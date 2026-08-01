@@ -23,6 +23,10 @@ type MetricsSnapshot = {
   triangles: number;
   geometries: number;
   textures: number;
+  logicalCells: number;
+  airCells: number;
+  nonAirBlocks: number;
+  chunks: number;
   instances: number;
 };
 
@@ -260,6 +264,10 @@ function FixedDiagnostics({ metrics }: { metrics: MetricsSnapshot & { phase: Exp
         <div><dt>Tris</dt><dd>{metrics.triangles}</dd></div>
         <div><dt>Geoms</dt><dd>{metrics.geometries}</dd></div>
         <div><dt>Tex</dt><dd>{metrics.textures}</dd></div>
+        <div><dt>Logical</dt><dd>{metrics.logicalCells}</dd></div>
+        <div><dt>Air</dt><dd>{metrics.airCells}</dd></div>
+        <div><dt>Solid</dt><dd>{metrics.nonAirBlocks}</dd></div>
+        <div><dt>Chunks</dt><dd>{metrics.chunks}</dd></div>
         <div className="metrics-wide"><dt>Instances</dt><dd>{metrics.instances} / 16 chunks</dd></div>
       </dl>
 
@@ -360,7 +368,13 @@ function ExperienceScene() {
       <TerrainChunks chunks={terrain.chunks} uniforms={uniforms} />
       <ConstrainedMapControls enabled={isInteractivePhase(phase)} phase={phase} />
       <RenderInvalidator phase={phase} />
-      <DevelopmentMetrics phase={phase} />
+      <DevelopmentMetrics
+        phase={phase}
+        logicalCells={terrain.logicalCellCount}
+        airCells={terrain.airCellCount}
+        nonAirBlocks={terrain.nonAirBlockCount}
+        chunks={terrain.chunks.length}
+      />
     </>
   );
 }
@@ -672,17 +686,20 @@ function createOpenBottomBlockGeometry(width: number, height: number, depth: num
   return geometry;
 }
 
-function DevelopmentMetrics({ phase }: { phase: ExperiencePhase }) {
+function DevelopmentMetrics({
+  phase,
+  logicalCells,
+  airCells,
+  nonAirBlocks,
+  chunks,
+}: {
+  phase: ExperiencePhase;
+  logicalCells: number;
+  airCells: number;
+  nonAirBlocks: number;
+  chunks: number;
+}) {
   const { gl } = useThree();
-  const [metrics, setMetrics] = useState<MetricsSnapshot>({
-    fps: 0,
-    frameMs: 0,
-    calls: 0,
-    triangles: 0,
-    geometries: 0,
-    textures: 0,
-    instances: TERRAIN_INSTANCE_COUNT,
-  });
   const frameCount = useRef(0);
   const accumulatedMs = useRef(0);
   const previousTime = useRef(0);
@@ -710,6 +727,10 @@ function DevelopmentMetrics({ phase }: { phase: ExperiencePhase }) {
         triangles: gl.info.render.triangles,
         geometries: gl.info.memory.geometries,
         textures: gl.info.memory.textures,
+        logicalCells,
+        airCells,
+        nonAirBlocks,
+        chunks,
         instances: TERRAIN_INSTANCE_COUNT,
       };
 
@@ -717,10 +738,6 @@ function DevelopmentMetrics({ phase }: { phase: ExperiencePhase }) {
         ...nextMetrics,
         phase,
       };
-
-      if (process.env.NODE_ENV !== "production") {
-        setMetrics(nextMetrics);
-      }
 
       frameCount.current = 0;
       accumulatedMs.current = 0;

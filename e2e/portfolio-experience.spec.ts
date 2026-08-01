@@ -23,6 +23,10 @@ test("loads the center platform, expands, and enters exploration", async ({ page
   expect(consoleErrors.filter((message) => message.includes("THREE.WebGLProgram"))).toEqual([]);
 
   const metrics = await page.evaluate(() => window.__portfolioExperienceMetrics);
+  expect(metrics?.logicalCells).toBe(49_152);
+  expect(metrics?.airCells).toBe(45_056);
+  expect(metrics?.nonAirBlocks).toBe(4_096);
+  expect(metrics?.chunks).toBe(16);
   expect(metrics?.instances).toBe(4096);
   expect(metrics?.calls).toBeLessThanOrEqual(18);
   expect(metrics?.triangles).toBeLessThanOrEqual(40_960);
