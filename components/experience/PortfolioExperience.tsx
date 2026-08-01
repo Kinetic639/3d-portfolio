@@ -9,9 +9,11 @@ import * as THREE from "three";
 import {
   CHUNK_MAX_INSTANCE_COUNT,
   createTerrainData,
+  createTerrainDataFromWorld,
   toTerrainChunk,
   type TerrainChunk,
 } from "@/lib/terrain/terrain";
+import { buildSurfaceChunkMesh, type SurfaceChunkMeshData } from "@/lib/terrain/surface-mesher";
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import { MAP_DOCUMENT_FILENAME, parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
 import type { GridCoordinate } from "@/lib/world/world-config";
@@ -40,6 +42,7 @@ const TOOL_COLORS: Record<EditorTool, string> = {
 type MetricsSnapshot = {
   fps: number;
   frameMs: number;
+  medianFrameMs: number;
   calls: number;
   triangles: number;
   geometries: number;
@@ -49,15 +52,26 @@ type MetricsSnapshot = {
   nonAirBlocks: number;
   chunks: number;
   instances: number;
+  animatedInstances: number;
+  staticTerrainInstances: number;
+  surfaceQuads: number;
+  surfaceTriangles: number;
+  visibleChunks: number;
+  culledChunks: number;
   chunkCapacity: number;
   dirtyChunks: number;
   lastRebuiltChunks: string;
+  lastChunkRebuildMs: number;
+  surfaceBuildMs: number;
+  renderMode: TerrainRenderMode;
   blockEditCount: number;
   zoneAssignmentCount: number;
   entityAnchorCount: number;
   undoDepth: number;
   redoDepth: number;
 };
+
+type TerrainRenderMode = "instanced" | "surface";
 
 declare global {
   interface Window {
@@ -133,6 +147,39 @@ const BLOCK_FRAGMENT_SHADER = `
     float light = clamp(dot(normalize(vNormal), lightDirection), 0.0, 1.0);
     vec3 color = base * (0.48 + light * 0.52);
     color += vec3(0.035, 0.028, 0.018) * smoothstep(0.0, 1.0, vReveal);
+
+    gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
+const SURFACE_VERTEX_SHADER = `
+  attribute vec3 color;
+  attribute float aVariation;
+
+  varying vec3 vNormal;
+  varying vec3 vBlockColor;
+  varying float vVariation;
+
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vBlockColor = color;
+    vVariation = aVariation;
+
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const SURFACE_FRAGMENT_SHADER = `
+  varying vec3 vNormal;
+  varying vec3 vBlockColor;
+  varying float vVariation;
+
+  void main() {
+    vec3 base = mix(vBlockColor * 0.92, min(vBlockColor * 1.12, vec3(1.0)), vVariation);
+    vec3 lightDirection = normalize(vec3(0.35, 0.8, 0.42));
+    float light = clamp(dot(normalize(vNormal), lightDirection), 0.0, 1.0);
+    vec3 color = base * (0.48 + light * 0.52);
+    color += vec3(0.035, 0.028, 0.018);
 
     gl_FragColor = vec4(color, 1.0);
   }
@@ -290,7 +337,7 @@ function ProductionFpsBadge({ metrics }: { metrics: MetricsSnapshot & { phase: E
     <aside className="fps-badge" aria-label="Rendering performance">
       <span>FPS</span>
       <strong>{metrics.fps}</strong>
-      <span>{metrics.frameMs}ms</span>
+      <span>{metrics.medianFrameMs}ms</span>
     </aside>
   );
 }
@@ -331,7 +378,9 @@ function FixedDiagnostics({ metrics }: { metrics: MetricsSnapshot & { phase: Exp
 
       <dl className="metrics-grid">
         <div><dt>FPS</dt><dd>{metrics.fps}</dd></div>
-        <div><dt>Frame</dt><dd>{metrics.frameMs}ms</dd></div>
+        <div><dt>Avg frame</dt><dd>{metrics.frameMs}ms</dd></div>
+        <div><dt>Median</dt><dd>{metrics.medianFrameMs}ms</dd></div>
+        <div><dt>Mode</dt><dd>{metrics.renderMode}</dd></div>
         <div><dt>Draws</dt><dd>{metrics.calls}</dd></div>
         <div><dt>Tris</dt><dd>{metrics.triangles}</dd></div>
         <div><dt>Geoms</dt><dd>{metrics.geometries}</dd></div>
@@ -340,6 +389,10 @@ function FixedDiagnostics({ metrics }: { metrics: MetricsSnapshot & { phase: Exp
         <div><dt>Air</dt><dd>{metrics.airCells}</dd></div>
         <div><dt>Solid</dt><dd>{metrics.nonAirBlocks}</dd></div>
         <div><dt>Chunks</dt><dd>{metrics.chunks}</dd></div>
+        <div><dt>Visible chunks</dt><dd>{metrics.visibleChunks}</dd></div>
+        <div><dt>Culled chunks</dt><dd>{metrics.culledChunks}</dd></div>
+        <div><dt>Surface quads</dt><dd>{metrics.surfaceQuads}</dd></div>
+        <div><dt>Surface tris</dt><dd>{metrics.surfaceTriangles}</dd></div>
         <div><dt>Capacity</dt><dd>{metrics.chunkCapacity}</dd></div>
         <div><dt>Dirty</dt><dd>{metrics.dirtyChunks}</dd></div>
         <div><dt>Edits</dt><dd>{metrics.blockEditCount}</dd></div>
@@ -347,8 +400,12 @@ function FixedDiagnostics({ metrics }: { metrics: MetricsSnapshot & { phase: Exp
         <div><dt>Markers</dt><dd>{metrics.entityAnchorCount}</dd></div>
         <div><dt>Undo</dt><dd>{metrics.undoDepth}</dd></div>
         <div><dt>Redo</dt><dd>{metrics.redoDepth}</dd></div>
+        <div className="metrics-wide"><dt>Animated instances</dt><dd>{metrics.animatedInstances}</dd></div>
+        <div className="metrics-wide"><dt>Static instances</dt><dd>{metrics.staticTerrainInstances}</dd></div>
         <div className="metrics-wide"><dt>Instances</dt><dd>{metrics.instances} / {metrics.chunks} chunks</dd></div>
         <div className="metrics-wide"><dt>Last rebuilt</dt><dd>{metrics.lastRebuiltChunks || "-"}</dd></div>
+        <div className="metrics-wide"><dt>Rebuild time</dt><dd>{metrics.lastChunkRebuildMs}ms</dd></div>
+        <div className="metrics-wide"><dt>Surface build</dt><dd>{metrics.surfaceBuildMs}ms</dd></div>
       </dl>
 
       <div className="metrics-controls">
@@ -372,6 +429,14 @@ function FixedDiagnostics({ metrics }: { metrics: MetricsSnapshot & { phase: Exp
   );
 }
 
+function createInitialTerrainData() {
+  if (process.env.NODE_ENV === "production") {
+    return createTerrainDataFromWorld(createMapPresetWorld("maxStress"));
+  }
+
+  return createTerrainData();
+}
+
 function ExperienceScene({
   editorEnabled,
   onEditorStateChange,
@@ -381,16 +446,19 @@ function ExperienceScene({
   onEditorStateChange: (state: MapEditorToolbarProps | null) => void;
   onCloseEditor: () => void;
 }) {
-  const [terrain, setTerrain] = useState(() => createTerrainData());
+  const initialPresetId: MapPresetId = process.env.NODE_ENV === "production" ? "maxStress" : "flat";
+  const [terrain, setTerrain] = useState(() => createInitialTerrainData());
   const [tool, setTool] = useState<EditorTool>("select");
   const [paintBlockId, setPaintBlockId] = useState<BlockId>(BLOCK_IDS.Path);
-  const [presetId, setPresetId] = useState<MapPresetId>("flat");
+  const [presetId, setPresetId] = useState<MapPresetId>(initialPresetId);
+  const [renderMode, setRenderMode] = useState<TerrainRenderMode>("surface");
   const [zoneId, setZoneId] = useState(1);
   const [hoveredCell, setHoveredCell] = useState<GridCoordinate | null>(null);
   const [selectedCell, setSelectedCell] = useState<GridCoordinate | null>(null);
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const [editorMessage, setEditorMessage] = useState<EditorMessage | null>(null);
   const [lastRebuiltChunks, setLastRebuiltChunks] = useState<string[]>([]);
+  const [lastChunkRebuildMs, setLastChunkRebuildMs] = useState(0);
   const [editorRevision, setEditorRevision] = useState(0);
   const [autosaveStatus, setAutosaveStatus] = useState("local idle");
   const [editorSession] = useState(() => new MapEditorSession(terrain.world));
@@ -410,6 +478,7 @@ function ExperienceScene({
   const { gl, scene, camera } = useThree();
   const initializedRef = useRef(false);
   const editorAvailable = editorEnabled && phase === "explore";
+  const activeRenderMode: TerrainRenderMode = phase === "explore" ? renderMode : "instanced";
   const dynamicStats = editorSession.world.getStats();
   const snapshot = editorSession.getSnapshot();
   const selectedWorldPosition = selectedCell
@@ -424,20 +493,34 @@ function ExperienceScene({
 
   const replaceRebuiltChunks = (rebuiltChunks: ReturnType<MapEditorSession["applyTool"]>["rebuiltChunks"]) => {
     if (rebuiltChunks.length === 0) {
+      setLastChunkRebuildMs(0);
       setEditorRevision((revision) => revision + 1);
       return;
     }
 
+    const startedAt = performance.now();
     const rebuiltTerrainChunks = new Map(rebuiltChunks.map((chunk) => [chunk.id, toTerrainChunk(chunk)]));
+    const rebuiltSurfaceChunks = new Map(rebuiltChunks.map((chunk) => [chunk.id, buildSurfaceChunkMesh(editorSession.world, chunk.chunkX, chunk.chunkZ)]));
+    const rebuildMs = Number((performance.now() - startedAt).toFixed(3));
 
     setTerrain((currentTerrain) => ({
       ...currentTerrain,
       chunks: currentTerrain.chunks.map((chunk) => rebuiltTerrainChunks.get(chunk.id) ?? chunk),
+      surfaceChunks: currentTerrain.surfaceChunks.map((chunk) => rebuiltSurfaceChunks.get(chunk.id) ?? chunk),
       instanceCount: editorSession.world.getStats().renderedInstances,
       airCellCount: editorSession.world.getStats().airCells,
       nonAirBlockCount: editorSession.world.getStats().nonAirBlocks,
+      surfaceQuadCount: currentTerrain.surfaceChunks.reduce(
+        (sum, chunk) => sum + (rebuiltSurfaceChunks.get(chunk.id)?.visibleQuads ?? chunk.visibleQuads),
+        0,
+      ),
+      surfaceTriangleCount: currentTerrain.surfaceChunks.reduce(
+        (sum, chunk) => sum + (rebuiltSurfaceChunks.get(chunk.id)?.triangles ?? chunk.triangles),
+        0,
+      ),
     }));
     setLastRebuiltChunks([...rebuiltTerrainChunks.keys()]);
+    setLastChunkRebuildMs(rebuildMs);
     setEditorRevision((revision) => revision + 1);
   };
 
@@ -506,15 +589,10 @@ function ExperienceScene({
 
     const presetWorld = createMapPresetWorld(nextPresetId);
     const result = editorSession.replaceWithDocument(serializeMapDocument(presetWorld, []), true);
-    setTerrain((currentTerrain) => ({
-      ...currentTerrain,
-      world: editorSession.world,
-      chunks: editorSession.world.createRenderChunks().map(toTerrainChunk),
-      instanceCount: editorSession.world.getStats().renderedInstances,
-      airCellCount: editorSession.world.getStats().airCells,
-      nonAirBlockCount: editorSession.world.getStats().nonAirBlocks,
-    }));
+    const nextTerrain = createTerrainDataFromWorld(editorSession.world);
+    setTerrain(nextTerrain);
     setLastRebuiltChunks(result.rebuiltChunkIds);
+    setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
     setSelectedCell(null);
     setSelectedMarkerId(null);
     setPresetId(nextPresetId);
@@ -549,16 +627,10 @@ function ExperienceScene({
       }
 
       const result = editorSession.replaceWithDocument(parsed.document, true);
-      const importedTerrainChunks = editorSession.world.createRenderChunks().map(toTerrainChunk);
-      setTerrain((currentTerrain) => ({
-        ...currentTerrain,
-        world: editorSession.world,
-        chunks: importedTerrainChunks,
-        instanceCount: editorSession.world.getStats().renderedInstances,
-        airCellCount: editorSession.world.getStats().airCells,
-        nonAirBlockCount: editorSession.world.getStats().nonAirBlocks,
-      }));
+      const nextTerrain = createTerrainDataFromWorld(editorSession.world);
+      setTerrain(nextTerrain);
       setLastRebuiltChunks(result.rebuiltChunkIds);
+      setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
       setSelectedCell(null);
       setSelectedMarkerId(null);
       setEditorMessage({ type: "info", text: "Map imported." });
@@ -599,6 +671,7 @@ function ExperienceScene({
       tool,
       paintBlockId,
       presetId,
+      renderMode,
       zoneId,
       hovered: hoveredCell,
       selected: selectedCell,
@@ -621,6 +694,7 @@ function ExperienceScene({
       onToolChange: setTool,
       onPaintBlockChange: setPaintBlockId,
       onPresetChange: handlePresetChange,
+      onRenderModeChange: setRenderMode,
       onZoneChange: setZoneId,
       onUndo: handleUndo,
       onRedo: handleRedo,
@@ -643,6 +717,7 @@ function ExperienceScene({
     onEditorStateChange,
     paintBlockId,
     presetId,
+    renderMode,
     selectedBlockId,
     selectedCell,
     selectedChunk,
@@ -679,15 +754,10 @@ function ExperienceScene({
         }
 
         const result = editorSession.replaceWithDocument(parsed.document, true);
-        setTerrain((currentTerrain) => ({
-          ...currentTerrain,
-          world: editorSession.world,
-          chunks: editorSession.world.createRenderChunks().map(toTerrainChunk),
-          instanceCount: editorSession.world.getStats().renderedInstances,
-          airCellCount: editorSession.world.getStats().airCells,
-          nonAirBlockCount: editorSession.world.getStats().nonAirBlocks,
-        }));
+        const nextTerrain = createTerrainDataFromWorld(editorSession.world);
+        setTerrain(nextTerrain);
         setLastRebuiltChunks(result.rebuiltChunkIds);
+        setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
         setAutosaveStatus("draft restored");
         setEditorRevision((revision) => revision + 1);
       } catch {
@@ -802,13 +872,21 @@ function ExperienceScene({
       <TerrainChunks
         chunks={terrain.chunks}
         uniforms={uniforms}
+        visible={activeRenderMode === "instanced"}
+      />
+      <SurfaceTerrainChunks
+        chunks={terrain.surfaceChunks}
+        visible={activeRenderMode === "surface" || phase === "loading"}
+        warmup={phase === "loading"}
       />
       <ConstrainedMapControls enabled={isInteractivePhase(phase)} phase={phase} />
       <RenderInvalidator phase={phase} />
       <EditorInteractionOverlay
         editorEnabled={editorAvailable}
         tool={tool}
+        renderMode={activeRenderMode}
         chunks={terrain.chunks}
+        surfaceChunks={terrain.surfaceChunks}
         world={editorSession.world}
         hoveredCell={hoveredCell}
         onHoverCell={setHoveredCell}
@@ -833,8 +911,16 @@ function ExperienceScene({
         nonAirBlocks={dynamicStats.nonAirBlocks}
         chunks={terrain.chunks.length}
         instances={dynamicStats.renderedInstances}
+        animatedInstances={activeRenderMode === "instanced" ? dynamicStats.renderedInstances : 0}
+        staticTerrainInstances={0}
+        surfaceChunks={terrain.surfaceChunks}
+        surfaceQuads={terrain.surfaceQuadCount}
+        surfaceTriangles={terrain.surfaceTriangleCount}
+        renderMode={activeRenderMode}
         dirtyChunks={editorSession.world.dirtyChunks.size}
         lastRebuiltChunks={lastRebuiltChunks.join(",")}
+        lastChunkRebuildMs={lastChunkRebuildMs}
+        surfaceBuildMs={terrain.surfaceBuildMs}
         blockEditCount={snapshot.blockEditCount}
         zoneAssignmentCount={snapshot.zoneAssignmentCount}
         entityAnchorCount={snapshot.entityAnchorCount}
@@ -848,9 +934,11 @@ function ExperienceScene({
 function TerrainChunks({
   chunks,
   uniforms,
+  visible,
 }: {
   chunks: TerrainChunk[];
   uniforms: TerrainUniforms;
+  visible: boolean;
 }) {
   const geometry = useMemo(() => createOpenBottomBlockGeometry(1.01, 1.01, 1.01), []);
   const material = useMemo(
@@ -871,7 +959,7 @@ function TerrainChunks({
   }, [geometry, material]);
 
   return (
-    <group>
+    <group visible={visible}>
       {chunks.map((chunk) => (
         <TerrainChunkMesh
           key={chunk.id}
@@ -881,6 +969,90 @@ function TerrainChunks({
         />
       ))}
     </group>
+  );
+}
+
+function SurfaceTerrainChunks({
+  chunks,
+  visible,
+  warmup,
+}: {
+  chunks: SurfaceChunkMeshData[];
+  visible: boolean;
+  warmup: boolean;
+}) {
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: SURFACE_VERTEX_SHADER,
+        fragmentShader: SURFACE_FRAGMENT_SHADER,
+        side: THREE.FrontSide,
+      }),
+    [],
+  );
+  const warmupMaterial = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: SURFACE_VERTEX_SHADER,
+        fragmentShader: SURFACE_FRAGMENT_SHADER,
+        side: THREE.FrontSide,
+        colorWrite: false,
+        depthWrite: false,
+      }),
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      material.dispose();
+      warmupMaterial.dispose();
+    };
+  }, [material, warmupMaterial]);
+
+  return (
+    <group visible={visible}>
+      {chunks.map((chunk) => (
+        <SurfaceTerrainChunkMesh key={chunk.id} chunk={chunk} material={warmup ? warmupMaterial : material} />
+      ))}
+    </group>
+  );
+}
+
+function SurfaceTerrainChunkMesh({
+  chunk,
+  material,
+}: {
+  chunk: SurfaceChunkMeshData;
+  material: THREE.Material;
+}) {
+  const geometry = useMemo(() => {
+    const nextGeometry = new THREE.BufferGeometry();
+    nextGeometry.setAttribute("position", new THREE.BufferAttribute(chunk.positions, 3));
+    nextGeometry.setAttribute("normal", new THREE.BufferAttribute(chunk.normals, 3));
+    nextGeometry.setAttribute("color", new THREE.BufferAttribute(chunk.colors, 3));
+    nextGeometry.setAttribute("aVariation", new THREE.BufferAttribute(chunk.variations, 1));
+    nextGeometry.setIndex(new THREE.BufferAttribute(chunk.indices, 1));
+    nextGeometry.computeBoundingBox();
+    nextGeometry.computeBoundingSphere();
+    return nextGeometry;
+  }, [chunk]);
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+    };
+  }, [geometry]);
+
+  return (
+    <mesh
+      geometry={geometry}
+      material={material}
+      userData={{
+        portfolioSurfaceChunkId: chunk.id,
+        portfolioSurfaceTriangleToCell: chunk.triangleToCell,
+      }}
+      frustumCulled
+    />
   );
 }
 
@@ -954,7 +1126,9 @@ function TerrainChunkMesh({
 function EditorInteractionOverlay({
   editorEnabled,
   tool,
+  renderMode,
   chunks,
+  surfaceChunks,
   world,
   hoveredCell,
   onHoverCell,
@@ -962,7 +1136,9 @@ function EditorInteractionOverlay({
 }: {
   editorEnabled: boolean;
   tool: EditorTool;
+  renderMode: TerrainRenderMode;
   chunks: TerrainChunk[];
+  surfaceChunks: SurfaceChunkMeshData[];
   world: MapEditorSession["world"];
   hoveredCell: GridCoordinate | null;
   onHoverCell: (coordinate: GridCoordinate | null) => void;
@@ -970,6 +1146,7 @@ function EditorInteractionOverlay({
 }) {
   const { camera, raycaster, scene } = useThree();
   const chunkById = useMemo(() => new Map(chunks.map((chunk) => [chunk.id, chunk])), [chunks]);
+  const surfaceChunkById = useMemo(() => new Map(surfaceChunks.map((chunk) => [chunk.id, chunk])), [surfaceChunks]);
   const mousePosition = useRef(new THREE.Vector2(0, 0));
   const pointerDownPosition = useRef<{ x: number; y: number } | null>(null);
   const brushActive = useRef(false);
@@ -992,7 +1169,7 @@ function EditorInteractionOverlay({
 
     const paintCurrentHover = () => {
       raycaster.setFromCamera(mousePosition.current, camera);
-      const currentHover = getHoveredEditorCell(scene, raycaster, chunkById, world, tool);
+      const currentHover = getHoveredEditorCell(scene, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
       if (!currentHover) {
         return false;
       }
@@ -1058,7 +1235,7 @@ function EditorInteractionOverlay({
 
       if (moved <= 5) {
         raycaster.setFromCamera(mousePosition.current, camera);
-        const currentHover = getHoveredEditorCell(scene, raycaster, chunkById, world, tool);
+        const currentHover = getHoveredEditorCell(scene, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
         if (currentHover) {
           event.preventDefault();
           onEditCell(currentHover);
@@ -1083,11 +1260,11 @@ function EditorInteractionOverlay({
       window.removeEventListener("pointerup", handlePointerUp, { capture: true });
       window.removeEventListener("pointercancel", handlePointerCancel, { capture: true });
     };
-  }, [camera, chunkById, editorEnabled, onEditCell, onHoverCell, raycaster, scene, tool, world]);
+  }, [camera, chunkById, editorEnabled, onEditCell, onHoverCell, raycaster, renderMode, scene, surfaceChunkById, tool, world]);
 
   useEffect(() => {
     shouldRaycast.current = true;
-  }, [chunkById]);
+  }, [chunkById, surfaceChunkById]);
 
   useFrame(() => {
     if (!editorEnabled || !shouldRaycast.current) {
@@ -1096,7 +1273,17 @@ function EditorInteractionOverlay({
 
     shouldRaycast.current = false;
     raycaster.setFromCamera(mousePosition.current, camera);
-    const nextHoveredCell = getHoveredEditorCell(scene, raycaster, chunkById, world, tool, groundPlane.current, planeIntersection.current);
+    const nextHoveredCell = getHoveredEditorCell(
+      scene,
+      raycaster,
+      chunkById,
+      surfaceChunkById,
+      world,
+      tool,
+      renderMode,
+      groundPlane.current,
+      planeIntersection.current,
+    );
 
     if (!sameCoordinate(hoveredCell, nextHoveredCell)) {
       onHoverCell(nextHoveredCell);
@@ -1110,25 +1297,46 @@ function getHoveredEditorCell(
   scene: THREE.Scene,
   raycaster: THREE.Raycaster,
   chunkById: Map<string, TerrainChunk>,
+  surfaceChunkById: Map<string, SurfaceChunkMeshData>,
   world: MapEditorSession["world"],
   tool: EditorTool,
+  renderMode: TerrainRenderMode,
   groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0),
   planeIntersection = new THREE.Vector3(),
 ) {
   const chunkMeshes: THREE.InstancedMesh[] = [];
+  const surfaceMeshes: THREE.Mesh[] = [];
 
   scene.traverse((object) => {
     if ((object as THREE.InstancedMesh).isInstancedMesh && typeof object.userData.portfolioChunkId === "string") {
       chunkMeshes.push(object as THREE.InstancedMesh);
     }
+    if ((object as THREE.Mesh).isMesh && typeof object.userData.portfolioSurfaceChunkId === "string") {
+      surfaceMeshes.push(object as THREE.Mesh);
+    }
   });
 
-  const hits = raycaster.intersectObjects(chunkMeshes, false);
+  const hits = raycaster.intersectObjects(renderMode === "surface" ? surfaceMeshes : chunkMeshes, false);
   const hit = hits[0];
 
   if (hit && hit.instanceId !== undefined) {
     const chunk = chunkById.get(hit.object.userData.portfolioChunkId as string);
     const cellIndex = chunk?.instanceToCell[hit.instanceId];
+    if (cellIndex !== undefined) {
+      const coordinate = world.getCoordinates(cellIndex);
+      if (coordinate) {
+        if (tool === "add") {
+          return getAdjacentFaceCoordinate(coordinate, hit.face?.normal, world);
+        }
+
+        return coordinate;
+      }
+    }
+  }
+
+  if (hit && typeof hit.faceIndex === "number" && typeof hit.object.userData.portfolioSurfaceChunkId === "string") {
+    const surfaceChunk = surfaceChunkById.get(hit.object.userData.portfolioSurfaceChunkId as string);
+    const cellIndex = surfaceChunk?.triangleToCell[hit.faceIndex];
     if (cellIndex !== undefined) {
       const coordinate = world.getCoordinates(cellIndex);
       if (coordinate) {
@@ -1372,12 +1580,22 @@ function ConstrainedMapControls({ enabled, phase }: { enabled: boolean; phase: E
       }
     };
 
+    const updateRightMouseAction = (event: PointerEvent) => {
+      if (event.button !== 2 || !controlsRef.current) {
+        return;
+      }
+
+      controlsRef.current.mouseButtons.RIGHT = event.ctrlKey ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
+    };
+
     window.addEventListener("pointerup", clearMomentum);
     window.addEventListener("mouseup", clearMomentum);
+    window.addEventListener("pointerdown", updateRightMouseAction, { capture: true });
 
     return () => {
       window.removeEventListener("pointerup", clearMomentum);
       window.removeEventListener("mouseup", clearMomentum);
+      window.removeEventListener("pointerdown", updateRightMouseAction, { capture: true });
     };
   }, []);
 
@@ -1457,7 +1675,6 @@ function ConstrainedMapControls({ enabled, phase }: { enabled: boolean; phase: E
       minPolarAngle={THREE.MathUtils.degToRad(20)}
       maxPolarAngle={THREE.MathUtils.degToRad(82)}
       mouseButtons={{
-        MIDDLE: THREE.MOUSE.ROTATE,
         RIGHT: THREE.MOUSE.PAN,
       }}
       screenSpacePanning={false}
@@ -1541,8 +1758,16 @@ function DevelopmentMetrics({
   nonAirBlocks,
   chunks,
   instances,
+  animatedInstances,
+  staticTerrainInstances,
+  surfaceChunks,
+  surfaceQuads,
+  surfaceTriangles,
+  renderMode,
   dirtyChunks,
   lastRebuiltChunks,
+  lastChunkRebuildMs,
+  surfaceBuildMs,
   blockEditCount,
   zoneAssignmentCount,
   entityAnchorCount,
@@ -1555,19 +1780,31 @@ function DevelopmentMetrics({
   nonAirBlocks: number;
   chunks: number;
   instances: number;
+  animatedInstances: number;
+  staticTerrainInstances: number;
+  surfaceChunks: SurfaceChunkMeshData[];
+  surfaceQuads: number;
+  surfaceTriangles: number;
+  renderMode: TerrainRenderMode;
   dirtyChunks: number;
   lastRebuiltChunks: string;
+  lastChunkRebuildMs: number;
+  surfaceBuildMs: number;
   blockEditCount: number;
   zoneAssignmentCount: number;
   entityAnchorCount: number;
   undoDepth: number;
   redoDepth: number;
 }) {
-  const { gl } = useThree();
+  const { camera, gl } = useThree();
   const frameCount = useRef(0);
   const accumulatedMs = useRef(0);
+  const frameTimes = useRef<number[]>([]);
   const previousTime = useRef(0);
   const lastUpdate = useRef(0);
+  const projectionScreenMatrix = useRef(new THREE.Matrix4());
+  const frustum = useRef(new THREE.Frustum());
+  const chunkCenter = useRef(new THREE.Vector3());
 
   useFrame(() => {
     const now = performance.now();
@@ -1581,12 +1818,16 @@ function DevelopmentMetrics({
     previousTime.current = now;
     frameCount.current += 1;
     accumulatedMs.current += delta;
+    frameTimes.current.push(delta);
 
     if (now - lastUpdate.current > 500) {
       const averageFrameMs = accumulatedMs.current / frameCount.current;
+      const medianFrameMs = getMedianFrameTime(frameTimes.current);
+      const chunkVisibility = getSurfaceChunkVisibility(surfaceChunks, camera, projectionScreenMatrix.current, frustum.current, chunkCenter.current);
       const nextMetrics = {
         fps: Math.round(1000 / averageFrameMs),
         frameMs: Number(averageFrameMs.toFixed(1)),
+        medianFrameMs,
         calls: gl.info.render.calls,
         triangles: gl.info.render.triangles,
         geometries: gl.info.memory.geometries,
@@ -1596,9 +1837,18 @@ function DevelopmentMetrics({
         nonAirBlocks,
         chunks,
         instances,
+        animatedInstances,
+        staticTerrainInstances,
+        surfaceQuads,
+        surfaceTriangles,
+        visibleChunks: renderMode === "surface" ? chunkVisibility.visible : 0,
+        culledChunks: renderMode === "surface" ? chunkVisibility.culled : 0,
         chunkCapacity: CHUNK_MAX_INSTANCE_COUNT,
         dirtyChunks,
         lastRebuiltChunks,
+        lastChunkRebuildMs,
+        surfaceBuildMs,
+        renderMode,
         blockEditCount,
         zoneAssignmentCount,
         entityAnchorCount,
@@ -1613,11 +1863,50 @@ function DevelopmentMetrics({
 
       frameCount.current = 0;
       accumulatedMs.current = 0;
+      frameTimes.current = [];
       lastUpdate.current = now;
     }
   });
 
   return null;
+}
+
+function getMedianFrameTime(frameTimes: number[]) {
+  if (frameTimes.length === 0) {
+    return 0;
+  }
+
+  const sorted = [...frameTimes].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+
+  return Number(median.toFixed(1));
+}
+
+function getSurfaceChunkVisibility(
+  chunks: SurfaceChunkMeshData[],
+  camera: THREE.Camera,
+  projectionScreenMatrix: THREE.Matrix4,
+  frustum: THREE.Frustum,
+  center: THREE.Vector3,
+) {
+  projectionScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  frustum.setFromProjectionMatrix(projectionScreenMatrix);
+
+  let visible = 0;
+  for (const chunk of chunks) {
+    const min = chunk.boundingBox.min;
+    const max = chunk.boundingBox.max;
+    center.set((min.x + max.x) / 2, (min.y + max.y) / 2, (min.z + max.z) / 2);
+    const radius = Math.hypot(max.x - min.x, max.y - min.y, max.z - min.z) / 2;
+    if (chunk.visibleQuads > 0 && frustum.intersectsSphere(new THREE.Sphere(center, radius))) {
+      visible += 1;
+    }
+  }
+
+  return { visible, culled: chunks.length - visible };
 }
 
 function usePrefersReducedMotion() {

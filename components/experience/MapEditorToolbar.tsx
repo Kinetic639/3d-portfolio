@@ -6,11 +6,14 @@ import type { EditorMessage, EditorTool } from "@/lib/editor/map-editor";
 import { MAP_PRESETS, type MapPresetId } from "@/lib/editor/map-presets";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
 
+export type TerrainRenderMode = "instanced" | "surface";
+
 export type EditorInspectorState = {
   available: boolean;
   tool: EditorTool;
   paintBlockId: BlockId;
   presetId: MapPresetId;
+  renderMode: TerrainRenderMode;
   zoneId: number;
   hovered: GridCoordinate | null;
   selected: GridCoordinate | null;
@@ -36,6 +39,7 @@ export type MapEditorToolbarProps = EditorInspectorState & {
   onToolChange: (tool: EditorTool) => void;
   onPaintBlockChange: (blockId: BlockId) => void;
   onPresetChange: (presetId: MapPresetId) => void;
+  onRenderModeChange: (mode: TerrainRenderMode) => void;
   onZoneChange: (zoneId: number) => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -119,6 +123,13 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
             {RENDERABLE_BLOCK_DEFINITIONS.map((block) => (
               <option key={block.id} value={block.id}>{block.displayName}</option>
             ))}
+          </select>
+        </label>
+        <label>
+          <span>Renderer</span>
+          <select value={props.renderMode} onChange={(event) => props.onRenderModeChange(event.target.value as TerrainRenderMode)}>
+            <option value="instanced">Instanced full cubes</option>
+            <option value="surface">Exposed-face chunk meshes</option>
           </select>
         </label>
         <label>

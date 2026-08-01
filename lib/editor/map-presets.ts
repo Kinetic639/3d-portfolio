@@ -2,7 +2,19 @@ import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import { VoxelWorld } from "@/lib/world/voxel-world";
 import { WORLD_CONFIG } from "@/lib/world/world-config";
 
-export type MapPresetId = "flat" | "portfolioCampus" | "terracedIslands" | "denseCity" | "maxStress";
+export type MapPresetId =
+  | "flat"
+  | "diagnosticIsolated"
+  | "diagnosticAdjacent"
+  | "diagnosticColumn"
+  | "diagnosticRowX"
+  | "diagnosticRowZ"
+  | "diagnosticBoundaries"
+  | "diagnosticChunkBoundary"
+  | "portfolioCampus"
+  | "terracedIslands"
+  | "denseCity"
+  | "maxStress";
 
 export type MapPresetDefinition = {
   id: MapPresetId;
@@ -15,6 +27,41 @@ export const MAP_PRESETS: MapPresetDefinition[] = [
     id: "flat",
     name: "Flat baseline",
     description: "4,096 blocks. Original single-layer map.",
+  },
+  {
+    id: "diagnosticIsolated",
+    name: "Diagnostic isolated",
+    description: "A single isolated test block plus the permanent center cells.",
+  },
+  {
+    id: "diagnosticAdjacent",
+    name: "Diagnostic adjacent",
+    description: "Two adjacent blocks with only the shared internal faces removed.",
+  },
+  {
+    id: "diagnosticColumn",
+    name: "Diagnostic column",
+    description: "A vertical stack for top, bottom and side-face inspection.",
+  },
+  {
+    id: "diagnosticRowX",
+    name: "Diagnostic row X",
+    description: "A horizontal X-axis row for side-face inspection.",
+  },
+  {
+    id: "diagnosticRowZ",
+    name: "Diagnostic row Z",
+    description: "A horizontal Z-axis row for side-face inspection.",
+  },
+  {
+    id: "diagnosticBoundaries",
+    name: "Diagnostic boundaries",
+    description: "Blocks placed on every world boundary.",
+  },
+  {
+    id: "diagnosticChunkBoundary",
+    name: "Diagnostic chunk seam",
+    description: "Blocks spanning a chunk boundary.",
   },
   {
     id: "portfolioCampus",
@@ -40,6 +87,20 @@ export const MAP_PRESETS: MapPresetDefinition[] = [
 
 export function createMapPresetWorld(presetId: MapPresetId) {
   switch (presetId) {
+    case "diagnosticIsolated":
+      return createDiagnosticIsolatedPreset();
+    case "diagnosticAdjacent":
+      return createDiagnosticAdjacentPreset();
+    case "diagnosticColumn":
+      return createDiagnosticColumnPreset();
+    case "diagnosticRowX":
+      return createDiagnosticRowXPreset();
+    case "diagnosticRowZ":
+      return createDiagnosticRowZPreset();
+    case "diagnosticBoundaries":
+      return createDiagnosticBoundariesPreset();
+    case "diagnosticChunkBoundary":
+      return createDiagnosticChunkBoundaryPreset();
     case "portfolioCampus":
       return createPortfolioCampusPreset();
     case "terracedIslands":
@@ -52,6 +113,75 @@ export function createMapPresetWorld(presetId: MapPresetId) {
     default:
       return createBaseWorld();
   }
+}
+
+function createDiagnosticIsolatedPreset() {
+  const world = new VoxelWorld();
+  world.setBlock(22, 2, 31, BLOCK_IDS.Special);
+  preserveCenterPlaza(world);
+  world.clearDirtyChunks();
+  return world;
+}
+
+function createDiagnosticAdjacentPreset() {
+  const world = new VoxelWorld();
+  world.setBlock(22, 2, 31, BLOCK_IDS.Special);
+  world.setBlock(23, 2, 31, BLOCK_IDS.ZoneGround);
+  preserveCenterPlaza(world);
+  world.clearDirtyChunks();
+  return world;
+}
+
+function createDiagnosticColumnPreset() {
+  const world = new VoxelWorld();
+  addColumn(world, 22, 31, 6, BLOCK_IDS.Special);
+  preserveCenterPlaza(world);
+  world.clearDirtyChunks();
+  return world;
+}
+
+function createDiagnosticRowXPreset() {
+  const world = new VoxelWorld();
+  for (let x = 18; x <= 27; x += 1) {
+    world.setBlock(x, 1, 31, x % 2 === 0 ? BLOCK_IDS.Special : BLOCK_IDS.ZoneGround);
+  }
+  preserveCenterPlaza(world);
+  world.clearDirtyChunks();
+  return world;
+}
+
+function createDiagnosticRowZPreset() {
+  const world = new VoxelWorld();
+  for (let z = 27; z <= 36; z += 1) {
+    world.setBlock(22, 1, z, z % 2 === 0 ? BLOCK_IDS.Special : BLOCK_IDS.ZoneGround);
+  }
+  preserveCenterPlaza(world);
+  world.clearDirtyChunks();
+  return world;
+}
+
+function createDiagnosticBoundariesPreset() {
+  const world = new VoxelWorld();
+  world.setBlock(0, 1, 31, BLOCK_IDS.Special);
+  world.setBlock(WORLD_CONFIG.width - 1, 1, 31, BLOCK_IDS.Special);
+  world.setBlock(31, 1, 0, BLOCK_IDS.ZoneGround);
+  world.setBlock(31, 1, WORLD_CONFIG.depth - 1, BLOCK_IDS.ZoneGround);
+  world.setBlock(28, 0, 28, BLOCK_IDS.Boundary);
+  world.setBlock(28, WORLD_CONFIG.height - 1, 28, BLOCK_IDS.Boundary);
+  preserveCenterPlaza(world);
+  world.clearDirtyChunks();
+  return world;
+}
+
+function createDiagnosticChunkBoundaryPreset() {
+  const world = new VoxelWorld();
+  world.setBlock(15, 1, 31, BLOCK_IDS.Special);
+  world.setBlock(16, 1, 31, BLOCK_IDS.ZoneGround);
+  world.setBlock(31, 1, 15, BLOCK_IDS.Special);
+  world.setBlock(31, 1, 16, BLOCK_IDS.ZoneGround);
+  preserveCenterPlaza(world);
+  world.clearDirtyChunks();
+  return world;
 }
 
 function createPortfolioCampusPreset() {

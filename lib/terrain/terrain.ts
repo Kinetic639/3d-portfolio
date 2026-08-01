@@ -1,5 +1,6 @@
 import { createFlatVoxelWorld, type RenderChunk, type RenderableCell, type VoxelWorld } from "@/lib/world/voxel-world";
 import { getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
+import { buildSurfaceChunkMeshes, type SurfaceChunkMeshData } from "./surface-mesher";
 import {
   CHUNK_SURFACE_CELL_COUNT,
   CHUNKS_PER_AXIS,
@@ -48,11 +49,15 @@ export type TerrainChunk = {
 export type TerrainData = {
   world: VoxelWorld;
   chunks: TerrainChunk[];
+  surfaceChunks: SurfaceChunkMeshData[];
   centerCells: TerrainCell[];
   instanceCount: number;
   logicalCellCount: number;
   airCellCount: number;
   nonAirBlockCount: number;
+  surfaceQuadCount: number;
+  surfaceTriangleCount: number;
+  surfaceBuildMs: number;
 };
 
 const CENTER_MIN = WORLD_CONFIG.width / 2 - 1;
@@ -70,19 +75,27 @@ export function distanceFromCenterPlatform(x: number, z: number) {
 }
 
 export function createTerrainData(): TerrainData {
-  const world = createFlatVoxelWorld();
+  return createTerrainDataFromWorld(createFlatVoxelWorld());
+}
+
+export function createTerrainDataFromWorld(world: VoxelWorld): TerrainData {
   const stats = world.getStats();
   const chunks = world.createRenderChunks().map(toTerrainChunk);
+  const surfaceBuild = buildSurfaceChunkMeshes(world);
   const centerCells = chunks.flatMap((chunk) => chunk.cells.filter((cell) => cell.isCenterLoaderBlock));
 
   return {
     world,
     chunks,
+    surfaceChunks: surfaceBuild.chunks,
     centerCells,
     instanceCount: stats.renderedInstances,
     logicalCellCount: stats.logicalCells,
     airCellCount: stats.airCells,
     nonAirBlockCount: stats.nonAirBlocks,
+    surfaceQuadCount: surfaceBuild.chunks.reduce((sum, chunk) => sum + chunk.visibleQuads, 0),
+    surfaceTriangleCount: surfaceBuild.chunks.reduce((sum, chunk) => sum + chunk.triangles, 0),
+    surfaceBuildMs: surfaceBuild.totalBuildMs,
   };
 }
 

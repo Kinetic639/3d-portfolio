@@ -4,7 +4,7 @@ import { BLOCK_IDS } from "@/lib/world/block-registry";
 import { WORLD_CONFIG, WORLD_SURFACE_CELL_COUNT } from "@/lib/world/world-config";
 
 describe("map presets", () => {
-  it("create valid worlds with varied renderable block counts", () => {
+  it("create valid worlds and varied stress-test block counts", () => {
     const counts = MAP_PRESETS.map((preset) => {
       const world = createMapPresetWorld(preset.id);
       const stats = world.getStats();
@@ -15,8 +15,12 @@ describe("map presets", () => {
 
       return stats.renderedInstances;
     });
+    const stressCounts = ["flat", "portfolioCampus", "terracedIslands", "denseCity", "maxStress"].map((presetId) => {
+      const world = createMapPresetWorld(presetId as (typeof MAP_PRESETS)[number]["id"]);
+      return world.getStats().renderedInstances;
+    });
 
-    expect(new Set(counts).size).toBe(MAP_PRESETS.length);
+    expect(new Set(stressCounts).size).toBe(stressCounts.length);
     expect(counts[0]).toBe(WORLD_SURFACE_CELL_COUNT);
     expect(Math.max(...counts)).toBeGreaterThan(WORLD_SURFACE_CELL_COUNT * 6);
   });
