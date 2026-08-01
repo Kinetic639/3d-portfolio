@@ -1,4 +1,5 @@
 import { createFlatVoxelWorld, type RenderChunk, type RenderableCell, type VoxelWorld } from "@/lib/world/voxel-world";
+import { getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import {
   CHUNK_SURFACE_CELL_COUNT,
   CHUNKS_PER_AXIS,
@@ -14,17 +15,20 @@ export const CHUNK_SIZE = WORLD_CONFIG.chunkSize;
 export { CHUNKS_PER_AXIS };
 export const TERRAIN_INSTANCE_COUNT = WORLD_SURFACE_CELL_COUNT;
 export const CHUNK_INSTANCE_COUNT = CHUNK_SURFACE_CELL_COUNT;
+export const CHUNK_MAX_INSTANCE_COUNT = CHUNK_SIZE * CHUNK_SIZE * TERRAIN_LEVELS_Y;
 export const TERRAIN_CHUNK_COUNT = WORLD_CHUNK_COUNT;
 
 export type TerrainCell = {
   index: number;
   cellIndex: number;
+  blockId: BlockId;
   x: number;
   y: number;
   z: number;
   worldX: number;
   worldY: number;
   worldZ: number;
+  color: [number, number, number];
   expansionDelay: number;
   variation: number;
   isCenterLoaderBlock: boolean;
@@ -82,7 +86,25 @@ export function createTerrainData(): TerrainData {
   };
 }
 
-function toTerrainChunk(chunk: RenderChunk): TerrainChunk {
+function toTerrainCell(cell: RenderableCell, index: number): TerrainCell {
+  return {
+    index,
+    cellIndex: cell.cellIndex,
+    blockId: cell.blockId,
+    x: cell.x,
+    y: cell.y,
+    z: cell.z,
+    worldX: cell.worldX,
+    worldY: cell.worldY,
+    worldZ: cell.worldZ,
+    color: hexToRgb(getBlockDefinition(cell.blockId).developmentColor),
+    expansionDelay: cell.expansionDelay,
+    variation: cell.variation,
+    isCenterLoaderBlock: cell.isCenterLoaderBlock,
+  };
+}
+
+export function toTerrainChunk(chunk: RenderChunk): TerrainChunk {
   return {
     id: chunk.id,
     chunkX: chunk.chunkX,
@@ -95,18 +117,13 @@ function toTerrainChunk(chunk: RenderChunk): TerrainChunk {
   };
 }
 
-function toTerrainCell(cell: RenderableCell, index: number): TerrainCell {
-  return {
-    index,
-    cellIndex: cell.cellIndex,
-    x: cell.x,
-    y: cell.y,
-    z: cell.z,
-    worldX: cell.worldX,
-    worldY: cell.worldY,
-    worldZ: cell.worldZ,
-    expansionDelay: cell.expansionDelay,
-    variation: cell.variation,
-    isCenterLoaderBlock: cell.isCenterLoaderBlock,
-  };
+function hexToRgb(hex: string): [number, number, number] {
+  const normalizedHex = hex.replace("#", "");
+  const value = Number.parseInt(normalizedHex, 16);
+
+  return [
+    ((value >> 16) & 255) / 255,
+    ((value >> 8) & 255) / 255,
+    (value & 255) / 255,
+  ];
 }

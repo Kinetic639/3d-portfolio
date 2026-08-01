@@ -3,18 +3,39 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { MapControls } from "@react-three/drei";
 import gsap from "gsap";
+import dynamic from "next/dynamic";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import {
-  TERRAIN_INSTANCE_COUNT,
+  CHUNK_MAX_INSTANCE_COUNT,
   createTerrainData,
+  toTerrainChunk,
   type TerrainChunk,
 } from "@/lib/terrain/terrain";
+import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
+import { MAP_DOCUMENT_FILENAME, parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
+import type { GridCoordinate } from "@/lib/world/world-config";
+import { MapEditorSession, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
+import { createMapPresetWorld, type MapPresetId } from "@/lib/editor/map-presets";
+import type { MapEditorToolbarProps } from "@/components/experience/MapEditorToolbar";
 import {
   type ExperiencePhase,
   isInteractivePhase,
   useExperienceStore,
 } from "@/lib/experience/experience-store";
+
+const MapEditorToolbar = dynamic(() => import("@/components/experience/MapEditorToolbar"), { ssr: false });
+const EDITOR_STORAGE_KEY = "portfolio-map-editor-draft.v1";
+const TOOL_COLORS: Record<EditorTool, string> = {
+  select: "#38bdf8",
+  paint: "#38bdf8",
+  add: "#10b981",
+  erase: "#ef4444",
+  raise: "#10b981",
+  lower: "#f97316",
+  zone: "#eab308",
+  marker: "#a855f7",
+};
 
 type MetricsSnapshot = {
   fps: number;
@@ -28,6 +49,14 @@ type MetricsSnapshot = {
   nonAirBlocks: number;
   chunks: number;
   instances: number;
+  chunkCapacity: number;
+  dirtyChunks: number;
+  lastRebuiltChunks: string;
+  blockEditCount: number;
+  zoneAssignmentCount: number;
+  entityAnchorCount: number;
+  undoDepth: number;
+  redoDepth: number;
 };
 
 declare global {
@@ -50,10 +79,12 @@ const BLOCK_VERTEX_SHADER = `
   uniform float uLoaderMotion;
 
   attribute vec3 aRevealData;
+  attribute vec3 aBlockColor;
 
   varying vec3 vNormal;
   varying float vReveal;
   varying float vVariation;
+  varying vec3 vBlockColor;
 
   float easeOutBack(float x) {
     float c1 = 1.2;
@@ -84,6 +115,7 @@ const BLOCK_VERTEX_SHADER = `
     vNormal = normalize(normalMatrix * normal);
     vReveal = reveal;
     vVariation = variation;
+    vBlockColor = aBlockColor;
 
     gl_Position = projectionMatrix * modelViewMatrix * worldPosition;
   }
@@ -93,9 +125,10 @@ const BLOCK_FRAGMENT_SHADER = `
   varying vec3 vNormal;
   varying float vReveal;
   varying float vVariation;
+  varying vec3 vBlockColor;
 
   void main() {
-    vec3 base = mix(vec3(0.31, 0.47, 0.42), vec3(0.42, 0.56, 0.50), vVariation);
+    vec3 base = mix(vBlockColor * 0.92, min(vBlockColor * 1.12, vec3(1.0)), vVariation);
     vec3 lightDirection = normalize(vec3(0.35, 0.8, 0.42));
     float light = clamp(dot(normalize(vNormal), lightDirection), 0.0, 1.0);
     vec3 color = base * (0.48 + light * 0.52);
@@ -108,7 +141,10 @@ const BLOCK_FRAGMENT_SHADER = `
 export default function PortfolioExperience() {
   const [webglState, setWebglState] = useState<"checking" | "available" | "unavailable">("checking");
   const [metrics, setMetrics] = useState<(MetricsSnapshot & { phase: ExperiencePhase }) | null>(null);
+  const [editorRequested, setEditorRequested] = useState(false);
+  const [editorPanel, setEditorPanel] = useState<MapEditorToolbarProps | null>(null);
   const phase = useExperienceStore((state) => state.phase);
+  const editorEnabled = process.env.NODE_ENV !== "production" && editorRequested;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -125,6 +161,21 @@ export default function PortfolioExperience() {
       return;
     }
 
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const editorParam = params.get("editor");
+      setEditorRequested(
+        process.env.NODE_ENV === "development" ||
+        editorParam === "1" ||
+        editorParam === "true" ||
+        process.env.NEXT_PUBLIC_ENABLE_MAP_EDITOR === "true",
+      );
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
       if (window.__portfolioExperienceMetrics) {
         setMetrics(window.__portfolioExperienceMetrics);
@@ -159,11 +210,22 @@ export default function PortfolioExperience() {
                 gl.setClearColor("#edf1ed");
               }}
             >
-              <ExperienceScene />
+              <ExperienceScene
+                editorEnabled={editorEnabled}
+                onEditorStateChange={setEditorPanel}
+                onCloseEditor={() => setEditorRequested(false)}
+              />
             </Canvas>
           </div>
           <ExperienceOverlay phase={phase} />
-          {process.env.NODE_ENV !== "production" && metrics ? <FixedDiagnostics metrics={metrics} /> : null}
+          {metrics ? (
+            process.env.NODE_ENV === "production" ? (
+              <ProductionFpsBadge metrics={metrics} />
+            ) : (
+              <FixedDiagnostics metrics={metrics} />
+            )
+          ) : null}
+          {editorEnabled && editorPanel ? <MapEditorToolbar {...editorPanel} /> : null}
         </>
       ) : (
         <div className="experience-fallback">
@@ -223,6 +285,16 @@ function ExperienceOverlay({ phase }: { phase: ExperiencePhase }) {
   );
 }
 
+function ProductionFpsBadge({ metrics }: { metrics: MetricsSnapshot & { phase: ExperiencePhase } }) {
+  return (
+    <aside className="fps-badge" aria-label="Rendering performance">
+      <span>FPS</span>
+      <strong>{metrics.fps}</strong>
+      <span>{metrics.frameMs}ms</span>
+    </aside>
+  );
+}
+
 function FixedDiagnostics({ metrics }: { metrics: MetricsSnapshot & { phase: ExperiencePhase } }) {
   const [minimized, setMinimized] = useState(false);
   const panSpeed = useExperienceStore((state) => state.panSpeed);
@@ -268,7 +340,15 @@ function FixedDiagnostics({ metrics }: { metrics: MetricsSnapshot & { phase: Exp
         <div><dt>Air</dt><dd>{metrics.airCells}</dd></div>
         <div><dt>Solid</dt><dd>{metrics.nonAirBlocks}</dd></div>
         <div><dt>Chunks</dt><dd>{metrics.chunks}</dd></div>
-        <div className="metrics-wide"><dt>Instances</dt><dd>{metrics.instances} / 16 chunks</dd></div>
+        <div><dt>Capacity</dt><dd>{metrics.chunkCapacity}</dd></div>
+        <div><dt>Dirty</dt><dd>{metrics.dirtyChunks}</dd></div>
+        <div><dt>Edits</dt><dd>{metrics.blockEditCount}</dd></div>
+        <div><dt>Zones</dt><dd>{metrics.zoneAssignmentCount}</dd></div>
+        <div><dt>Markers</dt><dd>{metrics.entityAnchorCount}</dd></div>
+        <div><dt>Undo</dt><dd>{metrics.undoDepth}</dd></div>
+        <div><dt>Redo</dt><dd>{metrics.redoDepth}</dd></div>
+        <div className="metrics-wide"><dt>Instances</dt><dd>{metrics.instances} / {metrics.chunks} chunks</dd></div>
+        <div className="metrics-wide"><dt>Last rebuilt</dt><dd>{metrics.lastRebuiltChunks || "-"}</dd></div>
       </dl>
 
       <div className="metrics-controls">
@@ -292,8 +372,28 @@ function FixedDiagnostics({ metrics }: { metrics: MetricsSnapshot & { phase: Exp
   );
 }
 
-function ExperienceScene() {
-  const terrain = useMemo(() => createTerrainData(), []);
+function ExperienceScene({
+  editorEnabled,
+  onEditorStateChange,
+  onCloseEditor,
+}: {
+  editorEnabled: boolean;
+  onEditorStateChange: (state: MapEditorToolbarProps | null) => void;
+  onCloseEditor: () => void;
+}) {
+  const [terrain, setTerrain] = useState(() => createTerrainData());
+  const [tool, setTool] = useState<EditorTool>("select");
+  const [paintBlockId, setPaintBlockId] = useState<BlockId>(BLOCK_IDS.Path);
+  const [presetId, setPresetId] = useState<MapPresetId>("flat");
+  const [zoneId, setZoneId] = useState(1);
+  const [hoveredCell, setHoveredCell] = useState<GridCoordinate | null>(null);
+  const [selectedCell, setSelectedCell] = useState<GridCoordinate | null>(null);
+  const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
+  const [editorMessage, setEditorMessage] = useState<EditorMessage | null>(null);
+  const [lastRebuiltChunks, setLastRebuiltChunks] = useState<string[]>([]);
+  const [editorRevision, setEditorRevision] = useState(0);
+  const [autosaveStatus, setAutosaveStatus] = useState("local idle");
+  const [editorSession] = useState(() => new MapEditorSession(terrain.world));
   const uniforms = useMemo<TerrainUniforms>(
     () => ({
       uExpansionProgress: { value: 0 },
@@ -309,10 +409,344 @@ function ExperienceScene() {
   const reducedMotion = usePrefersReducedMotion();
   const { gl, scene, camera } = useThree();
   const initializedRef = useRef(false);
+  const editorAvailable = editorEnabled && phase === "explore";
+  const dynamicStats = editorSession.world.getStats();
+  const snapshot = editorSession.getSnapshot();
+  const selectedWorldPosition = selectedCell
+    ? editorSession.world.gridToWorld(selectedCell.x, selectedCell.y, selectedCell.z)
+    : null;
+  const selectedChunk = selectedCell ? editorSession.world.getChunkCoordinates(selectedCell.x, selectedCell.z) : null;
+  const selectedLocal = selectedCell ? editorSession.world.getLocalChunkCoordinates(selectedCell.x, selectedCell.z) : null;
+  const selectedBlockId = selectedCell
+    ? editorSession.world.getBlock(selectedCell.x, selectedCell.y, selectedCell.z)
+    : null;
+  const selectedZoneId = selectedCell ? editorSession.world.getZone(selectedCell.x, selectedCell.y, selectedCell.z) : 0;
+
+  const replaceRebuiltChunks = (rebuiltChunks: ReturnType<MapEditorSession["applyTool"]>["rebuiltChunks"]) => {
+    if (rebuiltChunks.length === 0) {
+      setEditorRevision((revision) => revision + 1);
+      return;
+    }
+
+    const rebuiltTerrainChunks = new Map(rebuiltChunks.map((chunk) => [chunk.id, toTerrainChunk(chunk)]));
+
+    setTerrain((currentTerrain) => ({
+      ...currentTerrain,
+      chunks: currentTerrain.chunks.map((chunk) => rebuiltTerrainChunks.get(chunk.id) ?? chunk),
+      instanceCount: editorSession.world.getStats().renderedInstances,
+      airCellCount: editorSession.world.getStats().airCells,
+      nonAirBlockCount: editorSession.world.getStats().nonAirBlocks,
+    }));
+    setLastRebuiltChunks([...rebuiltTerrainChunks.keys()]);
+    setEditorRevision((revision) => revision + 1);
+  };
+
+  const handleEditorCell = (coordinate: GridCoordinate) => {
+    if (!editorAvailable) {
+      return;
+    }
+
+    const editCoordinate = getToolTargetCoordinate(editorSession, tool, coordinate);
+    if (!editCoordinate) {
+      setEditorMessage({ type: "error", text: "No valid cell for this tool." });
+      return;
+    }
+
+    setSelectedCell(editCoordinate);
+    setSelectedMarkerId(null);
+
+    const result = editorSession.applyTool(tool, editCoordinate, paintBlockId, zoneId);
+    if (result.message) {
+      setEditorMessage(result.message);
+    } else if (tool !== "select") {
+      setEditorMessage({ type: "info", text: `${tool} applied at ${editCoordinate.x},${editCoordinate.y},${editCoordinate.z}.` });
+    }
+    replaceRebuiltChunks(result.rebuiltChunks);
+  };
+
+  const handleUndo = () => {
+    const result = editorSession.undo();
+    replaceRebuiltChunks(result.rebuiltChunks);
+    setEditorMessage({ type: "info", text: "Undo complete." });
+  };
+
+  const handleRedo = () => {
+    const result = editorSession.redo();
+    replaceRebuiltChunks(result.rebuiltChunks);
+    setEditorMessage({ type: "info", text: "Redo complete." });
+  };
+
+  const handleResetUnsaved = () => {
+    if (!window.confirm("Reset unsaved editor changes to the last saved draft/export?")) {
+      return;
+    }
+    const result = editorSession.resetToDocument(editorSession.savedDocument);
+    replaceRebuiltChunks(result.rebuiltChunks);
+    setSelectedCell(null);
+    setSelectedMarkerId(null);
+    setEditorMessage({ type: "info", text: "Unsaved changes reset." });
+  };
+
+  const handleResetFlat = () => {
+    if (!window.confirm("Reset the editor map to the original flat world?")) {
+      return;
+    }
+    const result = editorSession.resetToFlatMap();
+    replaceRebuiltChunks(result.rebuiltChunks);
+    setSelectedCell(null);
+    setSelectedMarkerId(null);
+    setPresetId("flat");
+    setEditorMessage({ type: "info", text: "Flat map restored." });
+  };
+
+  const handlePresetChange = (nextPresetId: MapPresetId) => {
+    if (snapshot.hasUnsavedChanges && !window.confirm("Replace unsaved editor changes with the selected preset?")) {
+      return;
+    }
+
+    const presetWorld = createMapPresetWorld(nextPresetId);
+    const result = editorSession.replaceWithDocument(serializeMapDocument(presetWorld, []), true);
+    setTerrain((currentTerrain) => ({
+      ...currentTerrain,
+      world: editorSession.world,
+      chunks: editorSession.world.createRenderChunks().map(toTerrainChunk),
+      instanceCount: editorSession.world.getStats().renderedInstances,
+      airCellCount: editorSession.world.getStats().airCells,
+      nonAirBlockCount: editorSession.world.getStats().nonAirBlocks,
+    }));
+    setLastRebuiltChunks(result.rebuiltChunkIds);
+    setSelectedCell(null);
+    setSelectedMarkerId(null);
+    setPresetId(nextPresetId);
+    setEditorMessage({ type: "info", text: "Preset loaded for FPS testing." });
+    setEditorRevision((revision) => revision + 1);
+  };
+
+  const handleExport = () => {
+    const mapDocument = serializeMapDocument(editorSession.world, editorSession.entities);
+    const blob = new Blob([`${JSON.stringify(mapDocument, null, 2)}\n`], { type: "application/json" });
+    const link = window.document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = MAP_DOCUMENT_FILENAME;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    editorSession.markSaved();
+    setAutosaveStatus("exported");
+    setEditorRevision((revision) => revision + 1);
+  };
+
+  const handleImport = async (file: File) => {
+    const currentSnapshot = editorSession.getSnapshot();
+    if (currentSnapshot.hasUnsavedChanges && !window.confirm("Replace unsaved editor changes with the imported map?")) {
+      return;
+    }
+
+    try {
+      const parsed = parseMapDocument(JSON.parse(await file.text()));
+      if (!parsed.ok) {
+        setEditorMessage({ type: "error", text: parsed.error });
+        return;
+      }
+
+      const result = editorSession.replaceWithDocument(parsed.document, true);
+      const importedTerrainChunks = editorSession.world.createRenderChunks().map(toTerrainChunk);
+      setTerrain((currentTerrain) => ({
+        ...currentTerrain,
+        world: editorSession.world,
+        chunks: importedTerrainChunks,
+        instanceCount: editorSession.world.getStats().renderedInstances,
+        airCellCount: editorSession.world.getStats().airCells,
+        nonAirBlockCount: editorSession.world.getStats().nonAirBlocks,
+      }));
+      setLastRebuiltChunks(result.rebuiltChunkIds);
+      setSelectedCell(null);
+      setSelectedMarkerId(null);
+      setEditorMessage({ type: "info", text: "Map imported." });
+      setEditorRevision((revision) => revision + 1);
+    } catch {
+      setEditorMessage({ type: "error", text: "Import failed. The current map was not changed." });
+    }
+  };
+
+  const handleClearDraft = () => {
+    localStorage.removeItem(EDITOR_STORAGE_KEY);
+    setAutosaveStatus("draft cleared");
+  };
+
+  const handleRemoveMarker = () => {
+    if (!selectedMarkerId) {
+      return;
+    }
+
+    const result = editorSession.removeMarker(selectedMarkerId);
+    replaceRebuiltChunks(result.rebuiltChunks);
+    setSelectedMarkerId(null);
+    setEditorMessage({ type: "info", text: "Marker removed." });
+  };
 
   useEffect(() => {
     markLoading();
   }, [markLoading]);
+
+  useEffect(() => {
+    if (!editorAvailable) {
+      onEditorStateChange(null);
+      return;
+    }
+
+    onEditorStateChange({
+      available: editorAvailable,
+      tool,
+      paintBlockId,
+      presetId,
+      zoneId,
+      hovered: hoveredCell,
+      selected: selectedCell,
+      selectedBlockId,
+      selectedZoneId,
+      selectedWorldPosition,
+      selectedChunk,
+      selectedLocal,
+      dirtyChunks: editorSession.world.dirtyChunks.size,
+      lastRebuiltChunks,
+      blockEditCount: snapshot.blockEditCount,
+      zoneAssignmentCount: snapshot.zoneAssignmentCount,
+      entityAnchorCount: snapshot.entityAnchorCount,
+      undoDepth: snapshot.undoDepth,
+      redoDepth: snapshot.redoDepth,
+      hasUnsavedChanges: snapshot.hasUnsavedChanges,
+      autosaveStatus,
+      message: editorMessage,
+      selectedMarkerId,
+      onToolChange: setTool,
+      onPaintBlockChange: setPaintBlockId,
+      onPresetChange: handlePresetChange,
+      onZoneChange: setZoneId,
+      onUndo: handleUndo,
+      onRedo: handleRedo,
+      onResetUnsaved: handleResetUnsaved,
+      onResetFlat: handleResetFlat,
+      onExport: handleExport,
+      onImport: handleImport,
+      onClearDraft: handleClearDraft,
+      onClose: onCloseEditor,
+      onRemoveMarker: handleRemoveMarker,
+    });
+  }, [
+    autosaveStatus,
+    editorAvailable,
+    editorMessage,
+    editorRevision,
+    hoveredCell,
+    lastRebuiltChunks,
+    onCloseEditor,
+    onEditorStateChange,
+    paintBlockId,
+    presetId,
+    selectedBlockId,
+    selectedCell,
+    selectedChunk,
+    selectedLocal,
+    selectedMarkerId,
+    selectedWorldPosition,
+    selectedZoneId,
+    snapshot.blockEditCount,
+    snapshot.entityAnchorCount,
+    snapshot.hasUnsavedChanges,
+    snapshot.redoDepth,
+    snapshot.undoDepth,
+    snapshot.zoneAssignmentCount,
+    tool,
+    zoneId,
+  ]);
+
+  useEffect(() => {
+    if (!editorAvailable) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const savedDraft = localStorage.getItem(EDITOR_STORAGE_KEY);
+      if (!savedDraft) {
+        return;
+      }
+
+      try {
+        const parsed = parseMapDocument(JSON.parse(savedDraft));
+        if (!parsed.ok) {
+          setAutosaveStatus("bad draft ignored");
+          return;
+        }
+
+        const result = editorSession.replaceWithDocument(parsed.document, true);
+        setTerrain((currentTerrain) => ({
+          ...currentTerrain,
+          world: editorSession.world,
+          chunks: editorSession.world.createRenderChunks().map(toTerrainChunk),
+          instanceCount: editorSession.world.getStats().renderedInstances,
+          airCellCount: editorSession.world.getStats().airCells,
+          nonAirBlockCount: editorSession.world.getStats().nonAirBlocks,
+        }));
+        setLastRebuiltChunks(result.rebuiltChunkIds);
+        setAutosaveStatus("draft restored");
+        setEditorRevision((revision) => revision + 1);
+      } catch {
+        setAutosaveStatus("bad draft ignored");
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [editorAvailable, editorSession]);
+
+  useEffect(() => {
+    if (!editorAvailable) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      localStorage.setItem(
+        EDITOR_STORAGE_KEY,
+        JSON.stringify(serializeMapDocument(editorSession.world, editorSession.entities)),
+      );
+      setAutosaveStatus("local saved");
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+  }, [editorAvailable, editorRevision, editorSession]);
+
+  useEffect(() => {
+    if (!editorAvailable) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (selectedCell || selectedMarkerId) {
+          setSelectedCell(null);
+          setSelectedMarkerId(null);
+        } else {
+          onCloseEditor();
+        }
+      }
+
+      const isUndoKey = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z";
+      const isRedoKey =
+        ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "z") ||
+        ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y");
+
+      if (isRedoKey) {
+        event.preventDefault();
+        handleRedo();
+      } else if (isUndoKey) {
+        event.preventDefault();
+        handleUndo();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [editorAvailable, onCloseEditor, selectedCell, selectedMarkerId]);
 
   useEffect(() => {
     if (initializedRef.current) {
@@ -365,15 +799,47 @@ function ExperienceScene() {
     <>
       <ambientLight intensity={0.9} />
       <directionalLight position={[24, 42, 18]} intensity={1.2} />
-      <TerrainChunks chunks={terrain.chunks} uniforms={uniforms} />
+      <TerrainChunks
+        chunks={terrain.chunks}
+        uniforms={uniforms}
+      />
       <ConstrainedMapControls enabled={isInteractivePhase(phase)} phase={phase} />
       <RenderInvalidator phase={phase} />
+      <EditorInteractionOverlay
+        editorEnabled={editorAvailable}
+        tool={tool}
+        chunks={terrain.chunks}
+        world={editorSession.world}
+        hoveredCell={hoveredCell}
+        onHoverCell={setHoveredCell}
+        onEditCell={handleEditorCell}
+      />
+      <SelectionIndicator coordinate={hoveredCell} visible={editorAvailable} color={TOOL_COLORS[tool]} filled />
+      <SelectionIndicator coordinate={selectedCell} visible={editorAvailable} color="#f59e0b" />
+      <EditorMarkers
+        editorEnabled={editorAvailable}
+        entities={editorSession.entities}
+        world={editorSession.world}
+        selectedMarkerId={selectedMarkerId}
+        onSelectMarker={(id) => {
+          setSelectedMarkerId(id);
+          setSelectedCell(null);
+        }}
+      />
       <DevelopmentMetrics
         phase={phase}
-        logicalCells={terrain.logicalCellCount}
-        airCells={terrain.airCellCount}
-        nonAirBlocks={terrain.nonAirBlockCount}
+        logicalCells={dynamicStats.logicalCells}
+        airCells={dynamicStats.airCells}
+        nonAirBlocks={dynamicStats.nonAirBlocks}
         chunks={terrain.chunks.length}
+        instances={dynamicStats.renderedInstances}
+        dirtyChunks={editorSession.world.dirtyChunks.size}
+        lastRebuiltChunks={lastRebuiltChunks.join(",")}
+        blockEditCount={snapshot.blockEditCount}
+        zoneAssignmentCount={snapshot.zoneAssignmentCount}
+        entityAnchorCount={snapshot.entityAnchorCount}
+        undoDepth={snapshot.undoDepth}
+        redoDepth={snapshot.redoDepth}
       />
     </>
   );
@@ -386,7 +852,7 @@ function TerrainChunks({
   chunks: TerrainChunk[];
   uniforms: TerrainUniforms;
 }) {
-  const geometry = useMemo(() => createOpenBottomBlockGeometry(1.01, 0.74, 1.01), []);
+  const geometry = useMemo(() => createOpenBottomBlockGeometry(1.01, 1.01, 1.01), []);
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -407,7 +873,12 @@ function TerrainChunks({
   return (
     <group>
       {chunks.map((chunk) => (
-        <TerrainChunkMesh key={chunk.id} chunk={chunk} geometry={geometry} material={material} />
+        <TerrainChunkMesh
+          key={chunk.id}
+          chunk={chunk}
+          geometry={geometry}
+          material={material}
+        />
       ))}
     </group>
   );
@@ -425,19 +896,14 @@ function TerrainChunkMesh({
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const chunkGeometry = useMemo(() => {
     const clonedGeometry = geometry.clone();
-    const revealData = new Float32Array(chunk.cells.length * 3);
+    const revealData = new Float32Array(CHUNK_MAX_INSTANCE_COUNT * 3);
+    const blockColors = new Float32Array(CHUNK_MAX_INSTANCE_COUNT * 3);
 
-    chunk.cells.forEach((cell, index) => {
-      const offset = index * 3;
-      revealData[offset] = cell.expansionDelay;
-      revealData[offset + 1] = cell.variation;
-      revealData[offset + 2] = cell.isCenterLoaderBlock ? 1 : 0;
-    });
-
-    clonedGeometry.setAttribute("aRevealData", new THREE.InstancedBufferAttribute(revealData, 3));
+    clonedGeometry.setAttribute("aRevealData", new THREE.InstancedBufferAttribute(revealData, 3).setUsage(THREE.DynamicDrawUsage));
+    clonedGeometry.setAttribute("aBlockColor", new THREE.InstancedBufferAttribute(blockColors, 3).setUsage(THREE.DynamicDrawUsage));
 
     return clonedGeometry;
-  }, [chunk, geometry]);
+  }, [geometry]);
 
   useLayoutEffect(() => {
     const mesh = meshRef.current;
@@ -447,15 +913,28 @@ function TerrainChunkMesh({
     }
 
     const matrix = new THREE.Matrix4();
+    const revealData = chunkGeometry.getAttribute("aRevealData") as THREE.InstancedBufferAttribute;
+    const blockColors = chunkGeometry.getAttribute("aBlockColor") as THREE.InstancedBufferAttribute;
 
     chunk.cells.forEach((cell, index) => {
+      const offset = index * 3;
       matrix.makeTranslation(cell.worldX, cell.worldY, cell.worldZ);
       mesh.setMatrixAt(index, matrix);
+      revealData.array[offset] = cell.expansionDelay;
+      revealData.array[offset + 1] = cell.variation;
+      revealData.array[offset + 2] = cell.isCenterLoaderBlock ? 1 : 0;
+      blockColors.array[offset] = cell.color[0];
+      blockColors.array[offset + 1] = cell.color[1];
+      blockColors.array[offset + 2] = cell.color[2];
     });
 
+    mesh.userData.portfolioChunkId = chunk.id;
+    mesh.count = chunk.cells.length;
     mesh.instanceMatrix.needsUpdate = true;
+    revealData.needsUpdate = true;
+    blockColors.needsUpdate = true;
     mesh.computeBoundingSphere();
-  }, [chunk]);
+  }, [chunk, chunkGeometry]);
 
   useEffect(() => {
     return () => {
@@ -463,7 +942,377 @@ function TerrainChunkMesh({
     };
   }, [chunkGeometry]);
 
-  return <instancedMesh ref={meshRef} args={[chunkGeometry, material, chunk.cells.length]} frustumCulled={false} />;
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[chunkGeometry, material, CHUNK_MAX_INSTANCE_COUNT]}
+      frustumCulled={false}
+    />
+  );
+}
+
+function EditorInteractionOverlay({
+  editorEnabled,
+  tool,
+  chunks,
+  world,
+  hoveredCell,
+  onHoverCell,
+  onEditCell,
+}: {
+  editorEnabled: boolean;
+  tool: EditorTool;
+  chunks: TerrainChunk[];
+  world: MapEditorSession["world"];
+  hoveredCell: GridCoordinate | null;
+  onHoverCell: (coordinate: GridCoordinate | null) => void;
+  onEditCell: (coordinate: GridCoordinate) => void;
+}) {
+  const { camera, raycaster, scene } = useThree();
+  const chunkById = useMemo(() => new Map(chunks.map((chunk) => [chunk.id, chunk])), [chunks]);
+  const mousePosition = useRef(new THREE.Vector2(0, 0));
+  const pointerDownPosition = useRef<{ x: number; y: number } | null>(null);
+  const brushActive = useRef(false);
+  const brushedCellKeys = useRef(new Set<string>());
+  const groundPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
+  const planeIntersection = useRef(new THREE.Vector3());
+  const shouldRaycast = useRef(true);
+
+  useEffect(() => {
+    if (!editorEnabled) {
+      onHoverCell(null);
+      return;
+    }
+
+    const updateMousePosition = (event: PointerEvent) => {
+      mousePosition.current.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mousePosition.current.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      shouldRaycast.current = true;
+    };
+
+    const paintCurrentHover = () => {
+      raycaster.setFromCamera(mousePosition.current, camera);
+      const currentHover = getHoveredEditorCell(scene, raycaster, chunkById, world, tool);
+      if (!currentHover) {
+        return false;
+      }
+
+      const key = editorCoordinateKey(currentHover);
+      if (brushedCellKeys.current.has(key)) {
+        return false;
+      }
+
+      brushedCellKeys.current.add(key);
+      onEditCell(currentHover);
+      return true;
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || isEditorUiEvent(event)) {
+        return;
+      }
+
+      updateMousePosition(event);
+      pointerDownPosition.current = { x: event.clientX, y: event.clientY };
+
+      if (tool === "paint") {
+        brushActive.current = true;
+        brushedCellKeys.current.clear();
+        paintCurrentHover();
+      }
+
+      event.preventDefault();
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      updateMousePosition(event);
+
+      if (!brushActive.current || tool !== "paint" || (event.buttons & 1) !== 1 || isEditorUiEvent(event)) {
+        return;
+      }
+
+      if (paintCurrentHover()) {
+        event.preventDefault();
+      }
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (brushActive.current) {
+        brushActive.current = false;
+        brushedCellKeys.current.clear();
+        pointerDownPosition.current = null;
+        event.preventDefault();
+        return;
+      }
+
+      if (event.button !== 0 || !pointerDownPosition.current || isEditorUiEvent(event)) {
+        pointerDownPosition.current = null;
+        return;
+      }
+
+      const moved = Math.hypot(
+        event.clientX - pointerDownPosition.current.x,
+        event.clientY - pointerDownPosition.current.y,
+      );
+      pointerDownPosition.current = null;
+
+      if (moved <= 5) {
+        raycaster.setFromCamera(mousePosition.current, camera);
+        const currentHover = getHoveredEditorCell(scene, raycaster, chunkById, world, tool);
+        if (currentHover) {
+          event.preventDefault();
+          onEditCell(currentHover);
+        }
+      }
+    };
+
+    const handlePointerCancel = () => {
+      brushActive.current = false;
+      brushedCellKeys.current.clear();
+      pointerDownPosition.current = null;
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerdown", handlePointerDown, { capture: true });
+    window.addEventListener("pointerup", handlePointerUp, { capture: true });
+    window.addEventListener("pointercancel", handlePointerCancel, { capture: true });
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerdown", handlePointerDown, { capture: true });
+      window.removeEventListener("pointerup", handlePointerUp, { capture: true });
+      window.removeEventListener("pointercancel", handlePointerCancel, { capture: true });
+    };
+  }, [camera, chunkById, editorEnabled, onEditCell, onHoverCell, raycaster, scene, tool, world]);
+
+  useEffect(() => {
+    shouldRaycast.current = true;
+  }, [chunkById]);
+
+  useFrame(() => {
+    if (!editorEnabled || !shouldRaycast.current) {
+      return;
+    }
+
+    shouldRaycast.current = false;
+    raycaster.setFromCamera(mousePosition.current, camera);
+    const nextHoveredCell = getHoveredEditorCell(scene, raycaster, chunkById, world, tool, groundPlane.current, planeIntersection.current);
+
+    if (!sameCoordinate(hoveredCell, nextHoveredCell)) {
+      onHoverCell(nextHoveredCell);
+    }
+  });
+
+  return null;
+}
+
+function getHoveredEditorCell(
+  scene: THREE.Scene,
+  raycaster: THREE.Raycaster,
+  chunkById: Map<string, TerrainChunk>,
+  world: MapEditorSession["world"],
+  tool: EditorTool,
+  groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0),
+  planeIntersection = new THREE.Vector3(),
+) {
+  const chunkMeshes: THREE.InstancedMesh[] = [];
+
+  scene.traverse((object) => {
+    if ((object as THREE.InstancedMesh).isInstancedMesh && typeof object.userData.portfolioChunkId === "string") {
+      chunkMeshes.push(object as THREE.InstancedMesh);
+    }
+  });
+
+  const hits = raycaster.intersectObjects(chunkMeshes, false);
+  const hit = hits[0];
+
+  if (hit && hit.instanceId !== undefined) {
+    const chunk = chunkById.get(hit.object.userData.portfolioChunkId as string);
+    const cellIndex = chunk?.instanceToCell[hit.instanceId];
+    if (cellIndex !== undefined) {
+      const coordinate = world.getCoordinates(cellIndex);
+      if (coordinate) {
+        if (tool === "add") {
+          return getAdjacentFaceCoordinate(coordinate, hit.face?.normal, world);
+        }
+
+        return coordinate;
+      }
+    }
+  }
+
+  if (usesGroundPlaneFallback(tool) && raycaster.ray.intersectPlane(groundPlane, planeIntersection)) {
+    const gridCoordinate = world.worldToGrid({ x: planeIntersection.x, y: 0, z: planeIntersection.z });
+    if (gridCoordinate) {
+      const topY = world.getHighestNonAirY(gridCoordinate.x, gridCoordinate.z);
+      return { x: gridCoordinate.x, y: Math.max(0, topY ?? 0), z: gridCoordinate.z };
+    }
+  }
+
+  return null;
+}
+
+function getAdjacentFaceCoordinate(
+  coordinate: GridCoordinate,
+  normal: THREE.Vector3 | undefined,
+  world: MapEditorSession["world"],
+) {
+  if (!normal) {
+    return null;
+  }
+
+  const target = {
+    x: coordinate.x + Math.round(normal.x),
+    y: coordinate.y + Math.round(normal.y),
+    z: coordinate.z + Math.round(normal.z),
+  };
+
+  return world.isInsideWorld(target.x, target.y, target.z) ? target : null;
+}
+
+function usesGroundPlaneFallback(tool: EditorTool) {
+  return tool === "raise" || tool === "lower" || tool === "marker";
+}
+
+function SelectionIndicator({
+  coordinate,
+  visible,
+  color,
+  filled = false,
+}: {
+  coordinate: GridCoordinate | null;
+  visible: boolean;
+  color: string;
+  filled?: boolean;
+}) {
+  const wireGeometry = useMemo(() => new THREE.BoxGeometry(1.06, 1.06, 1.06), []);
+  const fillGeometry = useMemo(() => new THREE.BoxGeometry(0.98, 0.98, 0.98), []);
+  const wireMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color, wireframe: true, depthTest: false }), [color]);
+  const fillMaterial = useMemo(
+    () => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthWrite: false }),
+    [color],
+  );
+
+  useEffect(() => {
+    return () => {
+      wireGeometry.dispose();
+      fillGeometry.dispose();
+      wireMaterial.dispose();
+      fillMaterial.dispose();
+    };
+  }, [fillGeometry, fillMaterial, wireGeometry, wireMaterial]);
+
+  if (!visible || !coordinate) {
+    return null;
+  }
+
+  const worldPosition = {
+    x: (coordinate.x - 31.5),
+    y: coordinate.y + 0.5,
+    z: (coordinate.z - 31.5),
+  };
+
+  return (
+    <group position={[worldPosition.x, worldPosition.y, worldPosition.z]} renderOrder={10}>
+      {filled ? <mesh geometry={fillGeometry} material={fillMaterial} /> : null}
+      <mesh geometry={wireGeometry} material={wireMaterial} />
+    </group>
+  );
+}
+
+function EditorMarkers({
+  editorEnabled,
+  entities,
+  world,
+  selectedMarkerId,
+  onSelectMarker,
+}: {
+  editorEnabled: boolean;
+  entities: MapEditorSession["entities"];
+  world: MapEditorSession["world"];
+  selectedMarkerId: string | null;
+  onSelectMarker: (id: string) => void;
+}) {
+  const geometry = useMemo(() => new THREE.ConeGeometry(0.26, 0.7, 4), []);
+  const material = useMemo(() => new THREE.MeshBasicMaterial({ color: "#d46f3f" }), []);
+  const selectedMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#1f7a5e" }), []);
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+      material.dispose();
+      selectedMaterial.dispose();
+    };
+  }, [geometry, material, selectedMaterial]);
+
+  if (!editorEnabled) {
+    return null;
+  }
+
+  return (
+    <group>
+      {entities.map((entity) => {
+        const position = world.gridToWorld(
+          entity.gridPosition.x,
+          entity.gridPosition.y,
+          entity.gridPosition.z,
+        );
+
+        return (
+          <mesh
+            key={entity.id}
+            geometry={geometry}
+            material={selectedMarkerId === entity.id ? selectedMaterial : material}
+            position={[position.x, position.y + 0.72, position.z]}
+            rotation={[0, entity.rotationY, 0]}
+            onPointerUp={(event) => {
+              event.stopPropagation();
+              onSelectMarker(entity.id);
+            }}
+          />
+        );
+      })}
+    </group>
+  );
+}
+
+function getToolTargetCoordinate(session: MapEditorSession, tool: EditorTool, coordinate: GridCoordinate) {
+  if (tool === "raise") {
+    const topY = session.world.getHighestNonAirY(coordinate.x, coordinate.z);
+    const nextY = topY === null ? 0 : topY + 1;
+    return nextY < session.world.config.height ? { x: coordinate.x, y: nextY, z: coordinate.z } : coordinate;
+  }
+
+  if (tool === "lower") {
+    const topY = session.world.getHighestNonAirY(coordinate.x, coordinate.z);
+    return topY === null ? coordinate : { x: coordinate.x, y: topY, z: coordinate.z };
+  }
+
+  if (tool === "marker") {
+    const topY = session.world.getHighestNonAirY(coordinate.x, coordinate.z);
+    if (topY !== null && topY >= session.world.config.height - 1) {
+      return null;
+    }
+    const markerY = topY === null ? coordinate.y : topY + 1;
+    const target = { x: coordinate.x, y: markerY, z: coordinate.z };
+    return session.world.isInsideWorld(target.x, target.y, target.z) ? target : null;
+  }
+
+  return coordinate;
+}
+
+function sameCoordinate(left: GridCoordinate | null, right: GridCoordinate | null) {
+  return left?.x === right?.x && left?.y === right?.y && left?.z === right?.z;
+}
+
+function editorCoordinateKey(coordinate: GridCoordinate) {
+  return `${coordinate.x},${coordinate.y},${coordinate.z}`;
+}
+
+function isEditorUiEvent(event: PointerEvent) {
+  const target = event.target;
+
+  return target instanceof HTMLElement && Boolean(target.closest(".map-editor-toolbar, button, input, select, textarea, [role='button']"));
 }
 
 function ConstrainedMapControls({ enabled, phase }: { enabled: boolean; phase: ExperiencePhase }) {
@@ -608,9 +1457,8 @@ function ConstrainedMapControls({ enabled, phase }: { enabled: boolean; phase: E
       minPolarAngle={THREE.MathUtils.degToRad(20)}
       maxPolarAngle={THREE.MathUtils.degToRad(82)}
       mouseButtons={{
-        LEFT: THREE.MOUSE.PAN,
-        MIDDLE: THREE.MOUSE.DOLLY,
-        RIGHT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.ROTATE,
+        RIGHT: THREE.MOUSE.PAN,
       }}
       screenSpacePanning={false}
       touches={{
@@ -692,12 +1540,28 @@ function DevelopmentMetrics({
   airCells,
   nonAirBlocks,
   chunks,
+  instances,
+  dirtyChunks,
+  lastRebuiltChunks,
+  blockEditCount,
+  zoneAssignmentCount,
+  entityAnchorCount,
+  undoDepth,
+  redoDepth,
 }: {
   phase: ExperiencePhase;
   logicalCells: number;
   airCells: number;
   nonAirBlocks: number;
   chunks: number;
+  instances: number;
+  dirtyChunks: number;
+  lastRebuiltChunks: string;
+  blockEditCount: number;
+  zoneAssignmentCount: number;
+  entityAnchorCount: number;
+  undoDepth: number;
+  redoDepth: number;
 }) {
   const { gl } = useThree();
   const frameCount = useRef(0);
@@ -731,7 +1595,15 @@ function DevelopmentMetrics({
         airCells,
         nonAirBlocks,
         chunks,
-        instances: TERRAIN_INSTANCE_COUNT,
+        instances,
+        chunkCapacity: CHUNK_MAX_INSTANCE_COUNT,
+        dirtyChunks,
+        lastRebuiltChunks,
+        blockEditCount,
+        zoneAssignmentCount,
+        entityAnchorCount,
+        undoDepth,
+        redoDepth,
       };
 
       window.__portfolioExperienceMetrics = {

@@ -170,6 +170,32 @@ body {
   backdrop-filter: blur(10px);
 }
 
+.fps-badge {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid rgba(24, 34, 31, 0.16);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  color: #15201c;
+  background: rgba(247, 249, 246, 0.86);
+  box-shadow: 0 12px 32px rgba(24, 34, 31, 0.15);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+}
+
+.fps-badge strong {
+  color: #24785e;
+  font-size: 0.95rem;
+}
+
 .dev-metrics-panel {
   position: fixed;
   left: 1rem;
@@ -315,6 +341,153 @@ body {
   font-weight: 800;
 }
 
+.map-editor-toolbar {
+  position: fixed;
+  top: 4.75rem;
+  right: 1rem;
+  z-index: 60;
+  display: grid;
+  gap: 0.75rem;
+  width: min(23rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 6rem);
+  overflow: auto;
+  border: 1px solid rgba(24, 34, 31, 0.18);
+  border-radius: 8px;
+  padding: 0.85rem;
+  color: #15201c;
+  background: rgba(247, 249, 246, 0.93);
+  box-shadow: 0 18px 46px rgba(24, 34, 31, 0.2);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  pointer-events: auto;
+  backdrop-filter: blur(12px);
+}
+
+.map-editor-toolbar button,
+.map-editor-toolbar select {
+  min-height: 2rem;
+  border: 1px solid rgba(24, 34, 31, 0.16);
+  border-radius: 6px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.62);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+}
+
+.map-editor-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.map-editor-toolbar button:hover:not(:disabled),
+.map-editor-toolbar select:hover {
+  background: #ffffff;
+}
+
+.map-editor-toolbar--collapsed {
+  top: 4.75rem;
+  width: 8.5rem;
+  padding: 0;
+}
+
+.map-editor-toolbar--collapsed button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 0.75rem;
+}
+
+.map-editor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid rgba(24, 34, 31, 0.14);
+  padding-bottom: 0.65rem;
+}
+
+.map-editor-header > div {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.map-editor-header > div:first-child {
+  flex-direction: column;
+}
+
+.map-editor-header span {
+  color: #24785e;
+  text-transform: uppercase;
+}
+
+.map-editor-header button:first-child {
+  width: 2rem;
+}
+
+.map-editor-tools,
+.map-editor-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.map-editor-tools button.active {
+  color: #f9fbf7;
+  background: #24785e;
+}
+
+.map-editor-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.map-editor-controls label {
+  display: grid;
+  gap: 0.3rem;
+  color: var(--muted);
+}
+
+.map-editor-inspector {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem 0.65rem;
+  margin: 0;
+}
+
+.map-editor-inspector div {
+  min-width: 0;
+}
+
+.map-editor-inspector dt {
+  color: var(--muted);
+}
+
+.map-editor-inspector dd {
+  margin: 0.15rem 0 0;
+  overflow: hidden;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-editor-message,
+.map-editor-hint {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.map-editor-message.error {
+  color: #a7422d;
+}
+
+.map-editor-message.info {
+  color: #24785e;
+}
+
 .overlay-header {
   display: flex;
   justify-content: flex-end;
@@ -395,5 +568,13 @@ body {
 
   .experience-overlay {
     padding: 0.75rem;
+  }
+
+  .map-editor-toolbar {
+    top: auto;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    width: min(22rem, calc(100vw - 1.5rem));
+    max-height: 56vh;
   }
 }

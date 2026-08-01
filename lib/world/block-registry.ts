@@ -69,6 +69,14 @@ export const BLOCK_REGISTRY = {
   },
 } satisfies Record<BlockId, BlockDefinition>;
 
+export const BLOCK_DEFINITIONS = Object.values(BLOCK_REGISTRY);
+
+export const RENDERABLE_BLOCK_DEFINITIONS = BLOCK_DEFINITIONS.filter((block) => block.renderable);
+
+export function isKnownBlockId(blockId: number): blockId is BlockId {
+  return Number.isInteger(blockId) && blockId in BLOCK_REGISTRY;
+}
+
 export function getBlockDefinition(blockId: number) {
   return BLOCK_REGISTRY[blockId as BlockId] ?? BLOCK_REGISTRY[BLOCK_IDS.Air];
 }

@@ -52,6 +52,7 @@ export type WorldStats = {
   logicalCells: number;
   airCells: number;
   nonAirBlocks: number;
+  zoneAssignments: number;
   renderedInstances: number;
   chunks: number;
 };
@@ -63,11 +64,13 @@ const MAX_WAVE_DELAY = 0.74;
 export class VoxelWorld {
   readonly config: WorldConfig;
   readonly blocks: Uint16Array;
+  readonly zones: Uint8Array;
   readonly dirtyChunks = new Set<string>();
 
-  constructor(config: WorldConfig = WORLD_CONFIG, blocks?: Uint16Array) {
+  constructor(config: WorldConfig = WORLD_CONFIG, blocks?: Uint16Array, zones?: Uint8Array) {
     this.config = config;
     this.blocks = blocks ?? new Uint16Array(config.width * config.depth * config.height);
+    this.zones = zones ?? new Uint8Array(config.width * config.depth * config.height);
   }
 
   isInsideWorld(x: number, y: number, z: number) {
@@ -131,6 +134,42 @@ export class VoxelWorld {
     this.markChunkDirtyForCell(x, z);
 
     return true;
+  }
+
+  getZone(x: number, y: number, z: number) {
+    const index = this.getIndex(x, y, z);
+
+    if (index === null) {
+      return 0;
+    }
+
+    return this.zones[index];
+  }
+
+  setZone(x: number, y: number, z: number, zoneId: number) {
+    const index = this.getIndex(x, y, z);
+
+    if (index === null || !Number.isInteger(zoneId) || zoneId < 0 || zoneId > 255) {
+      return false;
+    }
+
+    this.zones[index] = zoneId;
+
+    return true;
+  }
+
+  getHighestNonAirY(x: number, z: number) {
+    if (x < 0 || x >= this.config.width || z < 0 || z >= this.config.depth) {
+      return null;
+    }
+
+    for (let y = this.config.height - 1; y >= 0; y -= 1) {
+      if (this.getBlock(x, y, z) !== BLOCK_IDS.Air) {
+        return y;
+      }
+    }
+
+    return null;
   }
 
   gridToWorld(x: number, y: number, z: number): WorldPosition {
@@ -212,6 +251,7 @@ export class VoxelWorld {
   getStats(): WorldStats {
     let nonAirBlocks = 0;
     let renderedInstances = 0;
+    let zoneAssignments = 0;
 
     for (let index = 0; index < this.blocks.length; index += 1) {
       const blockId = this.blocks[index];
@@ -221,12 +261,16 @@ export class VoxelWorld {
       if (isRenderableBlock(blockId)) {
         renderedInstances += 1;
       }
+      if (this.zones[index] !== 0) {
+        zoneAssignments += 1;
+      }
     }
 
     return {
       logicalCells: this.blocks.length,
       airCells: this.blocks.length - nonAirBlocks,
       nonAirBlocks,
+      zoneAssignments,
       renderedInstances,
       chunks: WORLD_CHUNK_COUNT,
     };

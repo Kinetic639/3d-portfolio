@@ -184,6 +184,7 @@ describe("voxel world foundation", () => {
       logicalCells: EXPECTED_WORLD_STATS.logicalCells,
       airCells: EXPECTED_WORLD_STATS.airCells,
       nonAirBlocks: EXPECTED_WORLD_STATS.nonAirBlocks,
+      zoneAssignments: 0,
       renderedInstances: EXPECTED_WORLD_STATS.renderedInstances,
       chunks: EXPECTED_WORLD_STATS.chunks,
     });
