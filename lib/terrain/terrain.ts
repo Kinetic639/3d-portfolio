@@ -1,14 +1,24 @@
-export const TERRAIN_SIZE_X = 64;
-export const TERRAIN_SIZE_Z = 64;
-export const TERRAIN_LEVELS_Y = 12;
-export const CHUNK_SIZE = 16;
-export const CHUNKS_PER_AXIS = 4;
-export const TERRAIN_INSTANCE_COUNT = TERRAIN_SIZE_X * TERRAIN_SIZE_Z;
-export const CHUNK_INSTANCE_COUNT = CHUNK_SIZE * CHUNK_SIZE;
-export const TERRAIN_CHUNK_COUNT = CHUNKS_PER_AXIS * CHUNKS_PER_AXIS;
+import { createFlatVoxelWorld, type RenderChunk, type RenderableCell, type VoxelWorld } from "@/lib/world/voxel-world";
+import {
+  CHUNK_SURFACE_CELL_COUNT,
+  CHUNKS_PER_AXIS,
+  WORLD_CHUNK_COUNT,
+  WORLD_CONFIG,
+  WORLD_SURFACE_CELL_COUNT,
+} from "@/lib/world/world-config";
+
+export const TERRAIN_SIZE_X = WORLD_CONFIG.width;
+export const TERRAIN_SIZE_Z = WORLD_CONFIG.depth;
+export const TERRAIN_LEVELS_Y = WORLD_CONFIG.height;
+export const CHUNK_SIZE = WORLD_CONFIG.chunkSize;
+export { CHUNKS_PER_AXIS };
+export const TERRAIN_INSTANCE_COUNT = WORLD_SURFACE_CELL_COUNT;
+export const CHUNK_INSTANCE_COUNT = CHUNK_SURFACE_CELL_COUNT;
+export const TERRAIN_CHUNK_COUNT = WORLD_CHUNK_COUNT;
 
 export type TerrainCell = {
   index: number;
+  cellIndex: number;
   x: number;
   y: number;
   z: number;
@@ -24,18 +34,25 @@ export type TerrainChunk = {
   id: string;
   chunkX: number;
   chunkZ: number;
+  instanceToCell: Uint32Array;
+  cellToInstance: Map<number, number>;
+  bounds: RenderChunk["bounds"];
+  boundingBox: RenderChunk["boundingBox"];
   cells: TerrainCell[];
 };
 
 export type TerrainData = {
+  world: VoxelWorld;
   chunks: TerrainChunk[];
   centerCells: TerrainCell[];
   instanceCount: number;
+  logicalCellCount: number;
+  airCellCount: number;
+  nonAirBlockCount: number;
 };
 
-const CENTER_MIN = TERRAIN_SIZE_X / 2 - 1;
-const CENTER_MAX = TERRAIN_SIZE_X / 2;
-const MAX_WAVE_DELAY = 0.74;
+const CENTER_MIN = WORLD_CONFIG.width / 2 - 1;
+const CENTER_MAX = WORLD_CONFIG.width / 2;
 
 export function isCenterLoaderCell(x: number, z: number) {
   return x >= CENTER_MIN && x <= CENTER_MAX && z >= CENTER_MIN && z <= CENTER_MAX;
@@ -49,54 +66,47 @@ export function distanceFromCenterPlatform(x: number, z: number) {
 }
 
 export function createTerrainData(): TerrainData {
-  const maxDistance = distanceFromCenterPlatform(0, 0);
-  const chunks: TerrainChunk[] = [];
-  const centerCells: TerrainCell[] = [];
-  let index = 0;
-
-  for (let chunkZ = 0; chunkZ < CHUNKS_PER_AXIS; chunkZ += 1) {
-    for (let chunkX = 0; chunkX < CHUNKS_PER_AXIS; chunkX += 1) {
-      const cells: TerrainCell[] = [];
-
-      for (let localZ = 0; localZ < CHUNK_SIZE; localZ += 1) {
-        for (let localX = 0; localX < CHUNK_SIZE; localX += 1) {
-          const x = chunkX * CHUNK_SIZE + localX;
-          const z = chunkZ * CHUNK_SIZE + localZ;
-          const isCenter = isCenterLoaderCell(x, z);
-          const distance = distanceFromCenterPlatform(x, z);
-          const cell: TerrainCell = {
-            index,
-            x,
-            y: 0,
-            z,
-            worldX: x - (TERRAIN_SIZE_X - 1) / 2,
-            worldY: 0,
-            worldZ: z - (TERRAIN_SIZE_Z - 1) / 2,
-            expansionDelay: isCenter ? 0 : (distance / maxDistance) * MAX_WAVE_DELAY,
-            variation: ((x * 37 + z * 17) % 100) / 100,
-            isCenterLoaderBlock: isCenter,
-          };
-
-          cells.push(cell);
-          if (isCenter) {
-            centerCells.push(cell);
-          }
-          index += 1;
-        }
-      }
-
-      chunks.push({
-        id: `chunk-${chunkX}-${chunkZ}`,
-        chunkX,
-        chunkZ,
-        cells,
-      });
-    }
-  }
+  const world = createFlatVoxelWorld();
+  const stats = world.getStats();
+  const chunks = world.createRenderChunks().map(toTerrainChunk);
+  const centerCells = chunks.flatMap((chunk) => chunk.cells.filter((cell) => cell.isCenterLoaderBlock));
 
   return {
+    world,
     chunks,
     centerCells,
-    instanceCount: index,
+    instanceCount: stats.renderedInstances,
+    logicalCellCount: stats.logicalCells,
+    airCellCount: stats.airCells,
+    nonAirBlockCount: stats.nonAirBlocks,
+  };
+}
+
+function toTerrainChunk(chunk: RenderChunk): TerrainChunk {
+  return {
+    id: chunk.id,
+    chunkX: chunk.chunkX,
+    chunkZ: chunk.chunkZ,
+    instanceToCell: chunk.instanceToCell,
+    cellToInstance: chunk.cellToInstance,
+    bounds: chunk.bounds,
+    boundingBox: chunk.boundingBox,
+    cells: chunk.renderableCells.map(toTerrainCell),
+  };
+}
+
+function toTerrainCell(cell: RenderableCell, index: number): TerrainCell {
+  return {
+    index,
+    cellIndex: cell.cellIndex,
+    x: cell.x,
+    y: cell.y,
+    z: cell.z,
+    worldX: cell.worldX,
+    worldY: cell.worldY,
+    worldZ: cell.worldZ,
+    expansionDelay: cell.expansionDelay,
+    variation: cell.variation,
+    isCenterLoaderBlock: cell.isCenterLoaderBlock,
   };
 }

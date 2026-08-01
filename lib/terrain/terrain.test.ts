@@ -13,6 +13,9 @@ describe("createTerrainData", () => {
 
     expect(terrain.chunks).toHaveLength(TERRAIN_CHUNK_COUNT);
     expect(terrain.instanceCount).toBe(TERRAIN_INSTANCE_COUNT);
+    expect(terrain.logicalCellCount).toBe(49_152);
+    expect(terrain.airCellCount).toBe(45_056);
+    expect(terrain.nonAirBlockCount).toBe(4_096);
     expect(terrain.chunks.every((chunk) => chunk.cells.length === CHUNK_INSTANCE_COUNT)).toBe(true);
   });
 
