@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { clickWorldEntryItem } from "./helpers";
 
 test("loads the center platform, expands, and enters exploration", async ({ page }) => {
   const consoleErrors: string[] = [];
@@ -13,12 +14,9 @@ test("loads the center platform, expands, and enters exploration", async ({ page
   const experience = page.locator(".experience-shell");
   await expect(experience).toHaveAttribute("data-phase", "ready", { timeout: 10_000 });
 
-  const expandButton = page.getByRole("button", { name: "Expand map" });
-  await expect(expandButton).toBeVisible();
-  await expandButton.click();
+  await clickWorldEntryItem(page);
 
   await expect(experience).toHaveAttribute("data-phase", "explore", { timeout: 6_000 });
-  await expect(expandButton).toBeHidden();
   await expect(page.locator("canvas")).toBeVisible();
   expect(consoleErrors.filter((message) => message.includes("THREE.WebGLProgram"))).toEqual([]);
 

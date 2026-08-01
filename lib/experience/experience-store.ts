@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type ExperiencePhase = "boot" | "loading" | "ready" | "expanding" | "explore";
+export type ExperiencePhase = "boot" | "loading" | "ready" | "focusing" | "expanding" | "explore";
 
 type ExperienceState = {
   phase: ExperiencePhase;
@@ -17,6 +17,7 @@ type ExperienceState = {
   markLoading: () => void;
   markReady: () => void;
   startExpansion: () => void;
+  markExpanding: () => void;
   markExplore: () => void;
   resetView: () => void;
   reset: () => void;
@@ -26,8 +27,9 @@ const transitionOrder: Record<ExperiencePhase, number> = {
   boot: 0,
   loading: 1,
   ready: 2,
-  expanding: 3,
-  explore: 4,
+  focusing: 3,
+  expanding: 4,
+  explore: 5,
 };
 
 function canTransition(from: ExperiencePhase, to: ExperiencePhase) {
@@ -52,7 +54,8 @@ export const useExperienceStore = create<ExperienceState>((set, get) => ({
   toggleAngleLock: () => set((state) => ({ isAngleLocked: !state.isAngleLocked })),
   markLoading: () => get().setPhase("loading"),
   markReady: () => get().setPhase("ready"),
-  startExpansion: () => get().setPhase("expanding"),
+  startExpansion: () => get().setPhase("focusing"),
+  markExpanding: () => get().setPhase("expanding"),
   markExplore: () => get().setPhase("explore"),
   resetView: () => set((state) => ({ resetViewCount: state.resetViewCount + 1 })),
   reset: () => set({ phase: "boot", resetViewCount: 0, isAngleLocked: false }),

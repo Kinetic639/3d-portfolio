@@ -122,32 +122,32 @@ body {
   text-align: center;
 }
 
-.expand-button {
-  min-height: 3rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0 1.15rem;
-  color: var(--foreground);
-  background: var(--panel);
-  box-shadow: 0 12px 34px rgba(24, 34, 31, 0.16);
-  cursor: pointer;
-  font: inherit;
-  font-weight: 700;
-  backdrop-filter: blur(12px);
+.welcome-panel {
+  position: absolute;
+  top: clamp(3rem, 11vh, 7rem);
+  left: 50%;
+  width: min(38rem, calc(100vw - 2rem));
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
 }
 
-.expand-button:disabled {
-  cursor: default;
-  opacity: 0.68;
+.welcome-panel p {
+  margin: 0 0 0.45rem;
+  color: #24785e;
+  font-size: clamp(0.78rem, 1.4vw, 0.95rem);
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
-.expand-button:hover {
-  background: #ffffff;
-}
-
-.expand-button:focus-visible {
-  outline: 3px solid rgba(53, 104, 86, 0.45);
-  outline-offset: 4px;
+.welcome-panel h1 {
+  margin: 0;
+  color: #16221e;
+  font-size: clamp(2.6rem, 6.8vw, 6rem);
+  font-weight: 850;
+  letter-spacing: 0;
+  line-height: 0.94;
 }
 
 .performance-overlay {
@@ -502,8 +502,7 @@ body {
 }
 
 .overlay-button,
-.phase-pill,
-.loading-pill {
+.phase-pill {
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--foreground);
@@ -538,32 +537,12 @@ body {
   background: #3c9c78;
 }
 
-.loading-pill {
-  align-self: center;
-  margin: auto 0;
-  padding: 0.85rem 1.1rem;
-  color: var(--muted);
-  font-weight: 700;
-  pointer-events: none;
-}
-
-.overlay-footer {
-  display: flex;
-  justify-content: center;
-  padding-bottom: max(1rem, env(safe-area-inset-bottom));
-  pointer-events: auto;
-}
-
 @media (max-width: 560px) {
   .performance-overlay {
     top: 0.75rem;
     left: 0.75rem;
     width: 10.75rem;
     font-size: 0.68rem;
-  }
-
-  .expand-button {
-    width: min(14rem, calc(100% - 2rem));
   }
 
   .experience-overlay {

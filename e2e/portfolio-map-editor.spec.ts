@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { clickWorldEntryItem } from "./helpers";
 
 test("keeps editor hidden before explore", async ({ page }) => {
   await page.goto("/");
@@ -14,7 +15,7 @@ test("enables editor in development after explore", async ({ page }) => {
   await expect(experience).toHaveAttribute("data-phase", "ready", { timeout: 10_000 });
   await expect(page.getByLabel("Development map editor")).toBeHidden();
 
-  await page.getByRole("button", { name: "Expand map" }).click();
+  await clickWorldEntryItem(page);
   await expect(experience).toHaveAttribute("data-phase", "explore", { timeout: 6_000 });
 
   const editor = page.getByLabel("Development map editor");

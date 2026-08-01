@@ -1,6 +1,6 @@
 "use client";
 
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import { MapControls } from "@react-three/drei";
 import gsap from "gsap";
 import dynamic from "next/dynamic";
@@ -8,7 +8,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import {
   CHUNK_MAX_INSTANCE_COUNT,
-  createTerrainData,
   createTerrainDataFromWorld,
   toTerrainChunk,
   type TerrainChunk,
@@ -28,6 +27,7 @@ import {
 
 const MapEditorToolbar = dynamic(() => import("@/components/experience/MapEditorToolbar"), { ssr: false });
 const EDITOR_STORAGE_KEY = "portfolio-map-editor-draft.v1";
+const DEFAULT_MAP_PRESET_ID: MapPresetId = "portfolioCampus";
 const TOOL_COLORS: Record<EditorTool, string> = {
   select: "#38bdf8",
   paint: "#38bdf8",
@@ -193,6 +193,10 @@ export default function PortfolioExperience() {
   const phase = useExperienceStore((state) => state.phase);
   const editorEnabled = process.env.NODE_ENV !== "production" && editorRequested;
 
+  useLayoutEffect(() => {
+    useExperienceStore.getState().reset();
+  }, []);
+
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       const canvas = document.createElement("canvas");
@@ -249,7 +253,7 @@ export default function PortfolioExperience() {
         <>
           <div className="map-canvas-layer">
             <Canvas
-              camera={{ position: [12, 15, 18], fov: 32, near: 0.1, far: 220 }}
+              camera={{ position: [0, 20, 54], fov: 32, near: 0.1, far: 220 }}
               dpr={[1, 1.5]}
               flat
               gl={{ antialias: true, powerPreference: "high-performance", alpha: false }}
@@ -284,7 +288,6 @@ export default function PortfolioExperience() {
 }
 
 function ExperienceOverlay({ phase }: { phase: ExperiencePhase }) {
-  const startExpansion = useExperienceStore((state) => state.startExpansion);
   const resetView = useExperienceStore((state) => state.resetView);
   const isAngleLocked = useExperienceStore((state) => state.isAngleLocked);
   const toggleAngleLock = useExperienceStore((state) => state.toggleAngleLock);
@@ -303,32 +306,47 @@ function ExperienceOverlay({ phase }: { phase: ExperiencePhase }) {
               </button>
             </>
           ) : null}
-          <div className="phase-pill" aria-live="polite">
-            <span className="phase-dot" />
-            <span>{phase}</span>
-          </div>
+          {phase === "explore" ? (
+            <div className="phase-pill" aria-live="polite">
+              <span className="phase-dot" />
+              <span>{phase}</span>
+            </div>
+          ) : null}
         </div>
       </header>
 
-      {phase === "loading" ? (
-        <div className="loading-pill" role="status">
-          Preparing terrain chunks and matrices...
-        </div>
-      ) : null}
-
-      {(phase === "ready" || phase === "expanding") ? (
-        <footer className="overlay-footer">
-          <button
-            className="expand-button"
-            type="button"
-            onClick={startExpansion}
-            disabled={phase === "expanding"}
-          >
-            {phase === "expanding" ? "Expanding map..." : "Expand map"}
-          </button>
-        </footer>
-      ) : null}
+      {phase === "ready" ? <WelcomePanel /> : null}
     </div>
+  );
+}
+
+function WelcomePanel() {
+  const panelRef = useRef<HTMLElement>(null);
+  const kickerRef = useRef<HTMLParagraphElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+
+  useLayoutEffect(() => {
+    const context = gsap.context(() => {
+      gsap.fromTo(
+        panelRef.current,
+        { autoAlpha: 0, y: 28 },
+        { autoAlpha: 1, y: 0, duration: 0.75, ease: "power3.out" },
+      );
+      gsap.fromTo(
+        [kickerRef.current, titleRef.current],
+        { autoAlpha: 0, y: 18 },
+        { autoAlpha: 1, y: 0, duration: 0.7, ease: "power3.out", stagger: 0.08, delay: 0.12 },
+      );
+    }, panelRef);
+
+    return () => context.revert();
+  }, []);
+
+  return (
+    <main ref={panelRef} className="welcome-panel" aria-label="Portfolio welcome">
+      <p ref={kickerRef}>Welcome</p>
+      <h1 ref={titleRef}>Michał Stępień</h1>
+    </main>
   );
 }
 
@@ -343,7 +361,7 @@ function ProductionFpsBadge({ metrics }: { metrics: MetricsSnapshot & { phase: E
 }
 
 function FixedDiagnostics({ metrics }: { metrics: MetricsSnapshot & { phase: ExperiencePhase } }) {
-  const [minimized, setMinimized] = useState(false);
+  const [minimized, setMinimized] = useState(true);
   const panSpeed = useExperienceStore((state) => state.panSpeed);
   const rotateSpeed = useExperienceStore((state) => state.rotateSpeed);
   const dampingFactor = useExperienceStore((state) => state.dampingFactor);
@@ -430,11 +448,7 @@ function FixedDiagnostics({ metrics }: { metrics: MetricsSnapshot & { phase: Exp
 }
 
 function createInitialTerrainData() {
-  if (process.env.NODE_ENV === "production") {
-    return createTerrainDataFromWorld(createMapPresetWorld("maxStress"));
-  }
-
-  return createTerrainData();
+  return createTerrainDataFromWorld(createMapPresetWorld(DEFAULT_MAP_PRESET_ID));
 }
 
 function ExperienceScene({
@@ -446,7 +460,7 @@ function ExperienceScene({
   onEditorStateChange: (state: MapEditorToolbarProps | null) => void;
   onCloseEditor: () => void;
 }) {
-  const initialPresetId: MapPresetId = process.env.NODE_ENV === "production" ? "maxStress" : "flat";
+  const initialPresetId: MapPresetId = DEFAULT_MAP_PRESET_ID;
   const [terrain, setTerrain] = useState(() => createInitialTerrainData());
   const [tool, setTool] = useState<EditorTool>("select");
   const [paintBlockId, setPaintBlockId] = useState<BlockId>(BLOCK_IDS.Path);
@@ -473,6 +487,8 @@ function ExperienceScene({
   const phase = useExperienceStore((state) => state.phase);
   const markLoading = useExperienceStore((state) => state.markLoading);
   const markReady = useExperienceStore((state) => state.markReady);
+  const startExpansion = useExperienceStore((state) => state.startExpansion);
+  const markExpanding = useExperienceStore((state) => state.markExpanding);
   const markExplore = useExperienceStore((state) => state.markExplore);
   const reducedMotion = usePrefersReducedMotion();
   const { gl, scene, camera } = useThree();
@@ -879,7 +895,8 @@ function ExperienceScene({
         visible={activeRenderMode === "surface" || phase === "loading"}
         warmup={phase === "loading"}
       />
-      <ConstrainedMapControls enabled={isInteractivePhase(phase)} phase={phase} />
+      <WorldEntryItem visible={phase === "ready"} onActivate={startExpansion} />
+      <ConstrainedMapControls enabled={isInteractivePhase(phase)} phase={phase} onFocusComplete={markExpanding} />
       <RenderInvalidator phase={phase} />
       <EditorInteractionOverlay
         editorEnabled={editorAvailable}
@@ -1053,6 +1070,140 @@ function SurfaceTerrainChunkMesh({
       }}
       frustumCulled
     />
+  );
+}
+
+function WorldEntryItem({
+  visible,
+  onActivate,
+}: {
+  visible: boolean;
+  onActivate: () => void;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const introOffset = useRef({ value: -0.32 });
+  const crystalMaterial = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: "#d8b45a",
+        emissive: "#4a3210",
+        emissiveIntensity: 0.45,
+        metalness: 0.35,
+        opacity: 0,
+        roughness: 0.28,
+        transparent: true,
+      }),
+    [],
+  );
+  const ringMaterial = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: "#263b34",
+        emissive: "#18221f",
+        emissiveIntensity: 0.18,
+        metalness: 0.1,
+        opacity: 0,
+        roughness: 0.46,
+        transparent: true,
+      }),
+    [],
+  );
+  const hitAreaMaterial = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      }),
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      crystalMaterial.dispose();
+      ringMaterial.dispose();
+      hitAreaMaterial.dispose();
+    };
+  }, [crystalMaterial, hitAreaMaterial, ringMaterial]);
+
+  useEffect(() => {
+    const group = groupRef.current;
+
+    if (!visible) {
+      document.body.style.cursor = "";
+      gsap.killTweensOf([group?.scale, introOffset.current, crystalMaterial, ringMaterial]);
+      crystalMaterial.opacity = 0;
+      ringMaterial.opacity = 0;
+      group?.scale.setScalar(0.18);
+      introOffset.current.value = -0.32;
+      return;
+    }
+
+    introOffset.current.value = -0.32;
+    crystalMaterial.opacity = 0;
+    ringMaterial.opacity = 0;
+
+    if (group) {
+      group.scale.setScalar(0.18);
+    }
+
+    const timeline = gsap.timeline();
+    timeline.to(introOffset.current, { value: 0, duration: 0.78, ease: "back.out(1.7)" }, 0);
+    if (group) {
+      timeline.to(group.scale, { x: 1, y: 1, z: 1, duration: 0.78, ease: "back.out(1.7)" }, 0);
+    }
+    timeline.to([crystalMaterial, ringMaterial], { opacity: 1, duration: 0.42, ease: "power2.out" }, 0.05);
+
+    return () => {
+      timeline.kill();
+    };
+  }, [crystalMaterial, ringMaterial, visible]);
+
+  useFrame(({ clock }) => {
+    const group = groupRef.current;
+
+    if (!group || !visible) {
+      return;
+    }
+
+    group.position.y = 1.08 + introOffset.current.value + Math.sin(clock.elapsedTime * 2.8) * 0.05;
+    group.rotation.y = clock.elapsedTime * 0.85;
+  });
+
+  const handlePointer = (event: ThreeEvent<PointerEvent>) => {
+    event.stopPropagation();
+    onActivate();
+  };
+
+  const handlePointerOver = (event: ThreeEvent<PointerEvent>) => {
+    event.stopPropagation();
+    document.body.style.cursor = "pointer";
+  };
+
+  const handlePointerOut = (event: ThreeEvent<PointerEvent>) => {
+    event.stopPropagation();
+    document.body.style.cursor = "";
+  };
+
+  return (
+    <group
+      ref={groupRef}
+      visible={visible}
+      position={[0, 0.76, 0]}
+      onClick={handlePointer}
+      onPointerOver={handlePointerOver}
+      onPointerOut={handlePointerOut}
+    >
+      <mesh material={ringMaterial} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.28, 0]}>
+        <torusGeometry args={[0.42, 0.035, 8, 24]} />
+      </mesh>
+      <mesh material={crystalMaterial} scale={[0.58, 0.82, 0.58]}>
+        <octahedronGeometry args={[0.42, 0]} />
+      </mesh>
+      <mesh material={hitAreaMaterial}>
+        <sphereGeometry args={[0.95, 12, 8]} />
+      </mesh>
+    </group>
   );
 }
 
@@ -1523,7 +1674,15 @@ function isEditorUiEvent(event: PointerEvent) {
   return target instanceof HTMLElement && Boolean(target.closest(".map-editor-toolbar, button, input, select, textarea, [role='button']"));
 }
 
-function ConstrainedMapControls({ enabled, phase }: { enabled: boolean; phase: ExperiencePhase }) {
+function ConstrainedMapControls({
+  enabled,
+  phase,
+  onFocusComplete,
+}: {
+  enabled: boolean;
+  phase: ExperiencePhase;
+  onFocusComplete: () => void;
+}) {
   const controlsRef = useRef<React.ElementRef<typeof MapControls>>(null);
   const { camera } = useThree();
   const resetViewCount = useExperienceStore((state) => state.resetViewCount);
@@ -1540,14 +1699,27 @@ function ConstrainedMapControls({ enabled, phase }: { enabled: boolean; phase: E
   const resetStartTarget = useRef(new THREE.Vector3());
   const transitioning = useRef(false);
   const transitionProgress = useRef(0);
+  const focusing = useRef(false);
+  const focusProgress = useRef(0);
+  const focusStartCamera = useRef(new THREE.Vector3());
+  const focusStartTarget = useRef(new THREE.Vector3());
+  const loaderCameraPosition = useMemo(() => new THREE.Vector3(0, 20, 54), []);
+  const loaderTargetPosition = useMemo(() => new THREE.Vector3(0, 13.5, 0), []);
   const startCameraPosition = useMemo(() => new THREE.Vector3(12, 15, 18), []);
   const fullCameraPosition = useMemo(() => new THREE.Vector3(42, 52, 62), []);
   const targetPosition = useMemo(() => new THREE.Vector3(0, 0, 0), []);
 
   useEffect(() => {
-    camera.position.copy(startCameraPosition);
-    camera.lookAt(targetPosition);
-  }, [camera, startCameraPosition, targetPosition]);
+    const controls = controlsRef.current;
+
+    camera.position.copy(loaderCameraPosition);
+    if (controls) {
+      controls.target.copy(loaderTargetPosition);
+      controls.update();
+    } else {
+      camera.lookAt(loaderTargetPosition);
+    }
+  }, [camera, loaderCameraPosition, loaderTargetPosition]);
 
   useEffect(() => {
     const controls = controlsRef.current;
@@ -1612,6 +1784,17 @@ function ConstrainedMapControls({ enabled, phase }: { enabled: boolean; phase: E
   }, [camera, resetViewCount, targetPosition]);
 
   useEffect(() => {
+    if (phase !== "focusing") {
+      return;
+    }
+
+    focusStartCamera.current.copy(camera.position);
+    focusStartTarget.current.copy(controlsRef.current?.target ?? loaderTargetPosition);
+    focusProgress.current = 0;
+    focusing.current = true;
+  }, [camera, loaderTargetPosition, phase]);
+
+  useEffect(() => {
     if (phase !== "expanding") {
       return;
     }
@@ -1638,9 +1821,27 @@ function ConstrainedMapControls({ enabled, phase }: { enabled: boolean; phase: E
       }
     }
 
-    controls.target.x = THREE.MathUtils.clamp(controls.target.x, -bounds, bounds);
-    controls.target.y = 0;
-    controls.target.z = THREE.MathUtils.clamp(controls.target.z, -bounds, bounds);
+    if (focusing.current && !enabled) {
+      focusProgress.current = Math.min(1, focusProgress.current + delta * 0.7);
+      const eased = easeInOutCinematic(focusProgress.current);
+      camera.position.lerpVectors(focusStartCamera.current, startCameraPosition, eased);
+      controls.target.lerpVectors(focusStartTarget.current, targetPosition, eased);
+      controls.update();
+
+      if (focusProgress.current >= 1) {
+        focusing.current = false;
+        camera.position.copy(startCameraPosition);
+        controls.target.copy(targetPosition);
+        controls.update();
+        onFocusComplete();
+      }
+    }
+
+    if (enabled) {
+      controls.target.x = THREE.MathUtils.clamp(controls.target.x, -bounds, bounds);
+      controls.target.y = 0;
+      controls.target.z = THREE.MathUtils.clamp(controls.target.z, -bounds, bounds);
+    }
 
     if (resetting.current) {
       resetProgress.current = Math.min(1, resetProgress.current + 0.045);
@@ -1682,16 +1883,23 @@ function ConstrainedMapControls({ enabled, phase }: { enabled: boolean; phase: E
         ONE: THREE.TOUCH.PAN,
         TWO: THREE.TOUCH.DOLLY_ROTATE,
       }}
-      target={[0, 0, 0]}
+      target={[0, 13.5, 0]}
     />
   );
+}
+
+function easeInOutCinematic(progress: number) {
+  const clamped = THREE.MathUtils.clamp(progress, 0, 1);
+  return clamped < 0.5
+    ? 4 * clamped * clamped * clamped
+    : 1 - Math.pow(-2 * clamped + 2, 3) / 2;
 }
 
 function RenderInvalidator({ phase }: { phase: ExperiencePhase }) {
   const invalidate = useThree((state) => state.invalidate);
 
   useEffect(() => {
-    if (phase !== "loading" && phase !== "expanding") {
+    if (phase !== "loading" && phase !== "focusing" && phase !== "expanding") {
       invalidate();
       return;
     }

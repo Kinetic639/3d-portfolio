@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { clickWorldEntryItem } from "./helpers";
 
 test.skip(process.env.COLLECT_METRICS !== "1", "Only run during explicit production metrics collection.");
 
@@ -7,7 +8,7 @@ test("collects production renderer metrics after expansion and map gestures", as
 
   const experience = page.locator(".experience-shell");
   await expect(experience).toHaveAttribute("data-phase", "ready", { timeout: 10_000 });
-  await page.getByRole("button", { name: "Expand map" }).click();
+  await clickWorldEntryItem(page);
   await expect(experience).toHaveAttribute("data-phase", "explore", { timeout: 6_000 });
 
   await page.mouse.move(720, 500);

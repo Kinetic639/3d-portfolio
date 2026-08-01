@@ -16,6 +16,9 @@ describe("experience store", () => {
     expect(useExperienceStore.getState().phase).toBe("ready");
 
     useExperienceStore.getState().startExpansion();
+    expect(useExperienceStore.getState().phase).toBe("focusing");
+
+    useExperienceStore.getState().markExpanding();
     expect(useExperienceStore.getState().phase).toBe("expanding");
 
     useExperienceStore.getState().markExplore();
@@ -32,6 +35,8 @@ describe("experience store", () => {
 
   it("only treats explore as the interactive map phase", () => {
     expect(isInteractivePhase("ready")).toBe(false);
+    expect(isInteractivePhase("focusing")).toBe(false);
+    expect(isInteractivePhase("expanding")).toBe(false);
     expect(isInteractivePhase("explore")).toBe(true);
   });
 });
