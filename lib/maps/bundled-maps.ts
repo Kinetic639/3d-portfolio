@@ -1,0 +1,280 @@
+import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
+import { VoxelWorld } from "@/lib/world/voxel-world";
+import { WORLD_CONFIG } from "@/lib/world/world-config";
+import {
+  createDefaultOverviewCameraPreset,
+  createMapDefinitionFromWorld,
+  type MapCameraPreset,
+  type MapDefinition,
+  type MapMarkerDefinition,
+  type MapZoneDefinition,
+} from "./map-definition";
+
+const PHASE4_CREATED_AT = "2026-08-01T00:00:00.000Z";
+
+export function createPortfolioPhase4MapDefinition(): MapDefinition {
+  const world = createPhase4GrayBoxWorld();
+  const zones = createPhase4Zones();
+  const markers = createPhase4Markers();
+  const cameraPresets = createPhase4CameraPresets();
+
+  return createMapDefinitionFromWorld({
+    id: "portfolio-phase4",
+    name: "Portfolio Phase 4",
+    description: "Editable gray-box integration map for portfolio browsing, content binding and map-management workflows.",
+    kind: "portfolio",
+    runtimeMode: "baked-static",
+    world,
+    zones,
+    markers,
+    spawnPoints: [{
+      id: "overview",
+      label: "Overview",
+      position: { x: 31, y: 1, z: 31 },
+      rotationY: 0,
+      cameraTarget: { x: 31, y: 0, z: 31 },
+    }],
+    cameraPresets,
+    defaultSpawnId: "overview",
+    defaultCameraPresetId: "overview",
+    presentation: {
+      legendVisible: true,
+      backgroundId: "neutral-day",
+      environmentId: "graybox",
+    },
+    metadata: {
+      createdAt: PHASE4_CREATED_AT,
+      updatedAt: PHASE4_CREATED_AT,
+      authoringVersion: "phase-4",
+    },
+  });
+}
+
+export function createTinyExampleMapDefinition(): MapDefinition {
+  const world = new VoxelWorld();
+  forRect(world, 29, 29, 34, 34, 0, BLOCK_IDS.Ground);
+  forRect(world, 30, 30, 33, 33, 0, BLOCK_IDS.Path);
+  world.setBlock(31, 1, 31, BLOCK_IDS.Special);
+  forRectZone(world, 29, 29, 34, 34, 1, 1);
+  preserveCenterPlaza(world);
+  world.clearDirtyChunks();
+
+  const zones: MapZoneDefinition[] = [{
+    id: "example-zone",
+    numericId: 1,
+    label: "Example",
+    shortLabel: "Example",
+    description: "A tiny authored map proving the runtime is not hardcoded to the Phase 4 portfolio map.",
+    color: "#38bdf8",
+    displayOrder: 1,
+    visibleInLegend: true,
+    overlayVisible: true,
+    locked: false,
+    defaultFocusMarkerId: "example-marker",
+  }];
+
+  const markers: MapMarkerDefinition[] = [{
+    id: "example-marker",
+    type: "marker",
+    markerType: "info",
+    label: "Example marker",
+    zoneId: "example-zone",
+    gridPosition: { x: 31, y: 2, z: 31 },
+    rotationY: 0,
+    contentReference: { contentType: "about", contentId: "about-placeholder" },
+    developmentVisible: true,
+    runtimeVisible: true,
+    interactionRadius: 1.1,
+  }];
+
+  return createMapDefinitionFromWorld({
+    id: "tiny-example",
+    name: "Tiny Example",
+    description: "Small development map with one zone, one marker, one spawn and one camera preset.",
+    kind: "test",
+    runtimeMode: "dynamic-voxel",
+    world,
+    zones,
+    markers,
+    spawnPoints: [{
+      id: "overview",
+      label: "Overview",
+      position: { x: 31, y: 2, z: 31 },
+      rotationY: 0,
+      cameraTarget: { x: 31, y: 1, z: 31 },
+    }],
+    cameraPresets: [createDefaultOverviewCameraPreset()],
+    defaultSpawnId: "overview",
+    defaultCameraPresetId: "overview",
+    presentation: { legendVisible: true, backgroundId: "neutral-day", environmentId: "graybox" },
+    metadata: {
+      createdAt: PHASE4_CREATED_AT,
+      updatedAt: PHASE4_CREATED_AT,
+      authoringVersion: "phase-4",
+    },
+  });
+}
+
+function createPhase4GrayBoxWorld() {
+  const world = new VoxelWorld();
+  forRect(world, 0, 0, 63, 63, 0, BLOCK_IDS.Ground);
+
+  forRect(world, 27, 27, 36, 36, 0, BLOCK_IDS.Path);
+  forRect(world, 30, 8, 33, 55, 0, BLOCK_IDS.Path);
+  forRect(world, 8, 30, 55, 33, 0, BLOCK_IDS.Path);
+
+  addZonePlatform(world, 6, 8, 20, 22, 1, BLOCK_IDS.ZoneGround);
+  addZonePlatform(world, 43, 8, 57, 22, 2, BLOCK_IDS.Special);
+  addZonePlatform(world, 6, 42, 20, 56, 3, BLOCK_IDS.Boundary);
+  addZonePlatform(world, 43, 42, 57, 56, 4, BLOCK_IDS.ZoneGround);
+  addZonePlatform(world, 24, 4, 39, 15, 5, BLOCK_IDS.Special);
+
+  addSimpleMass(world, 9, 11, 17, 20, 2, BLOCK_IDS.ZoneGround);
+  addSimpleMass(world, 46, 11, 54, 19, 1, BLOCK_IDS.Special);
+  addSimpleMass(world, 9, 45, 18, 53, 3, BLOCK_IDS.Boundary);
+  addSimpleMass(world, 46, 45, 54, 53, 2, BLOCK_IDS.ZoneGround);
+  addSimpleMass(world, 27, 7, 36, 13, 1, BLOCK_IDS.Special);
+
+  preserveCenterPlaza(world);
+  world.clearDirtyChunks();
+  return world;
+}
+
+function createPhase4Zones(): MapZoneDefinition[] {
+  return [
+    createZone("projects", 1, "Projects", "Work", "Featured project placeholders and case-study anchors.", "#38bdf8", 1, "projects-primary"),
+    createZone("about", 2, "About", "About", "Personal introduction placeholder area.", "#a78bfa", 2, "about-primary"),
+    createZone("experience", 3, "Experience", "XP", "Professional timeline placeholder area.", "#f59e0b", 3, "experience-primary"),
+    createZone("skills", 4, "Skills", "Skills", "Technology and capability grouping placeholder area.", "#10b981", 4, "skills-primary"),
+    createZone("contact", 5, "Contact", "Contact", "Contact and availability placeholder area.", "#ef4444", 5, "contact-primary"),
+  ];
+}
+
+function createPhase4Markers(): MapMarkerDefinition[] {
+  return [
+    createMarker("projects-primary", "Featured projects", "projects", 13, 3, 15, { contentType: "project", contentId: "project-placeholder-1" }),
+    createMarker("about-primary", "About overview", "about", 50, 2, 15, { contentType: "about", contentId: "about-placeholder" }),
+    createMarker("experience-primary", "Experience overview", "experience", 13, 4, 49, { contentType: "experience", contentId: "experience-placeholder-1" }),
+    createMarker("skills-primary", "Skills overview", "skills", 50, 3, 49, { contentType: "skillGroup", contentId: "frontend" }),
+    createMarker("contact-primary", "Contact point", "contact", 31, 2, 10, { contentType: "contact", contentId: "contact-placeholder" }),
+    createMarker("project-secondary-a", "Project placeholder A", "projects", 9, 3, 19, { contentType: "project", contentId: "project-placeholder-2" }, "secondary"),
+    createMarker("project-secondary-b", "Project placeholder B", "projects", 18, 3, 11, { contentType: "project", contentId: "project-placeholder-3" }, "secondary"),
+  ];
+}
+
+function createPhase4CameraPresets(): MapCameraPreset[] {
+  return [
+    createDefaultOverviewCameraPreset(),
+    createCameraPreset("projects-focus", "Projects focus", -23, 26, -18, -18, 1.4, -16),
+    createCameraPreset("about-focus", "About focus", 23, 26, -18, 18, 1.4, -16),
+    createCameraPreset("experience-focus", "Experience focus", -23, 26, 20, -18, 1.8, 18),
+    createCameraPreset("skills-focus", "Skills focus", 23, 26, 20, 18, 1.8, 18),
+    createCameraPreset("contact-focus", "Contact focus", 0, 22, -24, 0, 1.2, -22),
+  ];
+}
+
+function createZone(
+  id: string,
+  numericId: number,
+  label: string,
+  shortLabel: string,
+  description: string,
+  color: string,
+  displayOrder: number,
+  defaultFocusMarkerId: string,
+): MapZoneDefinition {
+  return {
+    id,
+    numericId,
+    label,
+    shortLabel,
+    description,
+    color,
+    displayOrder,
+    visibleInLegend: true,
+    overlayVisible: true,
+    locked: false,
+    defaultFocusMarkerId,
+  };
+}
+
+function createMarker(
+  id: string,
+  label: string,
+  zoneId: string,
+  x: number,
+  y: number,
+  z: number,
+  contentReference: MapMarkerDefinition["contentReference"],
+  markerType: MapMarkerDefinition["markerType"] = "primary",
+): MapMarkerDefinition {
+  return {
+    id,
+    type: "marker",
+    markerType,
+    label,
+    zoneId,
+    gridPosition: { x, y, z },
+    rotationY: 0,
+    focusCameraPresetId: `${zoneId}-focus`,
+    contentReference,
+    developmentVisible: true,
+    runtimeVisible: true,
+    interactionRadius: markerType === "primary" ? 1.4 : 1.1,
+  };
+}
+
+function createCameraPreset(
+  id: string,
+  label: string,
+  cameraX: number,
+  cameraY: number,
+  cameraZ: number,
+  targetX: number,
+  targetY: number,
+  targetZ: number,
+): MapCameraPreset {
+  return {
+    id,
+    label,
+    cameraPosition: { x: cameraX, y: cameraY, z: cameraZ },
+    controlsTarget: { x: targetX, y: targetY, z: targetZ },
+    transitionDuration: 0.9,
+  };
+}
+
+function addZonePlatform(world: VoxelWorld, minX: number, minZ: number, maxX: number, maxZ: number, zoneId: number, blockId: BlockId) {
+  forRect(world, minX, minZ, maxX, maxZ, 0, blockId);
+  forRectZone(world, minX, minZ, maxX, maxZ, 0, zoneId);
+}
+
+function addSimpleMass(world: VoxelWorld, minX: number, minZ: number, maxX: number, maxZ: number, height: number, blockId: BlockId) {
+  for (let y = 1; y <= height; y += 1) {
+    forRect(world, minX, minZ, maxX, maxZ, y, blockId);
+  }
+}
+
+function forRect(world: VoxelWorld, minX: number, minZ: number, maxX: number, maxZ: number, y: number, blockId: BlockId) {
+  for (let z = minZ; z <= maxZ; z += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      world.setBlock(x, y, z, blockId);
+    }
+  }
+}
+
+function forRectZone(world: VoxelWorld, minX: number, minZ: number, maxX: number, maxZ: number, y: number, zoneId: number) {
+  for (let z = minZ; z <= maxZ; z += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      world.setZone(x, y, z, zoneId);
+    }
+  }
+}
+
+function preserveCenterPlaza(world: VoxelWorld) {
+  for (let z = WORLD_CONFIG.depth / 2 - 1; z <= WORLD_CONFIG.depth / 2; z += 1) {
+    for (let x = WORLD_CONFIG.width / 2 - 1; x <= WORLD_CONFIG.width / 2; x += 1) {
+      world.setBlock(x, 0, z, BLOCK_IDS.Path);
+      world.setZone(x, 0, z, 0);
+    }
+  }
+}

@@ -4,7 +4,7 @@ import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber"
 import { MapControls } from "@react-three/drei";
 import gsap from "gsap";
 import dynamic from "next/dynamic";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
 import {
   CHUNK_MAX_INSTANCE_COUNT,
@@ -14,11 +14,32 @@ import {
 } from "@/lib/terrain/terrain";
 import { buildSurfaceChunkMesh, type SurfaceChunkMeshData } from "@/lib/terrain/surface-mesher";
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
-import { MAP_DOCUMENT_FILENAME, parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
+import { parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
 import type { GridCoordinate } from "@/lib/world/world-config";
 import { MapEditorSession, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
 import { createMapPresetWorld, type MapPresetId } from "@/lib/editor/map-presets";
+import {
+  createBlankMapDefinition,
+  createLoadedMapState,
+  createMapDefinitionFromWorld,
+  duplicateMapDefinition,
+  mapDefinitionToDocument,
+  validateMapDefinition,
+  type MapDefinition,
+  type MapCameraPreset,
+  type MapMarkerDefinition,
+} from "@/lib/maps/map-definition";
+import {
+  DEFAULT_AUTHORED_MAP_ID,
+  deleteMapDraft,
+  listMapRegistryEntries,
+  loadMapDraft,
+  loadMapStateSync,
+  saveMapDraft,
+} from "@/lib/maps/map-registry";
 import type { MapEditorToolbarProps } from "@/components/experience/MapEditorToolbar";
+import { createBrowsingState, reduceBrowsingState, type BrowsingState } from "@/lib/portfolio/browsing-state";
+import { PORTFOLIO_CONTENT, resolveContentReference } from "@/lib/portfolio/content";
 import {
   type ExperiencePhase,
   isInteractivePhase,
@@ -26,8 +47,6 @@ import {
 } from "@/lib/experience/experience-store";
 
 const MapEditorToolbar = dynamic(() => import("@/components/experience/MapEditorToolbar"), { ssr: false });
-const EDITOR_STORAGE_KEY = "portfolio-map-editor-draft.v1";
-const DEFAULT_MAP_PRESET_ID: MapPresetId = "portfolioCampus";
 const TOOL_COLORS: Record<EditorTool, string> = {
   select: "#38bdf8",
   paint: "#38bdf8",
@@ -185,13 +204,15 @@ const SURFACE_FRAGMENT_SHADER = `
   }
 `;
 
-export default function PortfolioExperience() {
+export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MAP_ID }: { initialMapId?: string }) {
   const [webglState, setWebglState] = useState<"checking" | "available" | "unavailable">("checking");
   const [metrics, setMetrics] = useState<(MetricsSnapshot & { phase: ExperiencePhase }) | null>(null);
   const [editorRequested, setEditorRequested] = useState(false);
   const [editorPanel, setEditorPanel] = useState<MapEditorToolbarProps | null>(null);
+  const [mapUi, setMapUi] = useState<MapUiState | null>(null);
   const phase = useExperienceStore((state) => state.phase);
   const editorEnabled = process.env.NODE_ENV !== "production" && editorRequested;
+  const canOpenEditor = process.env.NODE_ENV !== "production" && phase === "explore" && !editorRequested;
 
   useLayoutEffect(() => {
     useExperienceStore.getState().reset();
@@ -262,8 +283,10 @@ export default function PortfolioExperience() {
               }}
             >
               <ExperienceScene
+                initialMapId={initialMapId}
                 editorEnabled={editorEnabled}
                 onEditorStateChange={setEditorPanel}
+                onMapUiStateChange={setMapUi}
                 onCloseEditor={() => setEditorRequested(false)}
               />
             </Canvas>
@@ -277,6 +300,16 @@ export default function PortfolioExperience() {
             )
           ) : null}
           {editorEnabled && editorPanel ? <MapEditorToolbar {...editorPanel} /> : null}
+          {canOpenEditor ? (
+            <button
+              className="map-editor-reopen"
+              type="button"
+              onClick={() => setEditorRequested(true)}
+            >
+              Editor
+            </button>
+          ) : null}
+          {mapUi ? <MapBrowserOverlay state={mapUi} /> : null}
         </>
       ) : (
         <div className="experience-fallback">
@@ -286,6 +319,18 @@ export default function PortfolioExperience() {
     </section>
   );
 }
+
+type MapUiState = {
+  browsing: BrowsingState;
+  map: MapDefinition;
+  hoveredZoneId: string | null;
+  selectedMarkerId: string | null;
+  onSelectZone: (zoneId: string) => void;
+  onFocusZone: () => void;
+  onReturnOverview: () => void;
+  onOpenContent: () => void;
+  onCloseContent: () => void;
+};
 
 function ExperienceOverlay({ phase }: { phase: ExperiencePhase }) {
   const resetView = useExperienceStore((state) => state.resetView);
@@ -447,35 +492,180 @@ function FixedDiagnostics({ metrics }: { metrics: MetricsSnapshot & { phase: Exp
   );
 }
 
-function createInitialTerrainData() {
-  return createTerrainDataFromWorld(createMapPresetWorld(DEFAULT_MAP_PRESET_ID));
+function MapBrowserOverlay({ state }: { state: MapUiState }) {
+  const visibleZones = [...state.map.zones]
+    .filter((zone) => zone.visibleInLegend)
+    .sort((left, right) => left.displayOrder - right.displayOrder);
+  const selectedZoneId = "zoneId" in state.browsing ? state.browsing.zoneId : null;
+  const selectedMarker = state.selectedMarkerId
+    ? state.map.markers.find((marker) => marker.id === state.selectedMarkerId) ?? null
+    : null;
+  const selectedZone = selectedZoneId ? state.map.zones.find((zone) => zone.id === selectedZoneId) ?? null : null;
+  const content = selectedMarker?.contentReference
+    ? resolveContentReference(selectedMarker.contentReference.contentType, selectedMarker.contentReference.contentId, PORTFOLIO_CONTENT)
+    : null;
+
+  return (
+    <div className="map-browser-ui" aria-label="Portfolio map browser">
+      {state.map.presentation.legendVisible && visibleZones.length > 0 ? (
+        <aside className="map-legend" aria-label={`${state.map.name} legend`}>
+          <strong>{state.map.name}</strong>
+          <div role="list">
+            {visibleZones.map((zone) => {
+              const selected = selectedZoneId === zone.id;
+              const hovered = state.hoveredZoneId === zone.id;
+              return (
+                <button
+                  key={zone.id}
+                  type="button"
+                  className={selected ? "selected" : hovered ? "hovered" : ""}
+                  onClick={() => state.onSelectZone(zone.id)}
+                >
+                  <span style={{ backgroundColor: zone.color }} aria-hidden="true" />
+                  <span>{zone.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+      ) : null}
+
+      {selectedZone || selectedMarker ? (
+        <aside className="map-context-panel" aria-label="Selected map context">
+          <button type="button" onClick={state.onReturnOverview} aria-label="Return to overview">Back</button>
+          <h2>{selectedMarker?.label ?? selectedZone?.label}</h2>
+          <p>{selectedMarker ? getMarkerDescription(selectedMarker) : selectedZone?.description}</p>
+          <div>
+            {selectedZone ? <button type="button" onClick={state.onFocusZone}>Focus</button> : null}
+            {selectedMarker?.contentReference ? <button type="button" onClick={state.onOpenContent}>Open</button> : null}
+          </div>
+        </aside>
+      ) : null}
+
+      {state.browsing.mode === "contentOpen" && content ? (
+        <section className="map-content-panel" role="dialog" aria-modal="false" aria-label="Portfolio content">
+          <button type="button" onClick={state.onCloseContent} aria-label="Close content">Close</button>
+          {renderPortfolioContent(content)}
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function getMarkerDescription(marker: MapMarkerDefinition) {
+  return marker.contentReference
+    ? `${marker.contentReference.contentType}: ${marker.contentReference.contentId}`
+    : "Map point of interest.";
+}
+
+function renderPortfolioContent(content: NonNullable<ReturnType<typeof resolveContentReference>>) {
+  if ("title" in content) {
+    return (
+      <article>
+        <h2>{content.title}</h2>
+        <p>{content.shortDescription}</p>
+        <p>{content.longDescription}</p>
+        <dl>
+          <dt>Technologies</dt>
+          <dd>{content.technologies.join(", ")}</dd>
+        </dl>
+      </article>
+    );
+  }
+  if ("company" in content) {
+    return (
+      <article>
+        <h2>{content.position}</h2>
+        <p>{content.company}</p>
+        <p>{content.dateRange}</p>
+        <p>{content.description}</p>
+      </article>
+    );
+  }
+  if ("shortIntroduction" in content) {
+    return (
+      <article>
+        <h2>About</h2>
+        <p>{content.shortIntroduction}</p>
+        <p>{content.biography}</p>
+        <p>{content.currentFocus}</p>
+        <p>{content.workingApproach}</p>
+      </article>
+    );
+  }
+  if ("skills" in content) {
+    return (
+      <article>
+        <h2>{content.label}</h2>
+        <ul>
+          {content.skills.map((skill) => <li key={skill}>{skill}</li>)}
+        </ul>
+      </article>
+    );
+  }
+
+  return (
+    <article>
+      <h2>Contact</h2>
+      <p>{content.email}</p>
+      {content.availability ? <p>{content.availability}</p> : null}
+    </article>
+  );
+}
+
+function createInitialExperienceMapState(mapId: string) {
+  try {
+    const loadedMap = loadMapStateSync(mapId, { includeDevelopment: process.env.NODE_ENV !== "production" });
+    return {
+      loadedMap,
+      terrain: createTerrainDataFromWorld(loadedMap.world),
+      error: null,
+    };
+  } catch (error) {
+    const loadedMap = loadMapStateSync(DEFAULT_AUTHORED_MAP_ID, { includeDevelopment: process.env.NODE_ENV !== "production" });
+    return {
+      loadedMap,
+      terrain: createTerrainDataFromWorld(loadedMap.world),
+      error: error instanceof Error ? error.message : `Unknown map id: ${mapId}.`,
+    };
+  }
 }
 
 function ExperienceScene({
+  initialMapId,
   editorEnabled,
   onEditorStateChange,
+  onMapUiStateChange,
   onCloseEditor,
 }: {
+  initialMapId: string;
   editorEnabled: boolean;
   onEditorStateChange: (state: MapEditorToolbarProps | null) => void;
+  onMapUiStateChange: (state: MapUiState | null) => void;
   onCloseEditor: () => void;
 }) {
-  const initialPresetId: MapPresetId = DEFAULT_MAP_PRESET_ID;
-  const [terrain, setTerrain] = useState(() => createInitialTerrainData());
+  const initialState = useMemo(() => createInitialExperienceMapState(initialMapId), [initialMapId]);
+  const [currentMap, setCurrentMap] = useState<MapDefinition>(initialState.loadedMap.definition);
+  const [terrain, setTerrain] = useState(initialState.terrain);
+  const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities));
   const [tool, setTool] = useState<EditorTool>("select");
   const [paintBlockId, setPaintBlockId] = useState<BlockId>(BLOCK_IDS.Path);
-  const [presetId, setPresetId] = useState<MapPresetId>(initialPresetId);
+  const [presetId, setPresetId] = useState<MapPresetId>("portfolioCampus");
   const [renderMode, setRenderMode] = useState<TerrainRenderMode>("surface");
   const [zoneId, setZoneId] = useState(1);
+  const [activeMapId, setActiveMapId] = useState(initialState.loadedMap.definition.id);
+  const [hoveredZoneId, setHoveredZoneId] = useState<string | null>(null);
+  const [browsing, dispatchBrowsing] = useReducer(reduceBrowsingState, initialState.loadedMap.definition.id, createBrowsingState);
   const [hoveredCell, setHoveredCell] = useState<GridCoordinate | null>(null);
   const [selectedCell, setSelectedCell] = useState<GridCoordinate | null>(null);
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
-  const [editorMessage, setEditorMessage] = useState<EditorMessage | null>(null);
+  const [editorMessage, setEditorMessage] = useState<EditorMessage | null>(
+    initialState.error ? { type: "error", text: initialState.error } : null,
+  );
   const [lastRebuiltChunks, setLastRebuiltChunks] = useState<string[]>([]);
   const [lastChunkRebuildMs, setLastChunkRebuildMs] = useState(0);
   const [editorRevision, setEditorRevision] = useState(0);
   const [autosaveStatus, setAutosaveStatus] = useState("local idle");
-  const [editorSession] = useState(() => new MapEditorSession(terrain.world));
   const uniforms = useMemo<TerrainUniforms>(
     () => ({
       uExpansionProgress: { value: 0 },
@@ -506,6 +696,39 @@ function ExperienceScene({
     ? editorSession.world.getBlock(selectedCell.x, selectedCell.y, selectedCell.z)
     : null;
   const selectedZoneId = selectedCell ? editorSession.world.getZone(selectedCell.x, selectedCell.y, selectedCell.z) : 0;
+  const availableMaps = useMemo(() => listMapRegistryEntries({ includeDevelopment: process.env.NODE_ENV !== "production" }), []);
+  const activeCameraPreset = useMemo(() => getBrowsingCameraPreset(currentMap, browsing), [browsing, currentMap]);
+
+  const createCurrentMapDefinition = () => createMapDefinitionFromWorld({
+    ...currentMap,
+    world: editorSession.world,
+    zones: currentMap.zones,
+    markers: mergeMarkerDefinitions(currentMap.markers, editorSession.entities),
+    spawnPoints: currentMap.spawnPoints,
+    cameraPresets: currentMap.cameraPresets,
+    presentation: currentMap.presentation,
+    metadata: {
+      ...currentMap.metadata,
+      updatedAt: new Date().toISOString(),
+    },
+  });
+
+  const replaceLoadedMap = (map: MapDefinition, markSaved: boolean, message: string) => {
+    const document = mapDefinitionToDocument(map);
+    const result = editorSession.replaceWithDocument(document, markSaved);
+    const nextTerrain = createTerrainDataFromWorld(editorSession.world);
+
+    setCurrentMap(map);
+    setActiveMapId(map.id);
+    dispatchBrowsing({ type: "changeMap", mapId: map.id });
+    setTerrain(nextTerrain);
+    setLastRebuiltChunks(result.rebuiltChunkIds);
+    setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
+    setSelectedCell(null);
+    setSelectedMarkerId(null);
+    setEditorMessage({ type: "info", text: message });
+    setEditorRevision((revision) => revision + 1);
+  };
 
   const replaceRebuiltChunks = (rebuiltChunks: ReturnType<MapEditorSession["applyTool"]>["rebuiltChunks"]) => {
     if (rebuiltChunks.length === 0) {
@@ -616,12 +839,99 @@ function ExperienceScene({
     setEditorRevision((revision) => revision + 1);
   };
 
+  const handleMapChange = (nextMapId: string) => {
+    if (snapshot.hasUnsavedChanges && !window.confirm("Replace unsaved editor changes with the selected map?")) {
+      return;
+    }
+
+    try {
+      const draft = loadMapDraft(localStorage, nextMapId);
+      const loaded = draft ? createLoadedMapState(draft) : loadMapStateSync(nextMapId, { includeDevelopment: true });
+
+      const nextSession = new MapEditorSession(loaded.world, loaded.entities);
+      const nextTerrain = createTerrainDataFromWorld(nextSession.world);
+      setEditorSession(nextSession);
+      setCurrentMap(loaded.definition);
+      setActiveMapId(loaded.definition.id);
+      dispatchBrowsing({ type: "changeMap", mapId: loaded.definition.id });
+      setTerrain(nextTerrain);
+      setLastRebuiltChunks(nextTerrain.chunks.map((chunk) => chunk.id));
+      setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
+      setSelectedCell(null);
+      setSelectedMarkerId(null);
+      setEditorMessage({ type: "info", text: `Loaded ${loaded.definition.name}.` });
+      setEditorRevision((revision) => revision + 1);
+    } catch (error) {
+      setEditorMessage({ type: "error", text: error instanceof Error ? error.message : "Map load failed." });
+    }
+  };
+
+  const handleNewMap = () => {
+    if (snapshot.hasUnsavedChanges && !window.confirm("Discard unsaved edits and create a blank development map?")) {
+      return;
+    }
+    const id = window.prompt("New map id", `custom-map-${Date.now().toString(36)}`);
+    if (!id) return;
+    if (availableMaps.some((map) => map.id === id) || id === currentMap.id) {
+      setEditorMessage({ type: "error", text: `Map id already exists: ${id}.` });
+      return;
+    }
+    const name = window.prompt("New map name", "Custom Map");
+    if (!name) return;
+
+    try {
+      const map = createBlankMapDefinition({ id, name, flatBaseLayer: true });
+      const nextSession = new MapEditorSession();
+      nextSession.replaceWithDocument(mapDefinitionToDocument(map), true);
+      setEditorSession(nextSession);
+      setCurrentMap(map);
+      setActiveMapId(map.id);
+      dispatchBrowsing({ type: "changeMap", mapId: map.id });
+      setTerrain(createTerrainDataFromWorld(nextSession.world));
+      setSelectedCell(null);
+      setSelectedMarkerId(null);
+      setEditorMessage({ type: "info", text: "Blank map created." });
+      setEditorRevision((revision) => revision + 1);
+    } catch (error) {
+      setEditorMessage({ type: "error", text: error instanceof Error ? error.message : "New map failed." });
+    }
+  };
+
+  const handleDuplicateMap = () => {
+    const id = window.prompt("Duplicate map id", `${currentMap.id}-copy`);
+    if (!id) return;
+    if (availableMaps.some((map) => map.id === id) || id === currentMap.id) {
+      setEditorMessage({ type: "error", text: `Map id already exists: ${id}.` });
+      return;
+    }
+    const name = window.prompt("Duplicate map name", `${currentMap.name} Copy`);
+    if (!name) return;
+    const duplicate = duplicateMapDefinition(createCurrentMapDefinition(), id, name);
+    replaceLoadedMap(duplicate, false, "Map duplicated.");
+  };
+
+  const handleSaveDraft = () => {
+    const saved = saveMapDraft(localStorage, createCurrentMapDefinition());
+    setCurrentMap(saved);
+    editorSession.markSaved();
+    setAutosaveStatus(`draft saved ${new Date().toLocaleTimeString()}`);
+    setEditorRevision((revision) => revision + 1);
+  };
+
+  const handleRenameMap = () => {
+    const name = window.prompt("Map name", currentMap.name);
+    if (!name || name === currentMap.name) return;
+    setCurrentMap({ ...currentMap, name, metadata: { ...currentMap.metadata, updatedAt: new Date().toISOString() } });
+    setEditorMessage({ type: "info", text: "Map renamed. Save draft or export to persist it." });
+    setEditorRevision((revision) => revision + 1);
+  };
+
   const handleExport = () => {
-    const mapDocument = serializeMapDocument(editorSession.world, editorSession.entities);
-    const blob = new Blob([`${JSON.stringify(mapDocument, null, 2)}\n`], { type: "application/json" });
+    const mapDefinition = createCurrentMapDefinition();
+    const blob = new Blob([`${JSON.stringify(mapDefinition, null, 2)}\n`], { type: "application/json" });
     const link = window.document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = MAP_DOCUMENT_FILENAME;
+    link.download = `${mapDefinition.id}.map.v1.json`;
     link.click();
     URL.revokeObjectURL(link.href);
     editorSession.markSaved();
@@ -636,28 +946,47 @@ function ExperienceScene({
     }
 
     try {
-      const parsed = parseMapDocument(JSON.parse(await file.text()));
-      if (!parsed.ok) {
-        setEditorMessage({ type: "error", text: parsed.error });
-        return;
+      const input = JSON.parse(await file.text());
+      if (isMapDefinitionLike(input)) {
+        const validation = validateMapDefinition(input);
+        if (!validation.ok) {
+          setEditorMessage({ type: "error", text: validation.errors.join(" ") });
+          return;
+        }
+        replaceLoadedMap(validation.map, true, "Map definition imported.");
+      } else {
+        const parsed = parseMapDocument(input);
+        if (!parsed.ok) {
+          setEditorMessage({ type: "error", text: parsed.error });
+          return;
+        }
+        const legacyMap = createMapDefinitionFromWorld({
+          id: `imported-map-${Date.now().toString(36)}`,
+          name: "Imported Legacy Map",
+          kind: "custom",
+          runtimeMode: "dynamic-voxel",
+          world: new MapEditorSession(undefined, []).world,
+          zones: currentMap.zones,
+          markers: [],
+          spawnPoints: currentMap.spawnPoints,
+          cameraPresets: currentMap.cameraPresets,
+        });
+        const imported = new MapEditorSession();
+        imported.replaceWithDocument(parsed.document, true);
+        const upgraded = createMapDefinitionFromWorld({
+          ...legacyMap,
+          world: imported.world,
+          markers: mergeMarkerDefinitions([], imported.entities),
+        });
+        replaceLoadedMap(upgraded, true, "Legacy map document imported.");
       }
-
-      const result = editorSession.replaceWithDocument(parsed.document, true);
-      const nextTerrain = createTerrainDataFromWorld(editorSession.world);
-      setTerrain(nextTerrain);
-      setLastRebuiltChunks(result.rebuiltChunkIds);
-      setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
-      setSelectedCell(null);
-      setSelectedMarkerId(null);
-      setEditorMessage({ type: "info", text: "Map imported." });
-      setEditorRevision((revision) => revision + 1);
     } catch {
       setEditorMessage({ type: "error", text: "Import failed. The current map was not changed." });
     }
   };
 
   const handleClearDraft = () => {
-    localStorage.removeItem(EDITOR_STORAGE_KEY);
+    deleteMapDraft(localStorage, currentMap.id);
     setAutosaveStatus("draft cleared");
   };
 
@@ -684,6 +1013,10 @@ function ExperienceScene({
 
     onEditorStateChange({
       available: editorAvailable,
+      mapId: activeMapId,
+      mapName: currentMap.name,
+      mapDescription: currentMap.description ?? "",
+      availableMaps,
       tool,
       paintBlockId,
       presetId,
@@ -710,6 +1043,11 @@ function ExperienceScene({
       onToolChange: setTool,
       onPaintBlockChange: setPaintBlockId,
       onPresetChange: handlePresetChange,
+      onMapChange: handleMapChange,
+      onNewMap: handleNewMap,
+      onDuplicateMap: handleDuplicateMap,
+      onSaveDraft: handleSaveDraft,
+      onRenameMap: handleRenameMap,
       onRenderModeChange: setRenderMode,
       onZoneChange: setZoneId,
       onUndo: handleUndo,
@@ -724,6 +1062,9 @@ function ExperienceScene({
     });
   }, [
     autosaveStatus,
+    activeMapId,
+    availableMaps,
+    currentMap,
     editorAvailable,
     editorMessage,
     editorRevision,
@@ -752,25 +1093,41 @@ function ExperienceScene({
   ]);
 
   useEffect(() => {
+    if (phase !== "explore") {
+      onMapUiStateChange(null);
+      return;
+    }
+
+    onMapUiStateChange({
+      browsing,
+      map: currentMap,
+      hoveredZoneId,
+      selectedMarkerId: browsing.mode === "itemSelected" || browsing.mode === "contentOpen" ? browsing.markerId : null,
+      onSelectZone: (nextZoneId) => dispatchBrowsing({ type: "selectZone", zoneId: nextZoneId }),
+      onFocusZone: () => dispatchBrowsing({ type: "focusZone", previousViewId: currentMap.defaultCameraPresetId }),
+      onReturnOverview: () => dispatchBrowsing({ type: "returnToOverview", previousViewId: currentMap.defaultCameraPresetId }),
+      onOpenContent: () => dispatchBrowsing({ type: "openContent" }),
+      onCloseContent: () => dispatchBrowsing({ type: "closeContent" }),
+    });
+
+    return () => onMapUiStateChange(null);
+  }, [browsing, currentMap, hoveredZoneId, onMapUiStateChange, phase]);
+
+  useEffect(() => {
     if (!editorAvailable) {
       return;
     }
 
     const timer = window.setTimeout(() => {
-      const savedDraft = localStorage.getItem(EDITOR_STORAGE_KEY);
-      if (!savedDraft) {
-        return;
-      }
-
       try {
-        const parsed = parseMapDocument(JSON.parse(savedDraft));
-        if (!parsed.ok) {
-          setAutosaveStatus("bad draft ignored");
+        const savedDraft = loadMapDraft(localStorage, currentMap.id);
+        if (!savedDraft) {
           return;
         }
 
-        const result = editorSession.replaceWithDocument(parsed.document, true);
+        const result = editorSession.replaceWithDocument(mapDefinitionToDocument(savedDraft), true);
         const nextTerrain = createTerrainDataFromWorld(editorSession.world);
+        setCurrentMap(savedDraft);
         setTerrain(nextTerrain);
         setLastRebuiltChunks(result.rebuiltChunkIds);
         setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
@@ -782,7 +1139,7 @@ function ExperienceScene({
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [editorAvailable, editorSession]);
+  }, [currentMap.id, editorAvailable, editorSession]);
 
   useEffect(() => {
     if (!editorAvailable) {
@@ -790,15 +1147,40 @@ function ExperienceScene({
     }
 
     const timer = window.setTimeout(() => {
-      localStorage.setItem(
-        EDITOR_STORAGE_KEY,
-        JSON.stringify(serializeMapDocument(editorSession.world, editorSession.entities)),
-      );
+      saveMapDraft(localStorage, createCurrentMapDefinition());
       setAutosaveStatus("local saved");
     }, 450);
 
     return () => window.clearTimeout(timer);
   }, [editorAvailable, editorRevision, editorSession]);
+
+  useEffect(() => {
+    if (phase !== "explore" || editorAvailable) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        dispatchBrowsing({ type: "escape" });
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [editorAvailable, phase]);
+
+  useEffect(() => {
+    if (browsing.mode !== "returningToOverview") {
+      return;
+    }
+
+    const duration = activeCameraPreset?.transitionDuration ?? 0.9;
+    const timer = window.setTimeout(() => {
+      dispatchBrowsing({ type: "settleOverview" });
+    }, reducedMotion ? 20 : duration * 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [activeCameraPreset, browsing.mode, reducedMotion]);
 
   useEffect(() => {
     if (!editorAvailable) {
@@ -896,7 +1278,13 @@ function ExperienceScene({
         warmup={phase === "loading"}
       />
       <WorldEntryItem visible={phase === "ready"} onActivate={startExpansion} />
-      <ConstrainedMapControls enabled={isInteractivePhase(phase)} phase={phase} onFocusComplete={markExpanding} />
+      <ConstrainedMapControls
+        enabled={isInteractivePhase(phase)}
+        phase={phase}
+        focusPreset={activeCameraPreset}
+        reducedMotion={reducedMotion}
+        onFocusComplete={markExpanding}
+      />
       <RenderInvalidator phase={phase} />
       <EditorInteractionOverlay
         editorEnabled={editorAvailable}
@@ -919,6 +1307,24 @@ function ExperienceScene({
         onSelectMarker={(id) => {
           setSelectedMarkerId(id);
           setSelectedCell(null);
+        }}
+      />
+      <MapInteractionProxies
+        map={currentMap}
+        world={editorSession.world}
+        enabled={phase === "explore" && !editorAvailable}
+        browsing={browsing}
+        onHoverZone={setHoveredZoneId}
+        onSelectZone={(nextZoneId) => dispatchBrowsing({ type: "selectZone", zoneId: nextZoneId })}
+        onSelectMarker={(marker) => {
+          const itemId = marker.contentReference?.contentId ?? marker.id;
+          dispatchBrowsing({
+            type: "selectItem",
+            markerId: marker.id,
+            itemId,
+            zoneId: marker.zoneId,
+            previousViewId: currentMap.defaultCameraPresetId,
+          });
         }}
       />
       <DevelopmentMetrics
@@ -1126,13 +1532,17 @@ function WorldEntryItem({
     };
   }, [crystalMaterial, hitAreaMaterial, ringMaterial]);
 
+  // Three.js materials are imperative GPU resources; GSAP mutates their opacity outside React state.
+  // eslint-disable-next-line react-hooks/immutability
   useEffect(() => {
     const group = groupRef.current;
 
     if (!visible) {
       document.body.style.cursor = "";
       gsap.killTweensOf([group?.scale, introOffset.current, crystalMaterial, ringMaterial]);
+      // eslint-disable-next-line react-hooks/immutability
       crystalMaterial.opacity = 0;
+      // eslint-disable-next-line react-hooks/immutability
       ringMaterial.opacity = 0;
       group?.scale.setScalar(0.18);
       introOffset.current.value = -0.32;
@@ -1579,6 +1989,173 @@ function SelectionIndicator({
   );
 }
 
+type ZoneProxy = {
+  zoneId: string;
+  label: string;
+  color: string;
+  center: THREE.Vector3;
+  size: THREE.Vector3;
+};
+
+function MapInteractionProxies({
+  map,
+  world,
+  enabled,
+  browsing,
+  onHoverZone,
+  onSelectZone,
+  onSelectMarker,
+}: {
+  map: MapDefinition;
+  world: MapEditorSession["world"];
+  enabled: boolean;
+  browsing: BrowsingState;
+  onHoverZone: (zoneId: string | null) => void;
+  onSelectZone: (zoneId: string) => void;
+  onSelectMarker: (marker: MapMarkerDefinition) => void;
+}) {
+  const zoneProxies = useMemo(() => createZoneProxies(map, world), [map, world]);
+  const zoneGeometry = useMemo(() => new THREE.BoxGeometry(1, 0.08, 1), []);
+  const markerGeometry = useMemo(() => new THREE.ConeGeometry(0.34, 0.82, 5), []);
+  const markerMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#d8b45a" }), []);
+  const selectedMarkerMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#ffffff" }), []);
+  const zoneMaterials = useMemo(
+    () => new Map(zoneProxies.map((proxy) => [
+      proxy.zoneId,
+      new THREE.MeshBasicMaterial({
+        color: proxy.color,
+        transparent: true,
+        opacity: browsing.mode !== "overview" && "zoneId" in browsing && browsing.zoneId === proxy.zoneId ? 0.32 : 0.16,
+        depthWrite: false,
+      }),
+    ])),
+    [browsing, zoneProxies],
+  );
+
+  useEffect(() => {
+    return () => {
+      zoneGeometry.dispose();
+      markerGeometry.dispose();
+      markerMaterial.dispose();
+      selectedMarkerMaterial.dispose();
+    };
+  }, [markerGeometry, markerMaterial, selectedMarkerMaterial, zoneGeometry]);
+
+  useEffect(() => {
+    return () => {
+      for (const material of zoneMaterials.values()) {
+        material.dispose();
+      }
+    };
+  }, [zoneMaterials]);
+
+  if (!enabled) {
+    return null;
+  }
+
+  return (
+    <group>
+      {zoneProxies.map((proxy) => (
+        <mesh
+          key={proxy.zoneId}
+          geometry={zoneGeometry}
+          material={zoneMaterials.get(proxy.zoneId)}
+          position={proxy.center}
+          scale={proxy.size}
+          onPointerOver={(event) => {
+            event.stopPropagation();
+            document.body.style.cursor = "pointer";
+            onHoverZone(proxy.zoneId);
+          }}
+          onPointerOut={(event) => {
+            event.stopPropagation();
+            document.body.style.cursor = "";
+            onHoverZone(null);
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelectZone(proxy.zoneId);
+          }}
+        />
+      ))}
+      {map.markers.filter((marker) => marker.runtimeVisible).map((marker) => {
+        const position = world.gridToWorld(marker.gridPosition.x, marker.gridPosition.y, marker.gridPosition.z);
+        const selected = (browsing.mode === "itemSelected" || browsing.mode === "contentOpen") && browsing.markerId === marker.id;
+
+        return (
+          <mesh
+            key={marker.id}
+            geometry={markerGeometry}
+            material={selected ? selectedMarkerMaterial : markerMaterial}
+            position={[position.x + (marker.offset?.x ?? 0), position.y + 0.9 + (marker.offset?.y ?? 0), position.z + (marker.offset?.z ?? 0)]}
+            rotation={[0, marker.rotationY, 0]}
+            scale={marker.markerType === "primary" ? 1 : 0.78}
+            onPointerOver={(event) => {
+              event.stopPropagation();
+              document.body.style.cursor = "pointer";
+              onHoverZone(marker.zoneId ?? null);
+            }}
+            onPointerOut={(event) => {
+              event.stopPropagation();
+              document.body.style.cursor = "";
+              onHoverZone(null);
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelectMarker(marker);
+            }}
+          />
+        );
+      })}
+    </group>
+  );
+}
+
+function createZoneProxies(map: MapDefinition, world: MapEditorSession["world"]) {
+  const zonesByNumber = new Map(map.zones.map((zone) => [zone.numericId, zone]));
+  const bounds = new Map<number, { minX: number; maxX: number; minZ: number; maxZ: number; y: number }>();
+
+  for (const assignment of map.zoneAssignments) {
+    const zone = zonesByNumber.get(assignment.zoneId);
+    if (!zone?.overlayVisible) {
+      continue;
+    }
+    const current = bounds.get(assignment.zoneId);
+    if (!current) {
+      bounds.set(assignment.zoneId, {
+        minX: assignment.x,
+        maxX: assignment.x,
+        minZ: assignment.z,
+        maxZ: assignment.z,
+        y: assignment.y,
+      });
+      continue;
+    }
+    current.minX = Math.min(current.minX, assignment.x);
+    current.maxX = Math.max(current.maxX, assignment.x);
+    current.minZ = Math.min(current.minZ, assignment.z);
+    current.maxZ = Math.max(current.maxZ, assignment.z);
+    current.y = Math.max(current.y, assignment.y);
+  }
+
+  const proxies: ZoneProxy[] = [];
+  for (const [numericId, box] of bounds) {
+    const zone = zonesByNumber.get(numericId);
+    if (!zone) continue;
+    const min = world.gridToWorld(box.minX, box.y, box.minZ);
+    const max = world.gridToWorld(box.maxX, box.y, box.maxZ);
+    proxies.push({
+      zoneId: zone.id,
+      label: zone.label,
+      color: zone.color,
+      center: new THREE.Vector3((min.x + max.x) / 2, box.y + 1.04, (min.z + max.z) / 2),
+      size: new THREE.Vector3(Math.max(1, box.maxX - box.minX + 1), 1, Math.max(1, box.maxZ - box.minZ + 1)),
+    });
+  }
+
+  return proxies;
+}
+
 function EditorMarkers({
   editorEnabled,
   entities,
@@ -1660,6 +2237,59 @@ function getToolTargetCoordinate(session: MapEditorSession, tool: EditorTool, co
   return coordinate;
 }
 
+function mergeMarkerDefinitions(existingMarkers: MapMarkerDefinition[], entities: MapEditorSession["entities"]) {
+  const existingById = new Map(existingMarkers.map((marker) => [marker.id, marker]));
+
+  return entities.map((entity): MapMarkerDefinition => {
+    const existing = existingById.get(entity.id);
+    if (existing) {
+      return {
+        ...existing,
+        gridPosition: { ...entity.gridPosition },
+        offset: entity.offset ? { ...entity.offset } : undefined,
+        rotationY: entity.rotationY,
+      };
+    }
+
+    return {
+      id: entity.id,
+      type: "marker",
+      markerType: "info",
+      label: String(entity.metadata?.label ?? entity.id),
+      zoneId: typeof entity.metadata?.zoneId === "string" && entity.metadata.zoneId.length > 0 ? entity.metadata.zoneId : undefined,
+      gridPosition: { ...entity.gridPosition },
+      offset: entity.offset ? { ...entity.offset } : undefined,
+      rotationY: entity.rotationY,
+      contentReference: getEntityContentReference(entity),
+      developmentVisible: true,
+      runtimeVisible: true,
+      interactionRadius: 1.1,
+    };
+  });
+}
+
+function getEntityContentReference(entity: MapEditorSession["entities"][number]) {
+  const contentType = entity.metadata?.contentType;
+  const contentId = entity.metadata?.contentId;
+  if (
+    typeof contentType === "string" &&
+    ["project", "about", "experience", "skillGroup", "contact"].includes(contentType) &&
+    typeof contentId === "string" &&
+    contentId.length > 0
+  ) {
+    return {
+      contentType: contentType as NonNullable<MapMarkerDefinition["contentReference"]>["contentType"],
+      contentId,
+    };
+  }
+
+  return undefined;
+}
+
+function isMapDefinitionLike(value: unknown): value is MapDefinition {
+  return typeof value === "object" && value !== null && "schemaVersion" in value && "blocks" in value && "markers" in value;
+}
+
 function sameCoordinate(left: GridCoordinate | null, right: GridCoordinate | null) {
   return left?.x === right?.x && left?.y === right?.y && left?.z === right?.z;
 }
@@ -1674,13 +2304,43 @@ function isEditorUiEvent(event: PointerEvent) {
   return target instanceof HTMLElement && Boolean(target.closest(".map-editor-toolbar, button, input, select, textarea, [role='button']"));
 }
 
+function getBrowsingCameraPreset(map: MapDefinition, browsing: BrowsingState) {
+  if (browsing.mode === "returningToOverview") {
+    return getMapCameraPreset(map, map.defaultCameraPresetId);
+  }
+  if (browsing.mode === "zoneFocused") {
+    const zone = map.zones.find((candidate) => candidate.id === browsing.zoneId);
+    const marker = zone?.defaultFocusMarkerId
+      ? map.markers.find((candidate) => candidate.id === zone.defaultFocusMarkerId)
+      : null;
+    return getMapCameraPreset(map, marker?.focusCameraPresetId) ?? getMapCameraPreset(map, map.defaultCameraPresetId);
+  }
+  if (browsing.mode === "itemSelected" || browsing.mode === "contentOpen") {
+    const marker = map.markers.find((candidate) => candidate.id === browsing.markerId);
+    return getMapCameraPreset(map, marker?.focusCameraPresetId) ?? getMapCameraPreset(map, map.defaultCameraPresetId);
+  }
+
+  return null;
+}
+
+function getMapCameraPreset(map: MapDefinition, presetId: string | undefined) {
+  if (!presetId) {
+    return null;
+  }
+  return map.cameraPresets.find((preset) => preset.id === presetId) ?? null;
+}
+
 function ConstrainedMapControls({
   enabled,
   phase,
+  focusPreset,
+  reducedMotion,
   onFocusComplete,
 }: {
   enabled: boolean;
   phase: ExperiencePhase;
+  focusPreset: MapCameraPreset | null;
+  reducedMotion: boolean;
   onFocusComplete: () => void;
 }) {
   const controlsRef = useRef<React.ElementRef<typeof MapControls>>(null);
@@ -1703,6 +2363,8 @@ function ConstrainedMapControls({
   const focusProgress = useRef(0);
   const focusStartCamera = useRef(new THREE.Vector3());
   const focusStartTarget = useRef(new THREE.Vector3());
+  const activeFocusPresetId = useRef<string | null>(null);
+  const focusTween = useRef<gsap.core.Tween | null>(null);
   const loaderCameraPosition = useMemo(() => new THREE.Vector3(0, 20, 54), []);
   const loaderTargetPosition = useMemo(() => new THREE.Vector3(0, 13.5, 0), []);
   const startCameraPosition = useMemo(() => new THREE.Vector3(12, 15, 18), []);
@@ -1801,6 +2463,56 @@ function ConstrainedMapControls({
     transitioning.current = true;
     transitionProgress.current = 0;
   }, [phase]);
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!focusPreset) {
+      activeFocusPresetId.current = null;
+      return;
+    }
+    if (!controls || !enabled) {
+      return;
+    }
+    if (activeFocusPresetId.current === focusPreset.id) {
+      return;
+    }
+
+    activeFocusPresetId.current = focusPreset.id;
+    focusTween.current?.kill();
+
+    const targetCamera = new THREE.Vector3(
+      focusPreset.cameraPosition.x,
+      focusPreset.cameraPosition.y,
+      focusPreset.cameraPosition.z,
+    );
+    const targetControls = new THREE.Vector3(
+      focusPreset.controlsTarget.x,
+      focusPreset.controlsTarget.y,
+      focusPreset.controlsTarget.z,
+    );
+    const tweenState = { progress: 0 };
+    const startCamera = camera.position.clone();
+    const startTarget = controls.target.clone();
+
+    focusTween.current = gsap.to(tweenState, {
+      progress: 1,
+      duration: reducedMotion ? 0.01 : focusPreset.transitionDuration ?? 0.9,
+      ease: "power3.inOut",
+      onUpdate: () => {
+        camera.position.lerpVectors(startCamera, targetCamera, tweenState.progress);
+        controls.target.lerpVectors(startTarget, targetControls, tweenState.progress);
+        controls.update();
+      },
+      onComplete: () => {
+        focusTween.current = null;
+      },
+    });
+
+    return () => {
+      focusTween.current?.kill();
+      focusTween.current = null;
+    };
+  }, [camera, enabled, focusPreset, reducedMotion]);
 
   useFrame((_, delta) => {
     const controls = controlsRef.current;

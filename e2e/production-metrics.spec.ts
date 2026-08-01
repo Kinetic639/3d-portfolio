@@ -22,7 +22,7 @@ test("collects production renderer metrics after expansion and map gestures", as
 
   console.log("production metrics", JSON.stringify(metrics));
   expect(metrics?.phase).toBe("explore");
-  expect(metrics?.instances).toBe(4096);
+  expect(metrics?.instances).toBeGreaterThan(4_096);
   expect(metrics?.calls).toBeGreaterThan(0);
   expect(metrics?.triangles).toBeGreaterThan(0);
 });

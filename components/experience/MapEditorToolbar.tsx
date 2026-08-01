@@ -4,12 +4,17 @@ import { useRef, useState } from "react";
 import { RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import type { EditorMessage, EditorTool } from "@/lib/editor/map-editor";
 import { MAP_PRESETS, type MapPresetId } from "@/lib/editor/map-presets";
+import type { MapRegistryEntry } from "@/lib/maps/map-registry";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
 
 export type TerrainRenderMode = "instanced" | "surface";
 
 export type EditorInspectorState = {
   available: boolean;
+  mapId: string;
+  mapName: string;
+  mapDescription: string;
+  availableMaps: MapRegistryEntry[];
   tool: EditorTool;
   paintBlockId: BlockId;
   presetId: MapPresetId;
@@ -39,6 +44,11 @@ export type MapEditorToolbarProps = EditorInspectorState & {
   onToolChange: (tool: EditorTool) => void;
   onPaintBlockChange: (blockId: BlockId) => void;
   onPresetChange: (presetId: MapPresetId) => void;
+  onMapChange: (mapId: string) => void;
+  onNewMap: () => void;
+  onDuplicateMap: () => void;
+  onSaveDraft: () => void;
+  onRenameMap: () => void;
   onRenderModeChange: (mode: TerrainRenderMode) => void;
   onZoneChange: (zoneId: number) => void;
   onUndo: () => void;
@@ -107,6 +117,27 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
           </button>
         ))}
       </div>
+
+      <section className="map-editor-section" aria-label="Map management">
+        <div className="map-editor-map-summary">
+          <strong>{props.mapName}</strong>
+          <span>{props.mapId}</span>
+        </div>
+        <label>
+          <span>Load Map</span>
+          <select value={props.mapId} onChange={(event) => props.onMapChange(event.target.value)}>
+            {props.availableMaps.map((map) => (
+              <option key={map.id} value={map.id}>{map.name}</option>
+            ))}
+          </select>
+        </label>
+        <div className="map-editor-actions">
+          <button type="button" onClick={props.onNewMap}>New Map</button>
+          <button type="button" onClick={props.onDuplicateMap}>Duplicate</button>
+          <button type="button" onClick={props.onSaveDraft}>Save Draft</button>
+          <button type="button" onClick={props.onRenameMap}>Rename</button>
+        </div>
+      </section>
 
       <div className="map-editor-controls">
         <label>
