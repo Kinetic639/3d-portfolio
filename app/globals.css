@@ -1571,6 +1571,227 @@ body {
   margin-top: 0.5rem;
 }
 
+.benchmark-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 34vw, 420px);
+  width: 100%;
+  max-width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #1f1f1f;
+  color: #d7d7d7;
+  box-sizing: border-box;
+}
+
+.benchmark-viewport {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.benchmark-panel,
+.benchmark-unavailable {
+  display: grid;
+  align-content: start;
+  gap: 0.7rem;
+  border-left: 1px solid #3a3a3a;
+  background: #262626;
+  padding: 0.8rem;
+  overflow: auto;
+  font-size: 12px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.benchmark-unavailable {
+  grid-column: 1 / -1;
+  place-content: center;
+  text-align: center;
+}
+
+.benchmark-panel header,
+.benchmark-actions,
+.benchmark-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.benchmark-panel header {
+  justify-content: space-between;
+  border-bottom: 1px solid #3a3a3a;
+  padding-bottom: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.benchmark-panel h1,
+.benchmark-panel h2 {
+  margin: 0;
+  color: #f2f2f2;
+}
+
+.benchmark-panel h1 {
+  font-size: 16px;
+}
+
+.benchmark-panel h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.benchmark-panel header span,
+.benchmark-panel footer,
+.benchmark-message {
+  color: #9c9c9c;
+}
+
+.benchmark-section {
+  display: grid;
+  gap: 0.55rem;
+  border: 1px solid #3a3a3a;
+  background: #2d2d2d;
+  padding: 0.65rem;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.benchmark-section label {
+  display: grid;
+  gap: 0.25rem;
+  color: #aaa;
+}
+
+.benchmark-inline label {
+  flex: 1;
+  min-width: 0;
+}
+
+.benchmark-panel input,
+.benchmark-panel select,
+.benchmark-panel textarea,
+.benchmark-panel button {
+  border: 1px solid #464646;
+  background: #1f1f1f;
+  color: #e1e1e1;
+  min-height: 28px;
+  padding: 0.35rem 0.45rem;
+  font: inherit;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.benchmark-panel textarea {
+  min-height: 54px;
+  resize: vertical;
+}
+
+.benchmark-panel button {
+  cursor: pointer;
+}
+
+.benchmark-panel button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.benchmark-actions {
+  flex-wrap: wrap;
+}
+
+.benchmark-progress {
+  height: 8px;
+  border: 1px solid #464646;
+  background: #1f1f1f;
+}
+
+.benchmark-progress span {
+  display: block;
+  height: 100%;
+  background: #5fa8d3;
+  transition: width 180ms linear;
+}
+
+.benchmark-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.benchmark-metrics div {
+  display: grid;
+  gap: 0.1rem;
+  border-top: 1px solid #3a3a3a;
+  padding-top: 0.3rem;
+}
+
+.benchmark-metrics dt {
+  color: #969696;
+}
+
+.benchmark-metrics dd {
+  margin: 0;
+  color: #f0f0f0;
+}
+
+.benchmark-history-table {
+  display: grid;
+  gap: 0.45rem;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.benchmark-history-table article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  border: 1px solid #3a3a3a;
+  background: #242424;
+  padding: 0.35rem;
+  min-width: 0;
+}
+
+.benchmark-history-table article.selected {
+  border-color: #5fa8d3;
+}
+
+.benchmark-history-table article > button {
+  display: grid;
+  justify-items: start;
+  gap: 0.18rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  min-width: 0;
+}
+
+.benchmark-history-table article > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.benchmark-history-table span,
+.benchmark-history-table strong,
+.benchmark-panel footer {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  .benchmark-page {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(320px, 52vh) minmax(0, 1fr);
+  }
+
+  .benchmark-panel {
+    border-top: 1px solid #3a3a3a;
+    border-left: 0;
+  }
+}
+
 .editor-tree-row,
 .editor-table button {
   min-height: 23px;

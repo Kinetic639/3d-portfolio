@@ -152,11 +152,54 @@ type MetricsSnapshot = {
 
 type TerrainRenderMode = "instanced" | "surface";
 
+export type BenchmarkCameraTransform = {
+  position: { x: number; y: number; z: number };
+  target: { x: number; y: number; z: number };
+};
+
+export type PortfolioBenchmarkBridge = {
+  getReadyState: () => {
+    phase: ExperiencePhase;
+    mapId: string;
+    mapName: string;
+    mapRevision: string | null;
+    terrainReady: boolean;
+    shaderWarm: boolean;
+    metricsReady: boolean;
+  };
+  loadMap: (mapId: string) => boolean;
+  enterLoadedMap: () => void;
+  prepareReveal: () => void;
+  startReveal: () => void;
+  setCamera: (transform: BenchmarkCameraTransform) => void;
+  resetCamera: () => void;
+  setInputEnabled: (enabled: boolean) => void;
+  setDpr: (dpr: number | null) => void;
+  getWorldMetrics: () => {
+    mapDimensions: { x: number; y: number; z: number };
+    logicalCells: number;
+    solidBlocks: number;
+    airCells: number;
+    visibleFaces: number;
+    renderedTerrainVertices: number;
+    renderedTerrainTriangles: number;
+    activeChunks: number;
+    dirtyChunks: number;
+    staticPrefabCount: number;
+    dynamicPrefabCount: number;
+    interactiveObjectCount: number;
+    visibleObjectCount: number;
+    chunkRebuildCount: number | null;
+    staticBatchRebuildCount: number | null;
+  };
+};
+
 declare global {
   interface Window {
     __portfolioExperienceMetrics?: MetricsSnapshot & {
       phase: ExperiencePhase;
     };
+    __portfolioBenchmarkBridge?: PortfolioBenchmarkBridge;
   }
 }
 
@@ -264,7 +307,13 @@ const SURFACE_FRAGMENT_SHADER = `
   }
 `;
 
-export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MAP_ID }: { initialMapId?: string }) {
+export default function PortfolioExperience({
+  initialMapId = DEFAULT_AUTHORED_MAP_ID,
+  benchmarkMode = false,
+}: {
+  initialMapId?: string;
+  benchmarkMode?: boolean;
+}) {
   const [webglState, setWebglState] = useState<"checking" | "available" | "unavailable">("checking");
   const [metrics, setMetrics] = useState<(MetricsSnapshot & { phase: ExperiencePhase }) | null>(null);
   const [editorRequested, setEditorRequested] = useState(false);
@@ -272,7 +321,7 @@ export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MA
   const [editorLayout, setEditorLayout] = useState<EditorViewportLayoutState>(DEFAULT_VIEWPORT_LAYOUT);
   const [mapUi, setMapUi] = useState<MapUiState | null>(null);
   const phase = useExperienceStore((state) => state.phase);
-  const editorEnabled = process.env.NODE_ENV !== "production" && editorRequested;
+  const editorEnabled = !benchmarkMode && process.env.NODE_ENV !== "production" && editorRequested;
   const editorActive = editorEnabled && phase === "explore";
   const canOpenEditor = process.env.NODE_ENV !== "production" && phase === "explore" && !editorRequested;
   const effectiveEditorLayout = getEffectiveViewportLayout(editorActive ? editorLayout : DEFAULT_VIEWPORT_LAYOUT);
@@ -364,13 +413,14 @@ export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MA
               <ExperienceScene
                 initialMapId={initialMapId}
                 editorEnabled={editorEnabled}
+                benchmarkMode={benchmarkMode}
                 onEditorStateChange={setEditorPanel}
                 onMapUiStateChange={setMapUi}
                 onCloseEditor={() => setEditorRequested(false)}
               />
             </Canvas>
           </div>
-          <ExperienceOverlay phase={phase} />
+          {benchmarkMode ? null : <ExperienceOverlay phase={phase} />}
           {metrics && !editorActive ? (
             process.env.NODE_ENV === "production" ? (
               <ProductionFpsBadge metrics={metrics} />
@@ -388,7 +438,7 @@ export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MA
               Editor
             </button>
           ) : null}
-          {mapUi && !editorActive ? <MapBrowserOverlay state={mapUi} /> : null}
+          {mapUi && !editorActive && !benchmarkMode ? <MapBrowserOverlay state={mapUi} /> : null}
         </>
       ) : (
         <div className="experience-fallback">
@@ -729,12 +779,14 @@ function createInitialExperienceMapState(mapId: string) {
 function ExperienceScene({
   initialMapId,
   editorEnabled,
+  benchmarkMode,
   onEditorStateChange,
   onMapUiStateChange,
   onCloseEditor,
 }: {
   initialMapId: string;
   editorEnabled: boolean;
+  benchmarkMode: boolean;
   onEditorStateChange: (state: MapEditorToolbarProps | null) => void;
   onMapUiStateChange: (state: MapUiState | null) => void;
   onCloseEditor: () => void;
@@ -795,6 +847,8 @@ function ExperienceScene({
   const reducedMotion = usePrefersReducedMotion();
   const { gl, scene, camera } = useThree();
   const initializedRef = useRef(false);
+  const originalPixelRatioRef = useRef<number | null>(null);
+  const [benchmarkInputEnabled, setBenchmarkInputEnabled] = useState(false);
   const editorAvailable = editorEnabled && phase === "explore";
   const lastEditorPanelSignature = useRef<string | null>(null);
   const activeRenderMode: TerrainRenderMode = phase === "explore" ? renderMode : "instanced";
@@ -1184,6 +1238,33 @@ function ExperienceScene({
       setEditorMessage({ type: "error", text: error instanceof Error ? error.message : "Map load failed." });
     }
   };
+
+  const loadBenchmarkMap = useCallback((nextMapId: string) => {
+    try {
+      const draft = loadMapDraft(localStorage, nextMapId);
+      const loaded = draft ? createLoadedMapState(draft) : loadMapStateSync(nextMapId, { includeDevelopment: true });
+      const nextSession = new MapEditorSession(loaded.world, loaded.entities);
+      const nextTerrain = createTerrainDataFromWorld(nextSession.world);
+
+      setEditorSession(nextSession);
+      setCurrentMap(loaded.definition);
+      mapHistoryRef.current = { undo: [], redo: [] };
+      setActiveMapId(loaded.definition.id);
+      dispatchBrowsing({ type: "changeMap", mapId: loaded.definition.id });
+      setTerrain(nextTerrain);
+      setLastRebuiltChunks(nextTerrain.chunks.map((chunk) => chunk.id));
+      setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
+      setSelectedCell(null);
+      setSelectedMarkerId(null);
+      setSelectedEntityIds([]);
+      setEditorMessage({ type: "info", text: `Loaded ${loaded.definition.name}.` });
+      setEditorRevision((revision) => revision + 1);
+      return true;
+    } catch (error) {
+      setEditorMessage({ type: "error", text: error instanceof Error ? error.message : "Map load failed." });
+      return false;
+    }
+  }, []);
 
   const handleNewMap = () => {
     if (snapshot.hasUnsavedChanges && !window.confirm("Discard unsaved edits and create a blank development map?")) {
@@ -1881,6 +1962,101 @@ function ExperienceScene({
     };
   }, [markExplore, phase, reducedMotion, uniforms.uExpansionProgress]);
 
+  useEffect(() => {
+    if (!benchmarkMode) {
+      return;
+    }
+
+    const defaultCamera: BenchmarkCameraTransform = {
+      position: { x: 42, y: 52, z: 62 },
+      target: { x: 0, y: 0, z: 0 },
+    };
+
+    window.__portfolioBenchmarkBridge = {
+      getReadyState: () => ({
+        phase,
+        mapId: activeMapId,
+        mapName: currentMap.name,
+        mapRevision: currentMap.metadata.updatedAt ?? null,
+        terrainReady: terrain.chunks.length > 0 && terrain.surfaceChunks.length > 0,
+        shaderWarm: initializedRef.current,
+        metricsReady: Boolean(window.__portfolioExperienceMetrics),
+      }),
+      loadMap: loadBenchmarkMap,
+      enterLoadedMap: () => {
+        uniforms.uExpansionProgress.value = 1;
+        setBenchmarkInputEnabled(false);
+        markExplore();
+      },
+      prepareReveal: () => {
+        uniforms.uExpansionProgress.value = 0;
+        setBenchmarkInputEnabled(false);
+        markReady();
+      },
+      startReveal: () => {
+        startExpansion();
+      },
+      setCamera: (transform) => {
+        const target = new THREE.Vector3(transform.target.x, transform.target.y, transform.target.z);
+        camera.position.set(transform.position.x, transform.position.y, transform.position.z);
+        camera.lookAt(target);
+      },
+      resetCamera: () => {
+        const target = new THREE.Vector3(defaultCamera.target.x, defaultCamera.target.y, defaultCamera.target.z);
+        camera.position.set(defaultCamera.position.x, defaultCamera.position.y, defaultCamera.position.z);
+        camera.lookAt(target);
+      },
+      setInputEnabled: setBenchmarkInputEnabled,
+      setDpr: (dpr) => {
+        if (originalPixelRatioRef.current === null) {
+          originalPixelRatioRef.current = gl.getPixelRatio();
+        }
+        gl.setPixelRatio(dpr ?? originalPixelRatioRef.current);
+      },
+      getWorldMetrics: () => {
+        const stats = editorSession.world.getStats();
+        return {
+          mapDimensions: { x: currentMap.dimensions.width, y: currentMap.dimensions.height, z: currentMap.dimensions.depth },
+          logicalCells: stats.logicalCells,
+          solidBlocks: stats.nonAirBlocks,
+          airCells: stats.airCells,
+          visibleFaces: terrain.surfaceQuadCount,
+          renderedTerrainVertices: terrain.surfaceQuadCount * 4,
+          renderedTerrainTriangles: terrain.surfaceTriangleCount,
+          activeChunks: terrain.chunks.length,
+          dirtyChunks: editorSession.world.dirtyChunks.size,
+          staticPrefabCount: currentMap.entities.filter((entity) => entity.entityType === "prefab" && entity.appearance.visibleAtRuntime).length,
+          dynamicPrefabCount: 0,
+          interactiveObjectCount: currentMap.entities.filter((entity) => entity.appearance.visibleAtRuntime).length + currentMap.markers.filter((marker) => marker.runtimeVisible).length,
+          visibleObjectCount: currentMap.entities.filter((entity) => entity.appearance.visibleAtRuntime).length,
+          chunkRebuildCount: null,
+          staticBatchRebuildCount: null,
+        };
+      },
+    };
+
+    return () => {
+      if (originalPixelRatioRef.current !== null) {
+        gl.setPixelRatio(originalPixelRatioRef.current);
+      }
+      delete window.__portfolioBenchmarkBridge;
+    };
+  }, [
+    activeMapId,
+    benchmarkMode,
+    camera,
+    currentMap,
+    editorSession.world,
+    gl,
+    loadBenchmarkMap,
+    markExplore,
+    markReady,
+    phase,
+    startExpansion,
+    terrain,
+    uniforms.uExpansionProgress,
+  ]);
+
   useFrame(({ clock }) => {
     // Shader uniforms are external Three.js state; updating them here avoids React rerenders.
     // eslint-disable-next-line react-hooks/immutability
@@ -1903,7 +2079,7 @@ function ExperienceScene({
       />
       <WorldEntryItem visible={phase === "ready"} onActivate={startExpansion} />
       <ConstrainedMapControls
-        enabled={isInteractivePhase(phase) && !entityTransformDragging}
+        enabled={benchmarkMode ? benchmarkInputEnabled : isInteractivePhase(phase) && !entityTransformDragging}
         phase={phase}
         focusPreset={activeCameraPreset}
         reducedMotion={reducedMotion}
