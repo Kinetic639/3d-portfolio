@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPortfolioPhase4MapDefinition, createTinyExampleMapDefinition } from "./bundled-maps";
+import { createPhase45AuthoringTestMapDefinition, createPortfolioPhase4MapDefinition, createTinyExampleMapDefinition } from "./bundled-maps";
 import {
   cloneMapDefinition,
   createBlankMapDefinition,
@@ -15,6 +15,7 @@ describe("map definitions", () => {
     expect(validateMapRegistry()).toEqual({ ok: true });
     expect(validateMapDefinition(createPortfolioPhase4MapDefinition()).ok).toBe(true);
     expect(validateMapDefinition(createTinyExampleMapDefinition()).ok).toBe(true);
+    expect(validateMapDefinition(createPhase45AuthoringTestMapDefinition()).ok).toBe(true);
   });
 
   it("rejects malformed block, zone, marker and spawn data", () => {
@@ -72,5 +73,65 @@ describe("map definitions", () => {
     const map = createBlankMapDefinition({ id: "blank-map", name: "Blank Map" });
     expect(validateMapDefinition(map).ok).toBe(true);
     expect(() => createLoadedMapState(map)).not.toThrow();
+  });
+
+  it("migrates older maps with missing Phase 4.5 arrays", () => {
+    const legacy = createTinyExampleMapDefinition();
+    const input = {
+      ...legacy,
+      schemaVersion: 1,
+      entities: undefined,
+      entityGroups: undefined,
+      navigation: undefined,
+    };
+
+    const result = validateMapDefinition(input);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.map.schemaVersion).toBe(2);
+      expect(result.map.entities).toEqual([]);
+      expect(result.map.entityGroups).toEqual([]);
+      expect(result.map.navigation).toEqual({ nodes: [], edges: [], routes: [] });
+    }
+  });
+
+  it("rejects invalid entity and navigation references", () => {
+    const map = createPhase45AuthoringTestMapDefinition();
+    map.entities.push({ ...map.entities[0], id: "bad-entity", zoneId: "missing-zone" });
+    map.navigation.edges.push({ id: "bad-edge", fromNodeId: "missing-node", toNodeId: "walk-a", bidirectional: true, locked: false });
+    map.navigation.routes.push({ id: "bad-route", name: "Bad route", nodeIds: ["walk-a", "missing-node"], tags: [] });
+
+    const result = validateMapDefinition(map);
+    expect(result.ok).toBe(false);
+    expect(result.ok ? "" : result.errors.join("\n")).toContain("unknown zone");
+    expect(result.ok ? "" : result.errors.join("\n")).toContain("unknown from node");
+    expect(result.ok ? "" : result.errors.join("\n")).toContain("unknown node");
+  });
+
+  it("round-trips complete Phase 4.5 map data through clone, duplicate and draft storage", () => {
+    const map = createPhase45AuthoringTestMapDefinition();
+    const duplicate = duplicateMapDefinition(map, "phase45-authoring-test-copy", "Phase 4.5 Copy");
+    duplicate.entities[0].name = "Changed";
+    duplicate.navigation.nodes[0].position.x = 99;
+
+    expect(map.entities[0].name).not.toBe("Changed");
+    expect(map.navigation.nodes[0].position.x).not.toBe(99);
+
+    const backing = new Map<string, string>();
+    const storage = {
+      setItem: (key: string, value: string) => void backing.set(key, value),
+      getItem: (key: string) => backing.get(key) ?? null,
+      removeItem: (key: string) => void backing.delete(key),
+      clear: () => void backing.clear(),
+      key: () => null,
+      get length() {
+        return backing.size;
+      },
+    } as Storage;
+
+    const saved = saveMapDraft(storage, map);
+    const parsed = validateMapDefinition(JSON.parse(backing.get(`portfolio-map-definition-draft.v1:${map.id}`) ?? "{}"));
+    expect(saved.entities).toHaveLength(map.entities.length);
+    expect(parsed.ok).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { createPortfolioPhase4MapDefinition, createTinyExampleMapDefinition } from "./bundled-maps";
+import { createPhase45AuthoringTestMapDefinition, createPortfolioPhase4MapDefinition, createTinyExampleMapDefinition } from "./bundled-maps";
 import {
   cloneMapDefinition,
   createLoadedMapState,
@@ -32,6 +32,7 @@ type BundledMapSource = {
 const BUNDLED_MAPS: BundledMapSource[] = [
   createBundledEntry(createPortfolioPhase4MapDefinition, "bundled:portfolio-phase4", false),
   createBundledEntry(createTinyExampleMapDefinition, "bundled:tiny-example", true),
+  createBundledEntry(createPhase45AuthoringTestMapDefinition, "bundled:phase45-authoring-test", true),
 ];
 
 export function listMapRegistryEntries(options: { includeDevelopment?: boolean } = {}) {

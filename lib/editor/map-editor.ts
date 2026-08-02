@@ -8,8 +8,25 @@ import {
 } from "@/lib/world/map-document";
 import { createFlatVoxelWorld, type RenderChunk, type VoxelWorld } from "@/lib/world/voxel-world";
 import type { GridCoordinate } from "@/lib/world/world-config";
+import type { TerrainCellMutation } from "./terrain-brushes";
 
-export type EditorTool = "select" | "paint" | "add" | "erase" | "raise" | "lower" | "zone" | "marker";
+export type EditorTool =
+  | "select"
+  | "paint"
+  | "add"
+  | "erase"
+  | "raise"
+  | "lower"
+  | "flatten"
+  | "fill"
+  | "clear"
+  | "path"
+  | "removePath"
+  | "zone"
+  | "removeZone"
+  | "marker"
+  | "entity"
+  | "navigation";
 
 export type EditorMessage = {
   type: "info" | "error";
@@ -102,8 +119,20 @@ export class MapEditorSession {
         return this.raise(coordinate, paintBlockId);
       case "lower":
         return this.lower(coordinate);
+      case "flatten":
+        return this.flattenColumn(coordinate, paintBlockId);
+      case "fill":
+        return this.addBlock(coordinate, paintBlockId);
+      case "clear":
+        return this.erase(coordinate);
+      case "path":
+        return this.paint(coordinate, BLOCK_IDS.Path);
+      case "removePath":
+        return this.paint(coordinate, BLOCK_IDS.Ground);
       case "zone":
         return this.assignZone(coordinate, zoneId);
+      case "removeZone":
+        return this.assignZone(coordinate, 0);
       case "marker":
         return this.placeMarker(coordinate);
       case "select":
@@ -224,6 +253,47 @@ export class MapEditorSession {
         before: this.world.getBlock(target.x, target.y, target.z),
         after: BLOCK_IDS.Air,
       }],
+    });
+  }
+
+  flattenColumn(coordinate: GridCoordinate, paintBlockId: BlockId): EditorActionResult {
+    const cells: CellChange[] = [];
+    const targetBlock = paintBlockId === BLOCK_IDS.Air ? BLOCK_IDS.Ground : paintBlockId;
+
+    for (let y = 0; y < this.world.config.height; y += 1) {
+      const before = this.world.getBlock(coordinate.x, y, coordinate.z);
+      const after = y <= coordinate.y ? targetBlock : BLOCK_IDS.Air;
+      cells.push({ coordinate: { x: coordinate.x, y, z: coordinate.z }, before, after });
+    }
+
+    return this.applyCommand({ label: "Flatten", cells });
+  }
+
+  applyTerrainMutations(label: string, mutations: TerrainCellMutation[]): EditorActionResult {
+    const merged = new Map<string, TerrainCellMutation>();
+    for (const mutation of mutations) {
+      const key = coordinateKey(mutation.coordinate);
+      const existing = merged.get(key);
+      merged.set(key, existing ? { ...mutation, beforeBlock: existing.beforeBlock, beforeZone: existing.beforeZone } : mutation);
+    }
+    const uniqueMutations = [...merged.values()];
+
+    return this.applyCommand({
+      label,
+      cells: uniqueMutations
+        .filter((mutation) => mutation.beforeBlock !== mutation.afterBlock)
+        .map((mutation) => ({
+          coordinate: mutation.coordinate,
+          before: mutation.beforeBlock,
+          after: mutation.afterBlock,
+        })),
+      zones: uniqueMutations
+        .filter((mutation) => mutation.beforeZone !== mutation.afterZone)
+        .map((mutation) => ({
+          coordinate: mutation.coordinate,
+          before: mutation.beforeZone,
+          after: mutation.afterZone,
+        })),
     });
   }
 

@@ -9,8 +9,23 @@ import {
 } from "@/lib/world/map-document";
 import { VoxelWorld } from "@/lib/world/voxel-world";
 import { WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
+import {
+  cloneEntityGroup,
+  clonePlacedEntity,
+  ENTITY_COLLISION_MODES,
+  ENTITY_PRIMITIVE_TYPES,
+  ENTITY_TYPES,
+  type EntityGroupDefinition,
+  type PlacedMapEntity,
+} from "./map-entities";
+import {
+  cloneNavigationDefinition,
+  createEmptyNavigationDefinition,
+  type MapNavigationDefinition,
+  type NavigationNodeType,
+} from "./map-navigation";
 
-export const MAP_DEFINITION_SCHEMA_VERSION = 1;
+export const MAP_DEFINITION_SCHEMA_VERSION = 2;
 
 export type MapRuntimeMode = "baked-static" | "dynamic-voxel";
 export type MapKind = "portfolio" | "interior" | "minigame" | "test" | "custom";
@@ -85,7 +100,7 @@ export type MapPresentationConfig = {
 };
 
 export type MapDefinition = {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   id: string;
   name: string;
   description?: string;
@@ -101,6 +116,9 @@ export type MapDefinition = {
   zoneAssignments: MapZoneAssignment[];
   zones: MapZoneDefinition[];
   markers: MapMarkerDefinition[];
+  entities: PlacedMapEntity[];
+  entityGroups: EntityGroupDefinition[];
+  navigation: MapNavigationDefinition;
   spawnPoints: MapSpawnPoint[];
   cameraPresets: MapCameraPreset[];
   defaultSpawnId?: string;
@@ -132,6 +150,9 @@ export function createMapDefinitionFromWorld(input: {
   world: VoxelWorld;
   zones: MapZoneDefinition[];
   markers: MapMarkerDefinition[];
+  entities?: PlacedMapEntity[];
+  entityGroups?: EntityGroupDefinition[];
+  navigation?: MapNavigationDefinition;
   spawnPoints: MapSpawnPoint[];
   cameraPresets: MapCameraPreset[];
   defaultSpawnId?: string;
@@ -162,6 +183,9 @@ export function createMapDefinitionFromWorld(input: {
     zoneAssignments: document.zones,
     zones: input.zones.map(cloneZone),
     markers: input.markers.map(cloneMarker),
+    entities: input.entities?.map(clonePlacedEntity) ?? [],
+    entityGroups: input.entityGroups?.map(cloneEntityGroup) ?? [],
+    navigation: input.navigation ? cloneNavigationDefinition(input.navigation) : createEmptyNavigationDefinition(),
     spawnPoints: input.spawnPoints.map(cloneSpawnPoint),
     cameraPresets: input.cameraPresets.map(cloneCameraPreset),
     defaultSpawnId: input.defaultSpawnId,
@@ -215,17 +239,21 @@ export function createBlankMapDefinition(input: {
 }
 
 export function cloneMapDefinition(map: MapDefinition): MapDefinition {
+  const migrated = migrateMapDefinition(map);
   return {
-    ...map,
-    dimensions: { ...map.dimensions },
-    blocks: { ...map.blocks, edits: map.blocks.edits.map((edit) => ({ ...edit })) },
-    zoneAssignments: map.zoneAssignments.map((zone) => ({ ...zone })),
-    zones: map.zones.map(cloneZone),
-    markers: map.markers.map(cloneMarker),
-    spawnPoints: map.spawnPoints.map(cloneSpawnPoint),
-    cameraPresets: map.cameraPresets.map(cloneCameraPreset),
-    presentation: { ...map.presentation },
-    metadata: { ...map.metadata },
+    ...migrated,
+    dimensions: { ...migrated.dimensions },
+    blocks: { ...migrated.blocks, edits: migrated.blocks.edits.map((edit) => ({ ...edit })) },
+    zoneAssignments: migrated.zoneAssignments.map((zone) => ({ ...zone })),
+    zones: migrated.zones.map(cloneZone),
+    markers: migrated.markers.map(cloneMarker),
+    entities: migrated.entities.map(clonePlacedEntity),
+    entityGroups: migrated.entityGroups.map(cloneEntityGroup),
+    navigation: cloneNavigationDefinition(migrated.navigation),
+    spawnPoints: migrated.spawnPoints.map(cloneSpawnPoint),
+    cameraPresets: migrated.cameraPresets.map(cloneCameraPreset),
+    presentation: { ...migrated.presentation },
+    metadata: { ...migrated.metadata },
   };
 }
 
@@ -280,7 +308,7 @@ export function validateMapDefinition(input: unknown): MapDefinitionValidationRe
     return { ok: false, errors: ["Map definition must be an object."] };
   }
 
-  const map = input as MapDefinition;
+  const map = migrateMapDefinition(input as MapDefinition);
   if (map.schemaVersion !== MAP_DEFINITION_SCHEMA_VERSION) {
     errors.push(`Unsupported map schema version: ${String(map.schemaVersion)}.`);
   }
@@ -333,6 +361,9 @@ export function validateMapDefinition(input: unknown): MapDefinitionValidationRe
     markerIds.add(marker.id);
   }
 
+  validatePlacedEntities(map.entities, map.entityGroups, zoneIds, markerIds, errors);
+  validateNavigation(map.navigation, zoneIds, errors);
+
   const spawnIds = new Set<string>();
   for (const spawn of map.spawnPoints ?? []) {
     if (!isStableId(spawn.id)) errors.push(`Invalid spawn id: ${String(spawn.id)}.`);
@@ -359,6 +390,20 @@ export function validateMapDefinition(input: unknown): MapDefinitionValidationRe
   validateZoneAssignments(map.zoneAssignments, numericZoneIds, errors);
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true, map: cloneMapDefinition(map) };
+}
+
+export function migrateMapDefinition(input: MapDefinition): MapDefinition {
+  return {
+    ...input,
+    schemaVersion: MAP_DEFINITION_SCHEMA_VERSION,
+    entities: Array.isArray(input.entities) ? input.entities.map(clonePlacedEntity) : [],
+    entityGroups: Array.isArray(input.entityGroups) ? input.entityGroups.map(cloneEntityGroup) : [],
+    navigation: input.navigation ? cloneNavigationDefinition({
+      nodes: Array.isArray(input.navigation.nodes) ? input.navigation.nodes : [],
+      edges: Array.isArray(input.navigation.edges) ? input.navigation.edges : [],
+      routes: Array.isArray(input.navigation.routes) ? input.navigation.routes : [],
+    }) : createEmptyNavigationDefinition(),
+  };
 }
 
 export function createDefaultOverviewCameraPreset(): MapCameraPreset {
@@ -434,6 +479,139 @@ function validateZoneAssignments(assignments: unknown, validZoneNumbers: Set<num
   }
 }
 
+function validatePlacedEntities(
+  entities: unknown,
+  groups: unknown,
+  zoneIds: Set<string>,
+  markerIds: Set<string>,
+  errors: string[],
+) {
+  if (!Array.isArray(entities)) {
+    errors.push("Map entities must be an array.");
+    return;
+  }
+
+  if (!Array.isArray(groups)) {
+    errors.push("Entity groups must be an array.");
+    return;
+  }
+
+  const groupIds = new Set<string>();
+  for (const group of groups) {
+    if (!isRecord(group) || !isStableId(group.id)) {
+      errors.push(`Invalid entity group id: ${String(isRecord(group) ? group.id : group)}.`);
+      continue;
+    }
+    const groupId = group.id;
+    if (groupIds.has(groupId)) errors.push(`Duplicate entity group id: ${groupId}.`);
+    groupIds.add(groupId);
+  }
+
+  const ids = new Set<string>();
+  for (const entity of entities) {
+    if (!isRecord(entity)) {
+      errors.push("Every map entity must be an object.");
+      continue;
+    }
+    if (!isStableId(entity.id)) errors.push(`Invalid entity id: ${String(entity.id)}.`);
+    if (ids.has(entity.id as string)) errors.push(`Duplicate entity id: ${String(entity.id)}.`);
+    if (typeof entity.name !== "string" || entity.name.trim().length === 0) errors.push(`Entity ${String(entity.id)} name is required.`);
+    if (!ENTITY_TYPES.includes(entity.entityType as never)) errors.push(`Entity ${String(entity.id)} has invalid type.`);
+    if (!ENTITY_PRIMITIVE_TYPES.includes(entity.primitiveType as never)) errors.push(`Entity ${String(entity.id)} has invalid primitive.`);
+    if (!ENTITY_COLLISION_MODES.includes(entity.collisionMode as never)) errors.push(`Entity ${String(entity.id)} has invalid collision mode.`);
+    if (!isSerializableTransform(entity.transform)) errors.push(`Entity ${String(entity.id)} transform is invalid.`);
+    if (!isFootprint(entity.footprint)) errors.push(`Entity ${String(entity.id)} footprint is invalid.`);
+    if (!isRecord(entity.appearance) || typeof entity.appearance.color !== "string" || !/^#[0-9a-f]{6}$/i.test(entity.appearance.color)) {
+      errors.push(`Entity ${String(entity.id)} must include a hex colour.`);
+    }
+    if (typeof entity.zoneId === "string" && !zoneIds.has(entity.zoneId)) errors.push(`Entity ${String(entity.id)} references unknown zone ${entity.zoneId}.`);
+    if (typeof entity.markerId === "string" && !markerIds.has(entity.markerId)) errors.push(`Entity ${String(entity.id)} references unknown marker ${entity.markerId}.`);
+    if (typeof entity.groupId === "string" && !groupIds.has(entity.groupId)) errors.push(`Entity ${String(entity.id)} references unknown group ${entity.groupId}.`);
+    if (!Array.isArray(entity.tags) || !entity.tags.every((tag) => typeof tag === "string")) errors.push(`Entity ${String(entity.id)} tags must be strings.`);
+    ids.add(entity.id as string);
+  }
+}
+
+function validateNavigation(navigation: unknown, zoneIds: Set<string>, errors: string[]) {
+  if (!isRecord(navigation)) {
+    errors.push("Navigation must be an object.");
+    return;
+  }
+
+  const nodeTypes: NavigationNodeType[] = ["walk", "route-junction", "wait-point", "look-at", "character-spawn", "bird-perch"];
+  const nodes = navigation.nodes;
+  const edges = navigation.edges;
+  const routes = navigation.routes;
+  if (!Array.isArray(nodes) || !Array.isArray(edges) || !Array.isArray(routes)) {
+    errors.push("Navigation nodes, edges and routes must be arrays.");
+    return;
+  }
+
+  const nodeIds = new Set<string>();
+  for (const node of nodes) {
+    if (!isRecord(node) || !isStableId(node.id)) {
+      errors.push(`Invalid navigation node id: ${String(isRecord(node) ? node.id : node)}.`);
+      continue;
+    }
+    const nodeId = node.id;
+    if (nodeIds.has(nodeId)) errors.push(`Duplicate navigation node id: ${nodeId}.`);
+    if (!nodeTypes.includes(node.type as NavigationNodeType)) errors.push(`Navigation node ${nodeId} has invalid type.`);
+    if (!isFiniteVector(node.position)) errors.push(`Navigation node ${nodeId} position is invalid.`);
+    if (typeof node.zoneId === "string" && !zoneIds.has(node.zoneId)) errors.push(`Navigation node ${nodeId} references unknown zone ${node.zoneId}.`);
+    nodeIds.add(nodeId);
+  }
+
+  const edgeIds = new Set<string>();
+  for (const edge of edges) {
+    if (!isRecord(edge) || !isStableId(edge.id)) {
+      errors.push(`Invalid navigation edge id: ${String(isRecord(edge) ? edge.id : edge)}.`);
+      continue;
+    }
+    const edgeId = edge.id;
+    const cost = edge.cost;
+    if (edgeIds.has(edgeId)) errors.push(`Duplicate navigation edge id: ${edgeId}.`);
+    if (!nodeIds.has(edge.fromNodeId as string)) errors.push(`Navigation edge ${edgeId} references unknown from node ${String(edge.fromNodeId)}.`);
+    if (!nodeIds.has(edge.toNodeId as string)) errors.push(`Navigation edge ${edgeId} references unknown to node ${String(edge.toNodeId)}.`);
+    if (cost !== undefined && (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0)) errors.push(`Navigation edge ${edgeId} cost is invalid.`);
+    edgeIds.add(edgeId);
+  }
+
+  const routeIds = new Set<string>();
+  for (const route of routes) {
+    if (!isRecord(route) || !isStableId(route.id)) {
+      errors.push(`Invalid navigation route id: ${String(isRecord(route) ? route.id : route)}.`);
+      continue;
+    }
+    const routeId = route.id;
+    if (routeIds.has(routeId)) errors.push(`Duplicate navigation route id: ${routeId}.`);
+    if (!Array.isArray(route.nodeIds)) {
+      errors.push(`Navigation route ${routeId} node ids must be an array.`);
+    } else {
+      for (const nodeId of route.nodeIds) {
+        if (!nodeIds.has(nodeId as string)) errors.push(`Navigation route ${routeId} references unknown node ${String(nodeId)}.`);
+      }
+    }
+    routeIds.add(routeId);
+  }
+}
+
+function isSerializableTransform(value: unknown) {
+  if (!isRecord(value)) return false;
+  return isFiniteVector(value.position) && isFiniteVector(value.rotation) && isFiniteVector(value.scale);
+}
+
+function isFiniteVector(value: unknown) {
+  if (!isRecord(value)) return false;
+  return Number.isFinite(value.x) && Number.isFinite(value.y) && Number.isFinite(value.z);
+}
+
+function isFootprint(value: unknown) {
+  if (!isRecord(value)) return false;
+  return typeof value.width === "number" && Number.isFinite(value.width) && value.width > 0 &&
+    typeof value.depth === "number" && Number.isFinite(value.depth) && value.depth > 0 &&
+    typeof value.height === "number" && Number.isFinite(value.height) && value.height > 0;
+}
+
 function hasExpectedDimensions(map: MapDefinition) {
   return (
     map.dimensions?.width === WORLD_CONFIG.width &&
@@ -472,7 +650,7 @@ function cloneCameraPreset(preset: MapCameraPreset): MapCameraPreset {
   };
 }
 
-function isStableId(value: unknown) {
+function isStableId(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
 }
 

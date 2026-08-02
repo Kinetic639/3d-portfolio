@@ -9,6 +9,8 @@ import {
   type MapMarkerDefinition,
   type MapZoneDefinition,
 } from "./map-definition";
+import { createPlacedEntity, type EntityGroupDefinition, type PlacedMapEntity } from "./map-entities";
+import type { MapNavigationDefinition } from "./map-navigation";
 
 const PHASE4_CREATED_AT = "2026-08-01T00:00:00.000Z";
 
@@ -112,6 +114,150 @@ export function createTinyExampleMapDefinition(): MapDefinition {
       updatedAt: PHASE4_CREATED_AT,
       authoringVersion: "phase-4",
     },
+  });
+}
+
+export function createPhase45AuthoringTestMapDefinition(): MapDefinition {
+  const world = new VoxelWorld();
+  forRect(world, 26, 26, 37, 37, 0, BLOCK_IDS.Ground);
+  forRect(world, 30, 24, 33, 39, 0, BLOCK_IDS.Path);
+  forRect(world, 24, 30, 39, 33, 0, BLOCK_IDS.Path);
+  addSimpleMass(world, 26, 26, 29, 29, 1, BLOCK_IDS.ZoneGround);
+  world.setBlock(36, 36, 0, BLOCK_IDS.Air);
+  forRectZone(world, 26, 26, 37, 37, 0, 1);
+  preserveCenterPlaza(world);
+  world.clearDirtyChunks();
+
+  const zones: MapZoneDefinition[] = [{
+    id: "authoring-zone",
+    numericId: 1,
+    label: "Authoring Zone",
+    shortLabel: "Tools",
+    description: "Development-only fixture for reusable map-authoring tools.",
+    color: "#22c55e",
+    displayOrder: 1,
+    visibleInLegend: true,
+    overlayVisible: true,
+    locked: false,
+    defaultFocusMarkerId: "authoring-marker",
+  }];
+
+  const markers: MapMarkerDefinition[] = [{
+    id: "authoring-marker",
+    type: "marker",
+    markerType: "info",
+    label: "Authoring Marker",
+    zoneId: "authoring-zone",
+    gridPosition: { x: 31, y: 1, z: 31 },
+    rotationY: 0,
+    developmentVisible: true,
+    runtimeVisible: true,
+    interactionRadius: 1.1,
+  }];
+
+  const entities: PlacedMapEntity[] = [
+    createAuthoringEntity("box-building", "Box building", "box", -3, 1.55, -3, "#6f8492", "blocking", { x: 3, y: 2.1, z: 3 }, "authoring-zone"),
+    createAuthoringEntity("desk-placeholder", "Desk placeholder", "box", 3, 1.05, -3, "#86735c", "blocking", { x: 2, y: 1, z: 1 }, "authoring-zone"),
+    createAuthoringEntity("tree-trunk", "Tree trunk", "cylinder", -4, 1.35, 4, "#4c5d54", "blocking", { x: 0.55, y: 1.7, z: 0.55 }, "authoring-zone", "tree-group"),
+    createAuthoringEntity("tree-canopy", "Tree canopy", "sphere", -4, 2.65, 4, "#22c55e", "none", { x: 1.5, y: 1.5, z: 1.5 }, "authoring-zone", "tree-group"),
+    createAuthoringEntity("non-blocking-decoration", "Non-blocking decoration", "sphere", 4, 1.2, 4, "#f59e0b", "none", { x: 0.8, y: 0.8, z: 0.8 }, "authoring-zone"),
+    createPlacedEntity({
+      id: "section-sign",
+      name: "Section sign",
+      entityType: "sign",
+      primitiveType: "sign",
+      transform: {
+        position: { x: 0, y: 1.2, z: -4 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1.4, y: 1, z: 1 },
+      },
+      appearance: { color: "#d8b45a", visibleAtRuntime: true, visibleInEditor: true },
+      footprint: { width: 1.4, depth: 0.25, height: 1.2 },
+      collisionMode: "trigger",
+      zoneId: "authoring-zone",
+      markerId: "authoring-marker",
+      contentReference: { contentType: "about", contentId: "about-placeholder" },
+      tags: ["fixture", "sign"],
+      sign: { label: "Authoring", subtitle: "Fixture", arrow: "forward" },
+    }),
+  ];
+
+  const entityGroups: EntityGroupDefinition[] = [{ id: "tree-group", name: "Grouped tree proxy", locked: false, hidden: false }];
+  const navigation: MapNavigationDefinition = {
+    nodes: [
+      { id: "walk-a", type: "walk", label: "Walk A", position: { x: -1, y: 1, z: -1 }, zoneId: "authoring-zone", tags: [], locked: false },
+      { id: "junction-a", type: "route-junction", label: "Junction A", position: { x: 1, y: 1, z: -1 }, zoneId: "authoring-zone", tags: [], locked: false },
+      { id: "wait-a", type: "wait-point", label: "Wait A", position: { x: 1, y: 1, z: 1 }, zoneId: "authoring-zone", tags: [], locked: false },
+    ],
+    edges: [{ id: "walk-junction", fromNodeId: "walk-a", toNodeId: "junction-a", bidirectional: true, cost: 1, routeTag: "fixture", locked: false }],
+    routes: [{ id: "fixture-route", name: "Fixture route", nodeIds: ["walk-a", "junction-a", "wait-a"], tags: ["fixture"] }],
+  };
+
+  return {
+    ...createMapDefinitionFromWorld({
+      id: "phase45-authoring-test",
+      name: "Phase 4.5 Authoring Test",
+      description: "Development-only authoring fixture built from generic terrain, entity and navigation data.",
+      kind: "test",
+      runtimeMode: "dynamic-voxel",
+      world,
+      zones,
+      markers,
+      spawnPoints: [{
+        id: "authoring-spawn",
+        label: "Authoring Spawn",
+        position: { x: 31, y: 1, z: 31 },
+        rotationY: 0,
+        cameraTarget: { x: 31, y: 0, z: 31 },
+      }],
+      cameraPresets: [{
+        ...createDefaultOverviewCameraPreset(),
+        id: "authoring-overview",
+        label: "Authoring Overview",
+      }],
+      defaultSpawnId: "authoring-spawn",
+      defaultCameraPresetId: "authoring-overview",
+      presentation: { legendVisible: true, backgroundId: "neutral-day", environmentId: "graybox" },
+      metadata: {
+        createdAt: PHASE4_CREATED_AT,
+        updatedAt: PHASE4_CREATED_AT,
+        authoringVersion: "phase-4.5",
+      },
+    }),
+    entities,
+    entityGroups,
+    navigation,
+  };
+}
+
+function createAuthoringEntity(
+  id: string,
+  name: string,
+  primitiveType: "box" | "cylinder" | "sphere",
+  x: number,
+  y: number,
+  z: number,
+  color: string,
+  collisionMode: "none" | "blocking" | "walkable" | "trigger",
+  scale: { x: number; y: number; z: number },
+  zoneId: string,
+  groupId?: string,
+) {
+  return createPlacedEntity({
+    id,
+    name,
+    primitiveType,
+    transform: {
+      position: { x, y, z },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale,
+    },
+    appearance: { color, visibleAtRuntime: true, visibleInEditor: true },
+    footprint: { width: scale.x, depth: scale.z, height: scale.y },
+    collisionMode,
+    zoneId,
+    groupId,
+    tags: ["fixture"],
   });
 }
 
