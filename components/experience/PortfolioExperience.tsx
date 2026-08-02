@@ -1,8 +1,9 @@
 "use client";
 
 import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
-import { MapControls } from "@react-three/drei";
+import { MapControls, Text } from "@react-three/drei";
 import gsap from "gsap";
+import { LockKeyhole, RotateCcw, UnlockKeyhole } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
@@ -18,6 +19,27 @@ import { parseMapDocument, serializeMapDocument } from "@/lib/world/map-document
 import type { GridCoordinate } from "@/lib/world/world-config";
 import { MapEditorSession, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
 import { createMapPresetWorld, type MapPresetId } from "@/lib/editor/map-presets";
+import {
+  addEntity,
+  createEntityFromDraft,
+  deleteEntities,
+  duplicateEntities,
+  groupEntities,
+  ungroupEntities,
+  updateEntity,
+  validateEntityPlacement,
+} from "@/lib/editor/entity-authoring";
+import {
+  DEFAULT_TERRAIN_BRUSH,
+  createTerrainMutations,
+  getBrushFootprint,
+  type BrushShape,
+  type TerrainBrushOperation,
+  type TerrainBrushSettings,
+} from "@/lib/editor/terrain-brushes";
+import { addNavigationEdge, addNavigationNode, addNavigationRoute } from "@/lib/editor/navigation-authoring";
+import type { CollisionMode, PlacedMapEntity, PrimitiveType } from "@/lib/maps/map-entities";
+import type { NavigationNodeType } from "@/lib/maps/map-navigation";
 import {
   createBlankMapDefinition,
   createLoadedMapState,
@@ -37,7 +59,7 @@ import {
   loadMapStateSync,
   saveMapDraft,
 } from "@/lib/maps/map-registry";
-import type { MapEditorToolbarProps } from "@/components/experience/MapEditorToolbar";
+import type { EditorLayerId, EditorLayerState, EditorViewportLayoutState, MapEditorToolbarProps } from "@/components/experience/MapEditorToolbar";
 import { createBrowsingState, reduceBrowsingState, type BrowsingState } from "@/lib/portfolio/browsing-state";
 import { PORTFOLIO_CONTENT, resolveContentReference } from "@/lib/portfolio/content";
 import {
@@ -47,6 +69,19 @@ import {
 } from "@/lib/experience/experience-store";
 
 const MapEditorToolbar = dynamic(() => import("@/components/experience/MapEditorToolbar"), { ssr: false });
+const DEFAULT_VIEWPORT_LAYOUT: EditorViewportLayoutState = {
+  leftWidth: 244,
+  rightWidth: 332,
+  bottomHeight: 204,
+  outlinerHeight: 260,
+  leftCollapsed: false,
+  rightCollapsed: false,
+  bottomCollapsed: false,
+  cleanPreview: false,
+  maximizedViewport: false,
+};
+const COLLAPSED_SIDE_DOCK_WIDTH = 32;
+const COLLAPSED_BOTTOM_DOCK_HEIGHT = 30;
 const TOOL_COLORS: Record<EditorTool, string> = {
   select: "#38bdf8",
   paint: "#38bdf8",
@@ -54,9 +89,29 @@ const TOOL_COLORS: Record<EditorTool, string> = {
   erase: "#ef4444",
   raise: "#10b981",
   lower: "#f97316",
+  flatten: "#f59e0b",
+  fill: "#14b8a6",
+  clear: "#ef4444",
+  path: "#817d68",
+  removePath: "#64748b",
   zone: "#eab308",
+  removeZone: "#facc15",
   marker: "#a855f7",
+  entity: "#22c55e",
+  navigation: "#60a5fa",
 };
+
+const DEFAULT_EDITOR_LAYERS: EditorLayerState[] = [
+  { id: "terrain", label: "Terrain", visible: true, locked: false },
+  { id: "paths", label: "Paths", visible: true, locked: false },
+  { id: "zones", label: "Zones", visible: true, locked: false },
+  { id: "entities", label: "Entities", visible: true, locked: false },
+  { id: "markers", label: "Markers", visible: true, locked: false },
+  { id: "navigation", label: "Navigation", visible: true, locked: false },
+  { id: "spawnPoints", label: "Spawn points", visible: true, locked: false },
+  { id: "cameraPresets", label: "Camera presets", visible: true, locked: false },
+  { id: "developmentHelpers", label: "Development helpers", visible: true, locked: false },
+];
 
 type MetricsSnapshot = {
   fps: number;
@@ -161,7 +216,7 @@ const BLOCK_FRAGMENT_SHADER = `
   varying vec3 vBlockColor;
 
   void main() {
-    vec3 base = mix(vBlockColor * 0.92, min(vBlockColor * 1.12, vec3(1.0)), vVariation);
+    vec3 base = vBlockColor;
     vec3 lightDirection = normalize(vec3(0.35, 0.8, 0.42));
     float light = clamp(dot(normalize(vNormal), lightDirection), 0.0, 1.0);
     vec3 color = base * (0.48 + light * 0.52);
@@ -194,7 +249,7 @@ const SURFACE_FRAGMENT_SHADER = `
   varying float vVariation;
 
   void main() {
-    vec3 base = mix(vBlockColor * 0.92, min(vBlockColor * 1.12, vec3(1.0)), vVariation);
+    vec3 base = vBlockColor;
     vec3 lightDirection = normalize(vec3(0.35, 0.8, 0.42));
     float light = clamp(dot(normalize(vNormal), lightDirection), 0.0, 1.0);
     vec3 color = base * (0.48 + light * 0.52);
@@ -209,10 +264,13 @@ export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MA
   const [metrics, setMetrics] = useState<(MetricsSnapshot & { phase: ExperiencePhase }) | null>(null);
   const [editorRequested, setEditorRequested] = useState(false);
   const [editorPanel, setEditorPanel] = useState<MapEditorToolbarProps | null>(null);
+  const [editorLayout, setEditorLayout] = useState<EditorViewportLayoutState>(DEFAULT_VIEWPORT_LAYOUT);
   const [mapUi, setMapUi] = useState<MapUiState | null>(null);
   const phase = useExperienceStore((state) => state.phase);
   const editorEnabled = process.env.NODE_ENV !== "production" && editorRequested;
+  const editorActive = editorEnabled && phase === "explore";
   const canOpenEditor = process.env.NODE_ENV !== "production" && phase === "explore" && !editorRequested;
+  const effectiveEditorLayout = getEffectiveViewportLayout(editorActive ? editorLayout : DEFAULT_VIEWPORT_LAYOUT);
 
   useLayoutEffect(() => {
     useExperienceStore.getState().reset();
@@ -237,7 +295,6 @@ export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MA
       const params = new URLSearchParams(window.location.search);
       const editorParam = params.get("editor");
       setEditorRequested(
-        process.env.NODE_ENV === "development" ||
         editorParam === "1" ||
         editorParam === "true" ||
         process.env.NEXT_PUBLIC_ENABLE_MAP_EDITOR === "true",
@@ -259,9 +316,15 @@ export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MA
 
   return (
     <section
-      className="experience-shell"
+      className={`experience-shell ${editorActive ? "experience-shell--editor" : ""} ${effectiveEditorLayout.cleanPreview ? "experience-shell--clean-preview" : ""} ${effectiveEditorLayout.maximizedViewport ? "experience-shell--viewport-maximized" : ""}`}
       data-phase={phase}
       aria-label="Interactive portfolio map proof of concept"
+      style={editorActive ? {
+        "--editor-left-width": `${effectiveEditorLayout.leftWidth}px`,
+        "--editor-right-width": `${effectiveEditorLayout.rightWidth}px`,
+        "--editor-bottom-height": `${effectiveEditorLayout.bottomHeight}px`,
+        "--editor-outliner-height": `${effectiveEditorLayout.outlinerHeight}px`,
+      } as React.CSSProperties : undefined}
     >
       {webglState === "unavailable" ? (
         <div className="webgl-error" role="status">
@@ -292,14 +355,14 @@ export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MA
             </Canvas>
           </div>
           <ExperienceOverlay phase={phase} />
-          {metrics ? (
+          {metrics && !editorActive ? (
             process.env.NODE_ENV === "production" ? (
               <ProductionFpsBadge metrics={metrics} />
             ) : (
               <FixedDiagnostics metrics={metrics} />
             )
           ) : null}
-          {editorEnabled && editorPanel ? <MapEditorToolbar {...editorPanel} /> : null}
+          {editorActive && editorPanel ? <MapEditorToolbar {...editorPanel} fps={metrics?.fps ?? null} frameMs={metrics?.frameMs ?? null} onLayoutChange={setEditorLayout} /> : null}
           {canOpenEditor ? (
             <button
               className="map-editor-reopen"
@@ -309,7 +372,7 @@ export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MA
               Editor
             </button>
           ) : null}
-          {mapUi ? <MapBrowserOverlay state={mapUi} /> : null}
+          {mapUi && !editorActive ? <MapBrowserOverlay state={mapUi} /> : null}
         </>
       ) : (
         <div className="experience-fallback">
@@ -343,19 +406,25 @@ function ExperienceOverlay({ phase }: { phase: ExperiencePhase }) {
         <div className="overlay-actions">
           {phase === "explore" ? (
             <>
-              <button className="overlay-button" type="button" onClick={toggleAngleLock}>
-                {isAngleLocked ? "Unlock Angle" : "Lock Angle"}
+              <button
+                className="overlay-icon-button"
+                type="button"
+                onClick={toggleAngleLock}
+                aria-label={isAngleLocked ? "Unlock camera angle" : "Lock camera angle"}
+                title={isAngleLocked ? "Unlock camera angle" : "Lock camera angle"}
+              >
+                {isAngleLocked ? <UnlockKeyhole aria-hidden="true" size={16} /> : <LockKeyhole aria-hidden="true" size={16} />}
               </button>
-              <button className="overlay-button" type="button" onClick={resetView}>
-                Reset View
+              <button
+                className="overlay-icon-button"
+                type="button"
+                onClick={resetView}
+                aria-label="Reset view"
+                title="Reset view"
+              >
+                <RotateCcw aria-hidden="true" size={16} />
               </button>
             </>
-          ) : null}
-          {phase === "explore" ? (
-            <div className="phase-pill" aria-live="polite">
-              <span className="phase-dot" />
-              <span>{phase}</span>
-            </div>
           ) : null}
         </div>
       </header>
@@ -403,6 +472,16 @@ function ProductionFpsBadge({ metrics }: { metrics: MetricsSnapshot & { phase: E
       <span>{metrics.medianFrameMs}ms</span>
     </aside>
   );
+}
+
+function getEffectiveViewportLayout(layout: EditorViewportLayoutState): EditorViewportLayoutState {
+  const hideSideDocks = layout.cleanPreview || layout.maximizedViewport;
+  return {
+    ...layout,
+    leftWidth: hideSideDocks ? 0 : layout.leftCollapsed ? COLLAPSED_SIDE_DOCK_WIDTH : layout.leftWidth,
+    rightWidth: hideSideDocks ? 0 : layout.rightCollapsed ? COLLAPSED_SIDE_DOCK_WIDTH : layout.rightWidth,
+    bottomHeight: layout.cleanPreview || layout.maximizedViewport ? 0 : layout.bottomCollapsed ? COLLAPSED_BOTTOM_DOCK_HEIGHT : layout.bottomHeight,
+  };
 }
 
 function FixedDiagnostics({ metrics }: { metrics: MetricsSnapshot & { phase: ExperiencePhase } }) {
@@ -646,6 +725,7 @@ function ExperienceScene({
 }) {
   const initialState = useMemo(() => createInitialExperienceMapState(initialMapId), [initialMapId]);
   const [currentMap, setCurrentMap] = useState<MapDefinition>(initialState.loadedMap.definition);
+  const mapHistoryRef = useRef<{ undo: MapDefinition[]; redo: MapDefinition[] }>({ undo: [], redo: [] });
   const [terrain, setTerrain] = useState(initialState.terrain);
   const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities));
   const [tool, setTool] = useState<EditorTool>("select");
@@ -659,6 +739,16 @@ function ExperienceScene({
   const [hoveredCell, setHoveredCell] = useState<GridCoordinate | null>(null);
   const [selectedCell, setSelectedCell] = useState<GridCoordinate | null>(null);
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
+  const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>([]);
+  const [brushSettings, setBrushSettings] = useState<TerrainBrushSettings>(DEFAULT_TERRAIN_BRUSH);
+  const [primitiveType, setPrimitiveType] = useState<PrimitiveType>("box");
+  const [collisionMode, setCollisionMode] = useState<CollisionMode>("blocking");
+  const [entityColor, setEntityColor] = useState("#9ca3af");
+  const [entityName, setEntityName] = useState("Placeholder");
+  const [navigationNodeType, setNavigationNodeType] = useState<NavigationNodeType>("walk");
+  const [layerStates, setLayerStates] = useState<EditorLayerState[]>(DEFAULT_EDITOR_LAYERS);
+  const [cleanPreview, setCleanPreview] = useState(false);
+  const [validationSummary, setValidationSummary] = useState<string[]>([]);
   const [editorMessage, setEditorMessage] = useState<EditorMessage | null>(
     initialState.error ? { type: "error", text: initialState.error } : null,
   );
@@ -696,14 +786,30 @@ function ExperienceScene({
     ? editorSession.world.getBlock(selectedCell.x, selectedCell.y, selectedCell.z)
     : null;
   const selectedZoneId = selectedCell ? editorSession.world.getZone(selectedCell.x, selectedCell.y, selectedCell.z) : 0;
+  const selectedEntity = currentMap.entities.find((entity) => selectedEntityIds.includes(entity.id)) ?? null;
+  const brushAffectedCellCount = hoveredCell ? getBrushFootprint(hoveredCell, brushSettings).length : 0;
   const availableMaps = useMemo(() => listMapRegistryEntries({ includeDevelopment: process.env.NODE_ENV !== "production" }), []);
   const activeCameraPreset = useMemo(() => getBrowsingCameraPreset(currentMap, browsing), [browsing, currentMap]);
+
+  const commitMapDefinitionChange = (nextMap: MapDefinition, message: string) => {
+    mapHistoryRef.current.undo.push(currentMap);
+    if (mapHistoryRef.current.undo.length > 80) {
+      mapHistoryRef.current.undo.shift();
+    }
+    mapHistoryRef.current.redo = [];
+    setCurrentMap(nextMap);
+    setEditorMessage({ type: "info", text: message });
+    setEditorRevision((revision) => revision + 1);
+  };
 
   const createCurrentMapDefinition = () => createMapDefinitionFromWorld({
     ...currentMap,
     world: editorSession.world,
     zones: currentMap.zones,
     markers: mergeMarkerDefinitions(currentMap.markers, editorSession.entities),
+    entities: currentMap.entities,
+    entityGroups: currentMap.entityGroups,
+    navigation: currentMap.navigation,
     spawnPoints: currentMap.spawnPoints,
     cameraPresets: currentMap.cameraPresets,
     presentation: currentMap.presentation,
@@ -719,6 +825,7 @@ function ExperienceScene({
     const nextTerrain = createTerrainDataFromWorld(editorSession.world);
 
     setCurrentMap(map);
+    mapHistoryRef.current = { undo: [], redo: [] };
     setActiveMapId(map.id);
     dispatchBrowsing({ type: "changeMap", mapId: map.id });
     setTerrain(nextTerrain);
@@ -726,6 +833,7 @@ function ExperienceScene({
     setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
     setSelectedCell(null);
     setSelectedMarkerId(null);
+    setSelectedEntityIds([]);
     setEditorMessage({ type: "info", text: message });
     setEditorRevision((revision) => revision + 1);
   };
@@ -767,6 +875,10 @@ function ExperienceScene({
     if (!editorAvailable) {
       return;
     }
+    if (isLayerLocked(layerStates, getToolLayer(tool))) {
+      setEditorMessage({ type: "error", text: "The active editor layer is locked." });
+      return;
+    }
 
     const editCoordinate = getToolTargetCoordinate(editorSession, tool, coordinate);
     if (!editCoordinate) {
@@ -776,8 +888,22 @@ function ExperienceScene({
 
     setSelectedCell(editCoordinate);
     setSelectedMarkerId(null);
+    setSelectedEntityIds([]);
 
-    const result = editorSession.applyTool(tool, editCoordinate, paintBlockId, zoneId);
+    const brushOperation = getTerrainBrushOperation(tool);
+    const result = brushOperation
+      ? editorSession.applyTerrainMutations(
+        brushOperation,
+        createTerrainMutations({
+          world: editorSession.world,
+          operation: brushOperation,
+          center: editCoordinate,
+          settings: brushSettings,
+          blockId: brushOperation === "paint-path" ? BLOCK_IDS.Path : paintBlockId,
+          zoneId,
+        }),
+      )
+      : editorSession.applyTool(tool, editCoordinate, paintBlockId, zoneId);
     if (result.message) {
       setEditorMessage(result.message);
     } else if (tool !== "select") {
@@ -786,13 +912,66 @@ function ExperienceScene({
     replaceRebuiltChunks(result.rebuiltChunks);
   };
 
+  const handleEditorCells = (coordinates: GridCoordinate[]) => {
+    if (!editorAvailable || coordinates.length === 0) {
+      return;
+    }
+    if (isLayerLocked(layerStates, getToolLayer(tool))) {
+      setEditorMessage({ type: "error", text: "The active editor layer is locked." });
+      return;
+    }
+
+    const brushOperation = getTerrainBrushOperation(tool);
+    if (!brushOperation) {
+      handleEditorCell(coordinates[coordinates.length - 1]);
+      return;
+    }
+
+    const mutations = coordinates.flatMap((coordinate) => {
+      const editCoordinate = getToolTargetCoordinate(editorSession, tool, coordinate);
+      if (!editCoordinate) return [];
+      return createTerrainMutations({
+        world: editorSession.world,
+        operation: brushOperation,
+        center: editCoordinate,
+        settings: brushSettings,
+        blockId: brushOperation === "paint-path" ? BLOCK_IDS.Path : paintBlockId,
+        zoneId,
+      });
+    });
+    const result = editorSession.applyTerrainMutations(brushOperation, mutations);
+    if (result.message) setEditorMessage(result.message);
+    setSelectedCell(coordinates[coordinates.length - 1]);
+    setSelectedMarkerId(null);
+    setSelectedEntityIds([]);
+    replaceRebuiltChunks(result.rebuiltChunks);
+  };
+
   const handleUndo = () => {
+    const previousMap = mapHistoryRef.current.undo.pop();
+    if (previousMap) {
+      mapHistoryRef.current.redo.push(currentMap);
+      setCurrentMap(previousMap);
+      setEditorMessage({ type: "info", text: "Map data undo complete." });
+      setEditorRevision((revision) => revision + 1);
+      return;
+    }
+
     const result = editorSession.undo();
     replaceRebuiltChunks(result.rebuiltChunks);
     setEditorMessage({ type: "info", text: "Undo complete." });
   };
 
   const handleRedo = () => {
+    const nextMap = mapHistoryRef.current.redo.pop();
+    if (nextMap) {
+      mapHistoryRef.current.undo.push(currentMap);
+      setCurrentMap(nextMap);
+      setEditorMessage({ type: "info", text: "Map data redo complete." });
+      setEditorRevision((revision) => revision + 1);
+      return;
+    }
+
     const result = editorSession.redo();
     replaceRebuiltChunks(result.rebuiltChunks);
     setEditorMessage({ type: "info", text: "Redo complete." });
@@ -806,6 +985,7 @@ function ExperienceScene({
     replaceRebuiltChunks(result.rebuiltChunks);
     setSelectedCell(null);
     setSelectedMarkerId(null);
+    setSelectedEntityIds([]);
     setEditorMessage({ type: "info", text: "Unsaved changes reset." });
   };
 
@@ -817,6 +997,7 @@ function ExperienceScene({
     replaceRebuiltChunks(result.rebuiltChunks);
     setSelectedCell(null);
     setSelectedMarkerId(null);
+    setSelectedEntityIds([]);
     setPresetId("flat");
     setEditorMessage({ type: "info", text: "Flat map restored." });
   };
@@ -834,6 +1015,7 @@ function ExperienceScene({
     setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
     setSelectedCell(null);
     setSelectedMarkerId(null);
+    setSelectedEntityIds([]);
     setPresetId(nextPresetId);
     setEditorMessage({ type: "info", text: "Preset loaded for FPS testing." });
     setEditorRevision((revision) => revision + 1);
@@ -852,6 +1034,7 @@ function ExperienceScene({
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
       setEditorSession(nextSession);
       setCurrentMap(loaded.definition);
+      mapHistoryRef.current = { undo: [], redo: [] };
       setActiveMapId(loaded.definition.id);
       dispatchBrowsing({ type: "changeMap", mapId: loaded.definition.id });
       setTerrain(nextTerrain);
@@ -859,6 +1042,7 @@ function ExperienceScene({
       setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
       setSelectedCell(null);
       setSelectedMarkerId(null);
+      setSelectedEntityIds([]);
       setEditorMessage({ type: "info", text: `Loaded ${loaded.definition.name}.` });
       setEditorRevision((revision) => revision + 1);
     } catch (error) {
@@ -885,11 +1069,13 @@ function ExperienceScene({
       nextSession.replaceWithDocument(mapDefinitionToDocument(map), true);
       setEditorSession(nextSession);
       setCurrentMap(map);
+      mapHistoryRef.current = { undo: [], redo: [] };
       setActiveMapId(map.id);
       dispatchBrowsing({ type: "changeMap", mapId: map.id });
       setTerrain(createTerrainDataFromWorld(nextSession.world));
       setSelectedCell(null);
       setSelectedMarkerId(null);
+      setSelectedEntityIds([]);
       setEditorMessage({ type: "info", text: "Blank map created." });
       setEditorRevision((revision) => revision + 1);
     } catch (error) {
@@ -1001,6 +1187,118 @@ function ExperienceScene({
     setEditorMessage({ type: "info", text: "Marker removed." });
   };
 
+  const handlePlaceEntity = () => {
+    if (isLayerLocked(layerStates, "entities")) {
+      setEditorMessage({ type: "error", text: "The entity layer is locked." });
+      return;
+    }
+    const basePosition = selectedWorldPosition ?? { x: 0, y: 1, z: 0 };
+    const entity = createEntityFromDraft({
+      name: entityName,
+      primitiveType,
+      color: entityColor,
+      collisionMode,
+      transform: {
+        position: { x: basePosition.x, y: basePosition.y + 0.5, z: basePosition.z },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: primitiveType === "plane" ? { x: 2, y: 0.08, z: 2 } : { x: 1, y: 1, z: 1 },
+      },
+    }, new Set(currentMap.entities.map((entity) => entity.id)));
+    const validation = validateEntityPlacement(currentMap, entity);
+    setValidationSummary(validation.messages);
+    if (validation.severity === "invalid") {
+      setEditorMessage({ type: "error", text: validation.messages[0] ?? "Entity placement is invalid." });
+      return;
+    }
+
+    commitMapDefinitionChange(addEntity(currentMap, entity), `Placed ${entity.name}.`);
+    setSelectedEntityIds([entity.id]);
+    setSelectedCell(null);
+    setSelectedMarkerId(null);
+  };
+
+  const handleDuplicateEntity = () => {
+    if (selectedEntityIds.length === 0) return;
+    const nextMap = duplicateEntities(currentMap, selectedEntityIds);
+    commitMapDefinitionChange(nextMap, "Entity duplicated.");
+    setSelectedEntityIds(nextMap.entities.slice(-selectedEntityIds.length).map((entity) => entity.id));
+  };
+
+  const handleDeleteEntity = () => {
+    if (selectedEntityIds.length === 0) return;
+    commitMapDefinitionChange(deleteEntities(currentMap, selectedEntityIds), "Entity deleted.");
+    setSelectedEntityIds([]);
+  };
+
+  const handleGroupEntity = () => {
+    if (selectedEntityIds.length < 2) return;
+    const groupId = `group-${Date.now().toString(36)}`;
+    commitMapDefinitionChange(groupEntities(currentMap, selectedEntityIds, groupId, "Entity Group"), "Entities grouped.");
+  };
+
+  const handleUngroupEntity = () => {
+    if (!selectedEntity?.groupId) return;
+    commitMapDefinitionChange(ungroupEntities(currentMap, selectedEntity.groupId), "Entity group removed.");
+  };
+
+  const handleToggleEntityLocked = () => {
+    if (!selectedEntity) return;
+    commitMapDefinitionChange(updateEntity(currentMap, selectedEntity.id, (entity) => ({ ...entity, locked: !entity.locked })), "Entity lock toggled.");
+  };
+
+  const handleToggleEntityHidden = () => {
+    if (!selectedEntity) return;
+    commitMapDefinitionChange(updateEntity(currentMap, selectedEntity.id, (entity) => ({
+      ...entity,
+      appearance: { ...entity.appearance, visibleInEditor: !entity.appearance.visibleInEditor },
+    })), "Entity visibility toggled.");
+  };
+
+  const handlePlaceNavigationNode = () => {
+    if (isLayerLocked(layerStates, "navigation")) {
+      setEditorMessage({ type: "error", text: "The navigation layer is locked." });
+      return;
+    }
+    const basePosition = selectedWorldPosition ?? { x: 0, y: 1, z: 0 };
+    const id = `nav-${navigationNodeType}-${Date.now().toString(36)}`.replace(/[^a-z0-9-]/g, "-");
+    commitMapDefinitionChange(addNavigationNode(currentMap, {
+      id,
+      type: navigationNodeType,
+      label: navigationNodeType,
+      position: { x: basePosition.x, y: basePosition.y + 0.55, z: basePosition.z },
+      tags: [],
+      locked: false,
+    }), "Navigation node placed.");
+  };
+
+  const handleConnectNavigationNodes = () => {
+    const nodes = currentMap.navigation.nodes.slice(-2);
+    if (nodes.length < 2) return;
+    commitMapDefinitionChange(addNavigationEdge(currentMap, {
+      id: `edge-${nodes[0].id}-${nodes[1].id}`.replace(/[^a-z0-9-]/g, "-"),
+      fromNodeId: nodes[0].id,
+      toNodeId: nodes[1].id,
+      bidirectional: true,
+      cost: 1,
+      locked: false,
+    }), "Navigation nodes connected.");
+  };
+
+  const handleCreateRoute = () => {
+    const nodeIds = currentMap.navigation.nodes.map((node) => node.id);
+    if (nodeIds.length < 2) return;
+    commitMapDefinitionChange(addNavigationRoute(currentMap, {
+      id: `route-${Date.now().toString(36)}`,
+      name: "Editor Route",
+      nodeIds,
+      tags: [],
+    }), "Route created from current nodes.");
+  };
+
+  const updateLayer = (id: EditorLayerId, patch: Partial<Pick<EditorLayerState, "visible" | "locked">>) => {
+    setLayerStates((layers) => layers.map((layer) => layer.id === id ? { ...layer, ...patch } : layer));
+  };
+
   useEffect(() => {
     markLoading();
   }, [markLoading]);
@@ -1034,12 +1332,28 @@ function ExperienceScene({
       blockEditCount: snapshot.blockEditCount,
       zoneAssignmentCount: snapshot.zoneAssignmentCount,
       entityAnchorCount: snapshot.entityAnchorCount,
-      undoDepth: snapshot.undoDepth,
-      redoDepth: snapshot.redoDepth,
+      undoDepth: snapshot.undoDepth + mapHistoryRef.current.undo.length,
+      redoDepth: snapshot.redoDepth + mapHistoryRef.current.redo.length,
       hasUnsavedChanges: snapshot.hasUnsavedChanges,
       autosaveStatus,
       message: editorMessage,
       selectedMarkerId,
+      selectedEntity,
+      entityCount: currentMap.entities.length,
+      selectedEntityIds,
+      primitiveType,
+      collisionMode,
+      entityColor,
+      entityName,
+      brushSettings,
+      brushAffectedCellCount,
+      layerStates,
+      cleanPreview,
+      navigationNodeType,
+      navigationNodeCount: currentMap.navigation.nodes.length,
+      navigationEdgeCount: currentMap.navigation.edges.length,
+      routeCount: currentMap.navigation.routes.length,
+      validationSummary,
       onToolChange: setTool,
       onPaintBlockChange: setPaintBlockId,
       onPresetChange: handlePresetChange,
@@ -1059,12 +1373,40 @@ function ExperienceScene({
       onClearDraft: handleClearDraft,
       onClose: onCloseEditor,
       onRemoveMarker: handleRemoveMarker,
+      onBrushShapeChange: (shape: BrushShape) => setBrushSettings((settings) => ({ ...settings, shape })),
+      onBrushSizeChange: (size: number) => setBrushSettings((settings) => ({ ...settings, size: Math.max(1, Math.min(9, Math.floor(size) || 1)) })),
+      onPathWidthChange: (pathWidth: number) => setBrushSettings((settings) => ({ ...settings, pathWidth: Math.max(1, Math.min(9, Math.floor(pathWidth) || 1)) })),
+      onFlattenHeightChange: (flattenHeight: number) => setBrushSettings((settings) => ({ ...settings, flattenHeight: Math.max(0, Math.min(11, Math.floor(flattenHeight) || 0)) })),
+      onPrimitiveTypeChange: setPrimitiveType,
+      onCollisionModeChange: setCollisionMode,
+      onEntityColorChange: setEntityColor,
+      onEntityNameChange: setEntityName,
+      onPlaceEntity: handlePlaceEntity,
+      onDuplicateEntity: handleDuplicateEntity,
+      onDeleteEntity: handleDeleteEntity,
+      onGroupEntity: handleGroupEntity,
+      onUngroupEntity: handleUngroupEntity,
+      onToggleEntityLocked: handleToggleEntityLocked,
+      onToggleEntityHidden: handleToggleEntityHidden,
+      onNavigationNodeTypeChange: setNavigationNodeType,
+      onPlaceNavigationNode: handlePlaceNavigationNode,
+      onConnectNavigationNodes: handleConnectNavigationNodes,
+      onCreateRoute: handleCreateRoute,
+      onLayerVisibilityChange: (id, visible) => updateLayer(id, { visible }),
+      onLayerLockChange: (id, locked) => updateLayer(id, { locked }),
+      onCleanPreviewChange: setCleanPreview,
     });
   }, [
     autosaveStatus,
     activeMapId,
     availableMaps,
     currentMap,
+    brushAffectedCellCount,
+    brushSettings,
+    cleanPreview,
+    collisionMode,
+    entityColor,
+    entityName,
     editorAvailable,
     editorMessage,
     editorRevision,
@@ -1074,12 +1416,15 @@ function ExperienceScene({
     onEditorStateChange,
     paintBlockId,
     presetId,
+    primitiveType,
     renderMode,
     selectedBlockId,
     selectedCell,
     selectedChunk,
     selectedLocal,
     selectedMarkerId,
+    selectedEntity,
+    selectedEntityIds,
     selectedWorldPosition,
     selectedZoneId,
     snapshot.blockEditCount,
@@ -1089,7 +1434,10 @@ function ExperienceScene({
     snapshot.undoDepth,
     snapshot.zoneAssignmentCount,
     tool,
+    validationSummary,
     zoneId,
+    layerStates,
+    navigationNodeType,
   ]);
 
   useEffect(() => {
@@ -1209,6 +1557,22 @@ function ExperienceScene({
         event.preventDefault();
         handleUndo();
       }
+
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        handleDuplicateEntity();
+      }
+
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (selectedEntityIds.length > 0) {
+          event.preventDefault();
+          handleDeleteEntity();
+        }
+      }
+
+      if (["w", "e", "r", "f"].includes(event.key.toLowerCase()) && selectedEntityIds.length > 0) {
+        setEditorMessage({ type: "info", text: `${event.key.toUpperCase()} shortcut reserved for transform controls.` });
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -1296,18 +1660,36 @@ function ExperienceScene({
         hoveredCell={hoveredCell}
         onHoverCell={setHoveredCell}
         onEditCell={handleEditorCell}
+        onEditCells={handleEditorCells}
       />
-      <SelectionIndicator coordinate={hoveredCell} visible={editorAvailable} color={TOOL_COLORS[tool]} filled />
-      <SelectionIndicator coordinate={selectedCell} visible={editorAvailable} color="#f59e0b" />
+      <BrushFootprintIndicator coordinate={hoveredCell} settings={brushSettings} visible={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "developmentHelpers")} color={TOOL_COLORS[tool]} />
+      <SelectionIndicator coordinate={selectedCell} visible={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "developmentHelpers")} color="#f59e0b" />
       <EditorMarkers
-        editorEnabled={editorAvailable}
+        editorEnabled={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "markers")}
         entities={editorSession.entities}
         world={editorSession.world}
         selectedMarkerId={selectedMarkerId}
         onSelectMarker={(id) => {
           setSelectedMarkerId(id);
           setSelectedCell(null);
+          setSelectedEntityIds([]);
         }}
+      />
+      <EditorPlacedEntities
+        editorEnabled={editorAvailable}
+        cleanPreview={cleanPreview}
+        layerVisible={isLayerVisible(layerStates, "entities")}
+        entities={currentMap.entities}
+        selectedEntityIds={selectedEntityIds}
+        onSelectEntity={(id, additive) => {
+          setSelectedEntityIds((ids) => additive ? [...new Set([...ids, id])] : [id]);
+          setSelectedCell(null);
+          setSelectedMarkerId(null);
+        }}
+      />
+      <EditorNavigationHelpers
+        editorEnabled={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "navigation")}
+        map={currentMap}
       />
       <MapInteractionProxies
         map={currentMap}
@@ -1694,6 +2076,7 @@ function EditorInteractionOverlay({
   hoveredCell,
   onHoverCell,
   onEditCell,
+  onEditCells,
 }: {
   editorEnabled: boolean;
   tool: EditorTool;
@@ -1704,14 +2087,16 @@ function EditorInteractionOverlay({
   hoveredCell: GridCoordinate | null;
   onHoverCell: (coordinate: GridCoordinate | null) => void;
   onEditCell: (coordinate: GridCoordinate) => void;
+  onEditCells: (coordinates: GridCoordinate[]) => void;
 }) {
-  const { camera, raycaster, scene } = useThree();
+  const { camera, gl, raycaster, scene } = useThree();
   const chunkById = useMemo(() => new Map(chunks.map((chunk) => [chunk.id, chunk])), [chunks]);
   const surfaceChunkById = useMemo(() => new Map(surfaceChunks.map((chunk) => [chunk.id, chunk])), [surfaceChunks]);
   const mousePosition = useRef(new THREE.Vector2(0, 0));
   const pointerDownPosition = useRef<{ x: number; y: number } | null>(null);
   const brushActive = useRef(false);
   const brushedCellKeys = useRef(new Set<string>());
+  const brushedCells = useRef<GridCoordinate[]>([]);
   const groundPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const planeIntersection = useRef(new THREE.Vector3());
   const shouldRaycast = useRef(true);
@@ -1723,9 +2108,22 @@ function EditorInteractionOverlay({
     }
 
     const updateMousePosition = (event: PointerEvent) => {
-      mousePosition.current.x = (event.clientX / window.innerWidth) * 2 - 1;
-      mousePosition.current.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      const rect = gl.domElement.getBoundingClientRect();
+      if (
+        event.clientX < rect.left ||
+        event.clientX > rect.right ||
+        event.clientY < rect.top ||
+        event.clientY > rect.bottom
+      ) {
+        onHoverCell(null);
+        shouldRaycast.current = false;
+        return false;
+      }
+
+      mousePosition.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mousePosition.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       shouldRaycast.current = true;
+      return true;
     };
 
     const paintCurrentHover = () => {
@@ -1741,7 +2139,7 @@ function EditorInteractionOverlay({
       }
 
       brushedCellKeys.current.add(key);
-      onEditCell(currentHover);
+      brushedCells.current.push(currentHover);
       return true;
     };
 
@@ -1750,12 +2148,16 @@ function EditorInteractionOverlay({
         return;
       }
 
-      updateMousePosition(event);
+      if (!updateMousePosition(event)) {
+        pointerDownPosition.current = null;
+        return;
+      }
       pointerDownPosition.current = { x: event.clientX, y: event.clientY };
 
-      if (tool === "paint") {
+      if (isStrokeBrushTool(tool)) {
         brushActive.current = true;
         brushedCellKeys.current.clear();
+        brushedCells.current = [];
         paintCurrentHover();
       }
 
@@ -1763,9 +2165,11 @@ function EditorInteractionOverlay({
     };
 
     const handlePointerMove = (event: PointerEvent) => {
-      updateMousePosition(event);
+      if (!updateMousePosition(event)) {
+        return;
+      }
 
-      if (!brushActive.current || tool !== "paint" || (event.buttons & 1) !== 1 || isEditorUiEvent(event)) {
+      if (!brushActive.current || !isStrokeBrushTool(tool) || (event.buttons & 1) !== 1 || isEditorUiEvent(event)) {
         return;
       }
 
@@ -1777,7 +2181,9 @@ function EditorInteractionOverlay({
     const handlePointerUp = (event: PointerEvent) => {
       if (brushActive.current) {
         brushActive.current = false;
+        onEditCells(brushedCells.current);
         brushedCellKeys.current.clear();
+        brushedCells.current = [];
         pointerDownPosition.current = null;
         event.preventDefault();
         return;
@@ -1807,6 +2213,7 @@ function EditorInteractionOverlay({
     const handlePointerCancel = () => {
       brushActive.current = false;
       brushedCellKeys.current.clear();
+      brushedCells.current = [];
       pointerDownPosition.current = null;
     };
 
@@ -1821,7 +2228,7 @@ function EditorInteractionOverlay({
       window.removeEventListener("pointerup", handlePointerUp, { capture: true });
       window.removeEventListener("pointercancel", handlePointerCancel, { capture: true });
     };
-  }, [camera, chunkById, editorEnabled, onEditCell, onHoverCell, raycaster, renderMode, scene, surfaceChunkById, tool, world]);
+  }, [camera, chunkById, editorEnabled, gl.domElement, onEditCell, onEditCells, onHoverCell, raycaster, renderMode, scene, surfaceChunkById, tool, world]);
 
   useEffect(() => {
     shouldRaycast.current = true;
@@ -1986,6 +2393,33 @@ function SelectionIndicator({
       {filled ? <mesh geometry={fillGeometry} material={fillMaterial} /> : null}
       <mesh geometry={wireGeometry} material={wireMaterial} />
     </group>
+  );
+}
+
+function BrushFootprintIndicator({
+  coordinate,
+  settings,
+  visible,
+  color,
+}: {
+  coordinate: GridCoordinate | null;
+  settings: TerrainBrushSettings;
+  visible: boolean;
+  color: string;
+}) {
+  const cells = useMemo(() => coordinate ? getBrushFootprint(coordinate, settings) : [], [coordinate, settings]);
+  return (
+    <>
+      {cells.map((cell) => (
+        <SelectionIndicator
+          key={`${cell.x}-${cell.y}-${cell.z}`}
+          coordinate={cell}
+          visible={visible}
+          color={color}
+          filled
+        />
+      ))}
+    </>
   );
 }
 
@@ -2212,6 +2646,154 @@ function EditorMarkers({
   );
 }
 
+function EditorPlacedEntities({
+  editorEnabled,
+  cleanPreview,
+  layerVisible,
+  entities,
+  selectedEntityIds,
+  onSelectEntity,
+}: {
+  editorEnabled: boolean;
+  cleanPreview: boolean;
+  layerVisible: boolean;
+  entities: PlacedMapEntity[];
+  selectedEntityIds: string[];
+  onSelectEntity: (id: string, additive: boolean) => void;
+}) {
+  const geometries = useMemo(() => ({
+    box: new THREE.BoxGeometry(1, 1, 1),
+    cylinder: new THREE.CylinderGeometry(0.5, 0.5, 1, 16),
+    sphere: new THREE.SphereGeometry(0.5, 16, 10),
+    plane: new THREE.BoxGeometry(1, 0.04, 1),
+    platform: new THREE.BoxGeometry(1, 0.22, 1),
+    sign: new THREE.BoxGeometry(1, 0.72, 0.08),
+  }), []);
+  const selectedMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#ffffff", wireframe: true, depthTest: false }), []);
+
+  useEffect(() => {
+    return () => {
+      Object.values(geometries).forEach((geometry) => geometry.dispose());
+      selectedMaterial.dispose();
+    };
+  }, [geometries, selectedMaterial]);
+
+  if (!editorEnabled || !layerVisible) {
+    return null;
+  }
+
+  return (
+    <group>
+      {entities.filter((entity) => entity.appearance.visibleInEditor || cleanPreview).map((entity) => {
+        if (cleanPreview && !entity.appearance.visibleAtRuntime) return null;
+        const selected = selectedEntityIds.includes(entity.id);
+        return (
+          <group key={entity.id}>
+            <mesh
+              geometry={geometries[entity.primitiveType]}
+              position={[entity.transform.position.x, entity.transform.position.y, entity.transform.position.z]}
+              rotation={[entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z]}
+              scale={[entity.transform.scale.x, entity.transform.scale.y, entity.transform.scale.z]}
+              onPointerUp={(event) => {
+                event.stopPropagation();
+                onSelectEntity(entity.id, event.shiftKey);
+              }}
+            >
+              <meshBasicMaterial
+                color={entity.appearance.color}
+                transparent={entity.appearance.opacity !== undefined}
+                opacity={entity.appearance.opacity ?? 1}
+              />
+            </mesh>
+            {selected ? (
+              <mesh
+                geometry={geometries[entity.primitiveType]}
+                material={selectedMaterial}
+                position={[entity.transform.position.x, entity.transform.position.y, entity.transform.position.z]}
+                rotation={[entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z]}
+                scale={[entity.transform.scale.x * 1.05, entity.transform.scale.y * 1.05, entity.transform.scale.z * 1.05]}
+                renderOrder={12}
+              />
+            ) : null}
+            {entity.primitiveType === "sign" && entity.sign?.label ? (
+              <HtmlSignLabel entity={entity} />
+            ) : null}
+          </group>
+        );
+      })}
+    </group>
+  );
+}
+
+function HtmlSignLabel({ entity }: { entity: PlacedMapEntity }) {
+  return (
+    <Text
+      position={[entity.transform.position.x, entity.transform.position.y + 0.12, entity.transform.position.z + 0.08]}
+      rotation={[entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z]}
+      fontSize={0.22}
+      color="#17201c"
+      anchorX="center"
+      anchorY="middle"
+      maxWidth={1.2}
+    >
+      {entity.sign?.label ?? entity.name}
+    </Text>
+  );
+}
+
+function EditorNavigationHelpers({
+  editorEnabled,
+  map,
+}: {
+  editorEnabled: boolean;
+  map: MapDefinition;
+}) {
+  const nodeGeometry = useMemo(() => new THREE.SphereGeometry(0.18, 10, 8), []);
+  const nodeMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#60a5fa" }), []);
+  const edgeMaterial = useMemo(() => new THREE.LineBasicMaterial({ color: "#93c5fd" }), []);
+
+  const edgeLines = useMemo(() => {
+    const nodes = new Map(map.navigation.nodes.map((node) => [node.id, node]));
+    return map.navigation.edges.flatMap((edge) => {
+      const from = nodes.get(edge.fromNodeId);
+      const to = nodes.get(edge.toNodeId);
+      if (!from || !to) return [];
+      const geometry = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(from.position.x, from.position.y, from.position.z),
+        new THREE.Vector3(to.position.x, to.position.y, to.position.z),
+      ]);
+      return [{ id: edge.id, object: new THREE.Line(geometry, edgeMaterial), geometry }];
+    });
+  }, [edgeMaterial, map.navigation.edges, map.navigation.nodes]);
+
+  useEffect(() => {
+    return () => {
+      nodeGeometry.dispose();
+      nodeMaterial.dispose();
+      edgeMaterial.dispose();
+      edgeLines.forEach((line) => line.geometry.dispose());
+    };
+  }, [edgeLines, edgeMaterial, nodeGeometry, nodeMaterial]);
+
+  if (!editorEnabled) {
+    return null;
+  }
+
+  return (
+    <group>
+      {map.navigation.nodes.map((node) => (
+        <mesh
+          key={node.id}
+          geometry={nodeGeometry}
+          material={nodeMaterial}
+          position={[node.position.x, node.position.y, node.position.z]}
+        />
+      ))}
+      {edgeLines.map((line) => <primitive key={line.id} object={line.object} />)}
+    </group>
+  );
+}
+
 function getToolTargetCoordinate(session: MapEditorSession, tool: EditorTool, coordinate: GridCoordinate) {
   if (tool === "raise") {
     const topY = session.world.getHighestNonAirY(coordinate.x, coordinate.z);
@@ -2235,6 +2817,56 @@ function getToolTargetCoordinate(session: MapEditorSession, tool: EditorTool, co
   }
 
   return coordinate;
+}
+
+function getTerrainBrushOperation(tool: EditorTool): TerrainBrushOperation | null {
+  switch (tool) {
+    case "paint":
+      return "paint";
+    case "erase":
+      return "erase";
+    case "raise":
+      return "raise";
+    case "lower":
+      return "lower";
+    case "flatten":
+      return "flatten";
+    case "fill":
+      return "fill";
+    case "clear":
+      return "clear";
+    case "path":
+      return "paint-path";
+    case "removePath":
+      return "remove-path";
+    case "zone":
+      return "assign-zone";
+    case "removeZone":
+      return "remove-zone";
+    default:
+      return null;
+  }
+}
+
+function isStrokeBrushTool(tool: EditorTool) {
+  return getTerrainBrushOperation(tool) !== null;
+}
+
+function isLayerVisible(layers: EditorLayerState[], id: EditorLayerId) {
+  return layers.find((layer) => layer.id === id)?.visible ?? true;
+}
+
+function isLayerLocked(layers: EditorLayerState[], id: EditorLayerId) {
+  return layers.find((layer) => layer.id === id)?.locked ?? false;
+}
+
+function getToolLayer(tool: EditorTool): EditorLayerId {
+  if (tool === "zone" || tool === "removeZone") return "zones";
+  if (tool === "marker") return "markers";
+  if (tool === "entity") return "entities";
+  if (tool === "navigation") return "navigation";
+  if (tool === "path" || tool === "removePath") return "paths";
+  return "terrain";
 }
 
 function mergeMarkerDefinitions(existingMarkers: MapMarkerDefinition[], entities: MapEditorSession["entities"]) {
