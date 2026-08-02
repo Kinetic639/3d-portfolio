@@ -17,27 +17,48 @@ type CatalogSeed = {
 
 type PrefabArchetype =
   | "building"
+  | "workshop-compound"
+  | "studio-compound"
+  | "communication-station"
   | "pavilion"
   | "wall"
+  | "wall-window"
+  | "wall-door"
   | "gate"
   | "platform"
+  | "path-section"
   | "round-platform"
   | "steps"
   | "bridge"
   | "fence"
+  | "garden-bed"
   | "path-detail"
   | "bench"
   | "post"
   | "board"
+  | "orientation-monument"
+  | "zone-board"
   | "container"
+  | "mailbox-bank"
   | "tree"
+  | "tree-wide"
+  | "tree-columnar"
   | "bush"
+  | "shrub-low"
   | "rock"
+  | "rock-stack"
   | "desk"
+  | "workbench-rich"
+  | "monitor-desk"
   | "chair"
   | "screen"
   | "paper-stack"
+  | "display-rack"
   | "landmark"
+  | "timeline-arch"
+  | "milestone-station"
+  | "skill-garden-landmark"
+  | "person-scale-marker"
   | "navigation-anchor";
 
 export const BUILT_IN_PREFAB_VERSION = 1;
@@ -109,6 +130,46 @@ function createArchetypeParts(archetype: PrefabArchetype): PrefabPartDefinition[
         part("roof", "platform", { x: 0, y: 2.08, z: 0 }, { x: 3, y: 0.18, z: 2.2 }, "structure-dark"),
         part("door", "box", { x: 0, y: 0.5, z: -1.03 }, { x: 0.55, y: 1, z: 0.08 }, "accent-blue"),
       ];
+    case "workshop-compound":
+      return [
+        part("foundation", "platform", { x: 0, y: 0.11, z: 0 }, { x: 6.8, y: 0.22, z: 5.4 }, "path-proxy"),
+        part("main-volume", "box", { x: -0.8, y: 1.35, z: 0.15 }, { x: 4.2, y: 2.7, z: 3.5 }, "wood-proxy"),
+        part("side-volume", "box", { x: 2.05, y: 1, z: 0.6 }, { x: 1.65, y: 2, z: 2.4 }, "structure-light"),
+        part("tall-bay", "box", { x: -2.45, y: 1.75, z: -0.25 }, { x: 1.3, y: 3.5, z: 2.8 }, "structure-light"),
+        part("roof-main", "platform", { x: -0.8, y: 2.85, z: 0.15 }, { x: 4.55, y: 0.24, z: 3.85 }, "structure-dark"),
+        part("roof-side", "platform", { x: 2.05, y: 2.1, z: 0.6 }, { x: 1.9, y: 0.22, z: 2.7 }, "structure-dark"),
+        part("porch-canopy", "platform", { x: -0.25, y: 2.25, z: -2.55 }, { x: 2.8, y: 0.16, z: 1 }, "structure-dark"),
+        part("door", "box", { x: -0.45, y: 0.95, z: -1.66 }, { x: 0.8, y: 1.9, z: 0.12 }, "accent-blue"),
+        part("window-a", "box", { x: -2, y: 1.65, z: -1.66 }, { x: 0.65, y: 0.55, z: 0.1 }, "paper"),
+        part("window-b", "box", { x: 1.05, y: 1.45, z: -1.66 }, { x: 0.65, y: 0.5, z: 0.1 }, "paper"),
+        part("beam-a", "box", { x: -1.55, y: 1.05, z: -2.55 }, { x: 0.14, y: 2.1, z: 0.14 }, "metal-proxy"),
+        part("beam-b", "box", { x: 1.1, y: 1.05, z: -2.55 }, { x: 0.14, y: 2.1, z: 0.14 }, "metal-proxy"),
+      ];
+    case "studio-compound":
+      return [
+        part("terrace", "platform", { x: 0, y: 0.11, z: 0 }, { x: 5.6, y: 0.22, z: 4.4 }, "path-proxy"),
+        part("studio-main", "box", { x: -0.55, y: 1.15, z: 0.25 }, { x: 3.4, y: 2.3, z: 2.7 }, "structure-light"),
+        part("quiet-nook", "box", { x: 1.75, y: 0.9, z: 0.75 }, { x: 1.55, y: 1.8, z: 1.9 }, "wood-proxy"),
+        part("flat-roof", "platform", { x: -0.55, y: 2.42, z: 0.25 }, { x: 3.7, y: 0.2, z: 3 }, "structure-dark"),
+        part("nook-roof", "platform", { x: 1.75, y: 1.94, z: 0.75 }, { x: 1.8, y: 0.18, z: 2.15 }, "structure-dark"),
+        part("entry", "box", { x: -0.75, y: 0.85, z: -1.15 }, { x: 0.75, y: 1.7, z: 0.12 }, "accent-yellow"),
+        part("window-long", "box", { x: 0.65, y: 1.45, z: -1.15 }, { x: 1.15, y: 0.5, z: 0.1 }, "paper"),
+        part("porch-slab", "platform", { x: -0.65, y: 0.22, z: -2.15 }, { x: 2.6, y: 0.18, z: 1.1 }, "wood-proxy"),
+        part("porch-post-a", "box", { x: -1.75, y: 1, z: -2.15 }, { x: 0.14, y: 2, z: 0.14 }, "wood-proxy"),
+        part("porch-post-b", "box", { x: 0.35, y: 1, z: -2.15 }, { x: 0.14, y: 2, z: 0.14 }, "wood-proxy"),
+      ];
+    case "communication-station":
+      return [
+        part("forecourt", "platform", { x: 0, y: 0.1, z: 0 }, { x: 4.8, y: 0.2, z: 4 }, "path-proxy"),
+        part("counter-building", "box", { x: -0.8, y: 1.05, z: 0.2 }, { x: 2.8, y: 2.1, z: 2.4 }, "structure-light"),
+        part("mail-annex", "box", { x: 1.45, y: 0.8, z: 0.65 }, { x: 1.3, y: 1.6, z: 1.5 }, "wood-proxy"),
+        part("roof", "platform", { x: -0.45, y: 2.25, z: 0.15 }, { x: 4.2, y: 0.22, z: 2.8 }, "structure-dark"),
+        part("service-window", "box", { x: -1, y: 1.2, z: -1.04 }, { x: 1.1, y: 0.65, z: 0.1 }, "paper"),
+        part("door", "box", { x: 0.65, y: 0.8, z: -1.04 }, { x: 0.65, y: 1.6, z: 0.1 }, "accent-yellow"),
+        part("mast", "cylinder", { x: 2.35, y: 2.2, z: 1.35 }, { x: 0.14, y: 4.4, z: 0.14 }, "metal-proxy"),
+        part("signal-a", "box", { x: 2.35, y: 3.8, z: 1.35 }, { x: 1.25, y: 0.08, z: 0.08 }, "accent-blue"),
+        part("signal-b", "box", { x: 2.35, y: 3.25, z: 1.35 }, { x: 0.95, y: 0.08, z: 0.08 }, "accent-blue"),
+      ];
     case "pavilion":
       return [
         part("deck", "platform", { x: 0, y: 0.08, z: 0 }, { x: 2.6, y: 0.16, z: 2.2 }, "wood-proxy"),
@@ -120,6 +181,21 @@ function createArchetypeParts(archetype: PrefabArchetype): PrefabPartDefinition[
       ];
     case "wall":
       return [part("wall", "box", { x: 0, y: 0.7, z: 0 }, { x: 3, y: 1.4, z: 0.22 }, "structure-light")];
+    case "wall-window":
+      return [
+        part("wall-left", "box", { x: -1.05, y: 0.8, z: 0 }, { x: 0.9, y: 1.6, z: 0.22 }, "structure-light"),
+        part("wall-right", "box", { x: 1.05, y: 0.8, z: 0 }, { x: 0.9, y: 1.6, z: 0.22 }, "structure-light"),
+        part("sill", "box", { x: 0, y: 0.45, z: 0 }, { x: 1, y: 0.16, z: 0.24 }, "structure-dark"),
+        part("lintel", "box", { x: 0, y: 1.35, z: 0 }, { x: 1, y: 0.16, z: 0.24 }, "structure-dark"),
+        part("window", "box", { x: 0, y: 0.9, z: -0.02 }, { x: 0.78, y: 0.7, z: 0.08 }, "paper"),
+      ];
+    case "wall-door":
+      return [
+        part("wall-left", "box", { x: -1.05, y: 0.85, z: 0 }, { x: 0.85, y: 1.7, z: 0.22 }, "structure-light"),
+        part("wall-right", "box", { x: 1.05, y: 0.85, z: 0 }, { x: 0.85, y: 1.7, z: 0.22 }, "structure-light"),
+        part("lintel", "box", { x: 0, y: 1.75, z: 0 }, { x: 1.05, y: 0.2, z: 0.24 }, "structure-dark"),
+        part("door", "box", { x: 0, y: 0.82, z: -0.02 }, { x: 0.78, y: 1.64, z: 0.08 }, "accent-blue"),
+      ];
     case "gate":
       return [
         part("left-post", "box", { x: -0.75, y: 0.9, z: 0 }, { x: 0.25, y: 1.8, z: 0.25 }, "structure-dark"),
@@ -128,6 +204,12 @@ function createArchetypeParts(archetype: PrefabArchetype): PrefabPartDefinition[
       ];
     case "platform":
       return [part("platform", "platform", { x: 0, y: 0.08, z: 0 }, { x: 2, y: 0.16, z: 2 }, "path-proxy")];
+    case "path-section":
+      return [
+        part("surface", "platform", { x: 0, y: 0.06, z: 0 }, { x: 3, y: 0.12, z: 1.2 }, "path-proxy"),
+        part("left-curb", "box", { x: 0, y: 0.16, z: -0.68 }, { x: 3, y: 0.18, z: 0.12 }, "structure-dark"),
+        part("right-curb", "box", { x: 0, y: 0.16, z: 0.68 }, { x: 3, y: 0.18, z: 0.12 }, "structure-dark"),
+      ];
     case "round-platform":
       return [part("round", "cylinder", { x: 0, y: 0.08, z: 0 }, { x: 2.5, y: 0.16, z: 2.5 }, "path-proxy")];
     case "steps":
@@ -147,6 +229,14 @@ function createArchetypeParts(archetype: PrefabArchetype): PrefabPartDefinition[
         part("rail", "box", { x: 0, y: 0.65, z: 0 }, { x: 2.3, y: 0.12, z: 0.12 }, "wood-proxy"),
         part("post-a", "box", { x: -1.05, y: 0.45, z: 0 }, { x: 0.16, y: 0.9, z: 0.16 }, "wood-proxy"),
         part("post-b", "box", { x: 1.05, y: 0.45, z: 0 }, { x: 0.16, y: 0.9, z: 0.16 }, "wood-proxy"),
+      ];
+    case "garden-bed":
+      return [
+        part("soil", "platform", { x: 0, y: 0.08, z: 0 }, { x: 2.4, y: 0.16, z: 1.4 }, "terrain-neutral"),
+        part("edge-n", "box", { x: 0, y: 0.22, z: -0.78 }, { x: 2.5, y: 0.28, z: 0.16 }, "wood-proxy"),
+        part("edge-s", "box", { x: 0, y: 0.22, z: 0.78 }, { x: 2.5, y: 0.28, z: 0.16 }, "wood-proxy"),
+        part("edge-w", "box", { x: -1.28, y: 0.22, z: 0 }, { x: 0.16, y: 0.28, z: 1.4 }, "wood-proxy"),
+        part("edge-e", "box", { x: 1.28, y: 0.22, z: 0 }, { x: 0.16, y: 0.28, z: 1.4 }, "wood-proxy"),
       ];
     case "path-detail":
       return [part("detail", "plane", { x: 0, y: 0.025, z: 0 }, { x: 1.4, y: 1, z: 0.4 }, "path-proxy")];
@@ -168,20 +258,70 @@ function createArchetypeParts(archetype: PrefabArchetype): PrefabPartDefinition[
         part("post-b", "box", { x: 0.45, y: 0.65, z: 0 }, { x: 0.12, y: 1.3, z: 0.12 }, "wood-proxy"),
         part("board", "box", { x: 0, y: 1.15, z: 0 }, { x: 1.2, y: 0.7, z: 0.12 }, "sign-board"),
       ];
+    case "orientation-monument":
+      return [
+        part("stepped-base-large", "cylinder", { x: 0, y: 0.12, z: 0 }, { x: 2.4, y: 0.24, z: 2.4 }, "structure-dark"),
+        part("stepped-base-small", "cylinder", { x: 0, y: 0.34, z: 0 }, { x: 1.75, y: 0.2, z: 1.75 }, "path-proxy"),
+        part("obelisk", "box", { x: 0, y: 1.55, z: 0 }, { x: 0.78, y: 2.4, z: 0.78 }, "structure-light"),
+        part("cap", "sphere", { x: 0, y: 2.92, z: 0 }, { x: 0.75, y: 0.38, z: 0.75 }, "accent-blue"),
+        part("pointer-n", "box", { x: 0, y: 1.45, z: -0.95 }, { x: 0.25, y: 0.18, z: 1.1 }, "accent-yellow"),
+        part("pointer-e", "box", { x: 0.95, y: 1.25, z: 0 }, { x: 1.1, y: 0.18, z: 0.25 }, "accent-yellow"),
+      ];
+    case "zone-board":
+      return [
+        part("base", "box", { x: 0, y: 0.1, z: 0 }, { x: 1.7, y: 0.2, z: 0.45 }, "structure-dark"),
+        part("post-a", "box", { x: -0.62, y: 0.8, z: 0 }, { x: 0.14, y: 1.6, z: 0.14 }, "wood-proxy"),
+        part("post-b", "box", { x: 0.62, y: 0.8, z: 0 }, { x: 0.14, y: 1.6, z: 0.14 }, "wood-proxy"),
+        part("panel", "box", { x: 0, y: 1.35, z: 0 }, { x: 1.8, y: 0.9, z: 0.14 }, "sign-board"),
+        part("header", "box", { x: 0, y: 1.88, z: -0.02 }, { x: 1.55, y: 0.14, z: 0.1 }, "accent-yellow"),
+      ];
     case "container":
       return [part("container", "box", { x: 0, y: 0.45, z: 0 }, { x: 0.8, y: 0.9, z: 0.8 }, "metal-proxy")];
+    case "mailbox-bank":
+      return [
+        part("rail", "box", { x: 0, y: 0.75, z: 0 }, { x: 2.4, y: 0.12, z: 0.16 }, "metal-proxy"),
+        part("box-a", "box", { x: -0.8, y: 1.05, z: 0 }, { x: 0.55, y: 0.48, z: 0.42 }, "accent-yellow"),
+        part("box-b", "box", { x: 0, y: 1.05, z: 0 }, { x: 0.55, y: 0.48, z: 0.42 }, "accent-blue"),
+        part("box-c", "box", { x: 0.8, y: 1.05, z: 0 }, { x: 0.55, y: 0.48, z: 0.42 }, "accent-green"),
+        part("post-a", "box", { x: -1.05, y: 0.45, z: 0 }, { x: 0.12, y: 0.9, z: 0.12 }, "metal-proxy"),
+        part("post-b", "box", { x: 1.05, y: 0.45, z: 0 }, { x: 0.12, y: 0.9, z: 0.12 }, "metal-proxy"),
+      ];
     case "tree":
       return [
         part("trunk", "cylinder", { x: 0, y: 0.7, z: 0 }, { x: 0.22, y: 1.4, z: 0.22 }, "vegetation-trunk"),
         part("canopy", "sphere", { x: 0, y: 1.65, z: 0 }, { x: 1.1, y: 0.9, z: 1.1 }, "vegetation-canopy"),
+      ];
+    case "tree-wide":
+      return [
+        part("trunk", "cylinder", { x: 0, y: 0.75, z: 0 }, { x: 0.28, y: 1.5, z: 0.28 }, "vegetation-trunk"),
+        part("canopy-low", "sphere", { x: -0.35, y: 1.55, z: 0.1 }, { x: 1.3, y: 0.75, z: 1.1 }, "vegetation-canopy"),
+        part("canopy-high", "sphere", { x: 0.35, y: 2.05, z: -0.1 }, { x: 1.1, y: 0.85, z: 1.25 }, "foliage-light"),
+      ];
+    case "tree-columnar":
+      return [
+        part("trunk", "cylinder", { x: 0, y: 0.95, z: 0 }, { x: 0.18, y: 1.9, z: 0.18 }, "vegetation-trunk"),
+        part("canopy-a", "sphere", { x: 0, y: 1.8, z: 0 }, { x: 0.75, y: 1.2, z: 0.75 }, "vegetation-canopy"),
+        part("canopy-b", "sphere", { x: 0, y: 2.5, z: 0 }, { x: 0.55, y: 0.9, z: 0.55 }, "foliage-light"),
       ];
     case "bush":
       return [
         part("bush-a", "sphere", { x: -0.22, y: 0.38, z: 0 }, { x: 0.75, y: 0.55, z: 0.75 }, "vegetation-canopy"),
         part("bush-b", "sphere", { x: 0.28, y: 0.32, z: 0.08 }, { x: 0.65, y: 0.48, z: 0.65 }, "foliage-light"),
       ];
+    case "shrub-low":
+      return [
+        part("leaf-a", "sphere", { x: -0.35, y: 0.28, z: 0.05 }, { x: 0.7, y: 0.42, z: 0.55 }, "vegetation-canopy"),
+        part("leaf-b", "sphere", { x: 0.25, y: 0.24, z: -0.05 }, { x: 0.6, y: 0.36, z: 0.52 }, "foliage-light"),
+        part("leaf-c", "sphere", { x: 0.05, y: 0.32, z: 0.32 }, { x: 0.55, y: 0.38, z: 0.5 }, "vegetation-canopy"),
+      ];
     case "rock":
       return [part("rock", "sphere", { x: 0, y: 0.25, z: 0 }, { x: 0.85, y: 0.45, z: 0.65 }, "terrain-neutral")];
+    case "rock-stack":
+      return [
+        part("rock-a", "sphere", { x: -0.28, y: 0.24, z: 0 }, { x: 0.75, y: 0.45, z: 0.62 }, "terrain-neutral"),
+        part("rock-b", "sphere", { x: 0.32, y: 0.28, z: 0.18 }, { x: 0.62, y: 0.5, z: 0.55 }, "structure-dark"),
+        part("rock-c", "sphere", { x: 0.05, y: 0.55, z: -0.18 }, { x: 0.5, y: 0.42, z: 0.46 }, "terrain-neutral"),
+      ];
     case "desk":
       return [
         part("top", "box", { x: 0, y: 0.75, z: 0 }, { x: 1.7, y: 0.14, z: 0.8 }, "wood-proxy"),
@@ -189,6 +329,23 @@ function createArchetypeParts(archetype: PrefabArchetype): PrefabPartDefinition[
         part("leg-b", "box", { x: 0.72, y: 0.36, z: -0.3 }, { x: 0.1, y: 0.72, z: 0.1 }, "metal-proxy"),
         part("leg-c", "box", { x: -0.72, y: 0.36, z: 0.3 }, { x: 0.1, y: 0.72, z: 0.1 }, "metal-proxy"),
         part("leg-d", "box", { x: 0.72, y: 0.36, z: 0.3 }, { x: 0.1, y: 0.72, z: 0.1 }, "metal-proxy"),
+      ];
+    case "workbench-rich":
+      return [
+        part("top", "box", { x: 0, y: 0.78, z: 0 }, { x: 2.4, y: 0.16, z: 1 }, "wood-proxy"),
+        part("lower-shelf", "box", { x: 0, y: 0.32, z: 0 }, { x: 2.2, y: 0.12, z: 0.82 }, "structure-dark"),
+        part("vice", "box", { x: -0.9, y: 0.98, z: -0.32 }, { x: 0.42, y: 0.22, z: 0.34 }, "metal-proxy"),
+        part("plans", "box", { x: 0.55, y: 0.9, z: 0.15 }, { x: 0.85, y: 0.05, z: 0.55 }, "paper"),
+        part("leg-a", "box", { x: -1, y: 0.38, z: -0.38 }, { x: 0.12, y: 0.76, z: 0.12 }, "metal-proxy"),
+        part("leg-b", "box", { x: 1, y: 0.38, z: -0.38 }, { x: 0.12, y: 0.76, z: 0.12 }, "metal-proxy"),
+        part("leg-c", "box", { x: -1, y: 0.38, z: 0.38 }, { x: 0.12, y: 0.76, z: 0.12 }, "metal-proxy"),
+        part("leg-d", "box", { x: 1, y: 0.38, z: 0.38 }, { x: 0.12, y: 0.76, z: 0.12 }, "metal-proxy"),
+      ];
+    case "monitor-desk":
+      return [
+        ...createArchetypeParts("desk"),
+        part("screen", "box", { x: 0, y: 1.2, z: -0.18 }, { x: 0.92, y: 0.55, z: 0.08 }, "structure-dark"),
+        part("screen-accent", "box", { x: 0, y: 1.22, z: -0.235 }, { x: 0.72, y: 0.38, z: 0.025 }, "accent-blue"),
       ];
     case "chair":
       return [
@@ -206,11 +363,52 @@ function createArchetypeParts(archetype: PrefabArchetype): PrefabPartDefinition[
         part("sheet-b", "box", { x: 0.04, y: 0.08, z: -0.03 }, { x: 0.7, y: 0.04, z: 0.5 }, "paper"),
         part("sheet-c", "box", { x: -0.03, y: 0.13, z: 0.02 }, { x: 0.7, y: 0.04, z: 0.5 }, "paper"),
       ];
+    case "display-rack":
+      return [
+        part("base", "platform", { x: 0, y: 0.08, z: 0 }, { x: 2.4, y: 0.16, z: 1.1 }, "structure-dark"),
+        part("back", "box", { x: 0, y: 1, z: 0.42 }, { x: 2.4, y: 1.8, z: 0.12 }, "sign-board"),
+        part("shelf-a", "box", { x: 0, y: 0.55, z: 0.18 }, { x: 2.1, y: 0.1, z: 0.45 }, "wood-proxy"),
+        part("shelf-b", "box", { x: 0, y: 1.05, z: 0.18 }, { x: 2.1, y: 0.1, z: 0.45 }, "wood-proxy"),
+        part("display-a", "box", { x: -0.72, y: 0.78, z: -0.02 }, { x: 0.48, y: 0.38, z: 0.08 }, "paper"),
+        part("display-b", "box", { x: 0, y: 1.28, z: -0.02 }, { x: 0.48, y: 0.38, z: 0.08 }, "paper"),
+        part("display-c", "box", { x: 0.72, y: 0.78, z: -0.02 }, { x: 0.48, y: 0.38, z: 0.08 }, "paper"),
+      ];
     case "landmark":
       return [
         part("base", "cylinder", { x: 0, y: 0.12, z: 0 }, { x: 1.2, y: 0.24, z: 1.2 }, "structure-dark"),
         part("body", "box", { x: 0, y: 0.8, z: 0 }, { x: 0.75, y: 1.25, z: 0.75 }, "accent-blue"),
         part("cap", "sphere", { x: 0, y: 1.55, z: 0 }, { x: 0.8, y: 0.35, z: 0.8 }, "accent-orange"),
+      ];
+    case "timeline-arch":
+      return [
+        part("left-pillar", "box", { x: -1.1, y: 1.15, z: 0 }, { x: 0.28, y: 2.3, z: 0.28 }, "structure-dark"),
+        part("right-pillar", "box", { x: 1.1, y: 1.15, z: 0 }, { x: 0.28, y: 2.3, z: 0.28 }, "structure-dark"),
+        part("lintel", "box", { x: 0, y: 2.25, z: 0 }, { x: 2.5, y: 0.3, z: 0.32 }, "accent-blue"),
+        part("date-plate", "box", { x: 0, y: 1.45, z: -0.16 }, { x: 1.35, y: 0.55, z: 0.08 }, "paper"),
+      ];
+    case "milestone-station":
+      return [
+        part("landing", "cylinder", { x: 0, y: 0.09, z: 0 }, { x: 1.45, y: 0.18, z: 1.45 }, "path-proxy"),
+        part("marker", "box", { x: -0.48, y: 0.9, z: 0 }, { x: 0.24, y: 1.8, z: 0.24 }, "structure-dark"),
+        part("plaque", "box", { x: 0.28, y: 0.88, z: -0.18 }, { x: 0.95, y: 0.58, z: 0.1 }, "paper"),
+        part("cap", "sphere", { x: -0.48, y: 1.92, z: 0 }, { x: 0.38, y: 0.28, z: 0.38 }, "accent-blue"),
+      ];
+    case "skill-garden-landmark":
+      return [
+        part("raised-bed", "cylinder", { x: 0, y: 0.16, z: 0 }, { x: 2.6, y: 0.32, z: 2.6 }, "wood-proxy"),
+        part("trunk", "cylinder", { x: 0, y: 1.1, z: 0 }, { x: 0.34, y: 2.2, z: 0.34 }, "vegetation-trunk"),
+        part("branch-x", "box", { x: 0, y: 2.05, z: 0 }, { x: 2.5, y: 0.12, z: 0.12 }, "wood-proxy"),
+        part("branch-z", "box", { x: 0, y: 2.35, z: 0 }, { x: 0.12, y: 0.12, z: 2.3 }, "wood-proxy"),
+        part("canopy-a", "sphere", { x: -1.15, y: 2.2, z: 0 }, { x: 0.75, y: 0.65, z: 0.75 }, "accent-green"),
+        part("canopy-b", "sphere", { x: 1.15, y: 2.2, z: 0 }, { x: 0.75, y: 0.65, z: 0.75 }, "accent-blue"),
+        part("canopy-c", "sphere", { x: 0, y: 2.55, z: -1.05 }, { x: 0.75, y: 0.65, z: 0.75 }, "accent-yellow"),
+        part("canopy-d", "sphere", { x: 0, y: 2.55, z: 1.05 }, { x: 0.75, y: 0.65, z: 0.75 }, "foliage-light"),
+      ];
+    case "person-scale-marker":
+      return [
+        part("base", "platform", { x: 0, y: 0.06, z: 0 }, { x: 0.7, y: 0.12, z: 0.7 }, "selection-validation"),
+        part("body", "box", { x: 0, y: 0.92, z: 0 }, { x: 0.36, y: 1.45, z: 0.22 }, "selection-validation"),
+        part("head", "sphere", { x: 0, y: 1.72, z: 0 }, { x: 0.28, y: 0.28, z: 0.28 }, "selection-validation"),
       ];
     case "navigation-anchor":
       return [
@@ -235,24 +433,43 @@ function part(id: string, primitive: PrimitiveType, position: { x: number; y: nu
 }
 
 function inferFootprint(archetype: PrefabArchetype): EntityFootprint {
+  if (archetype === "workshop-compound") return { width: 7, depth: 5.6, height: 3.2 };
+  if (archetype === "studio-compound") return { width: 5.8, depth: 4.6, height: 2.7 };
+  if (archetype === "communication-station") return { width: 5, depth: 4.2, height: 4.5 };
   if (archetype === "building") return { width: 3, depth: 2.4, height: 2.3 };
   if (archetype === "pavilion") return { width: 3, depth: 2.6, height: 2 };
-  if (archetype === "wall") return { width: 3, depth: 0.35, height: 1.4 };
+  if (archetype === "wall" || archetype === "wall-window" || archetype === "wall-door") return { width: 3, depth: 0.35, height: 1.9 };
   if (archetype === "gate") return { width: 2, depth: 0.5, height: 2 };
+  if (archetype === "path-section") return { width: 3, depth: 1.5, height: 0.25 };
   if (archetype === "bridge") return { width: 3.2, depth: 1.4, height: 0.8 };
+  if (archetype === "garden-bed") return { width: 2.6, depth: 1.7, height: 0.4 };
+  if (archetype === "orientation-monument") return { width: 2.6, depth: 2.6, height: 3.2 };
+  if (archetype === "zone-board") return { width: 1.9, depth: 0.6, height: 2.1 };
+  if (archetype === "mailbox-bank") return { width: 2.6, depth: 0.7, height: 1.35 };
   if (archetype === "tree") return { width: 0.45, depth: 0.45, height: 2.1 };
+  if (archetype === "tree-wide") return { width: 1, depth: 1, height: 2.7 };
+  if (archetype === "tree-columnar") return { width: 0.7, depth: 0.7, height: 3 };
   if (archetype === "bush") return { width: 0.9, depth: 0.8, height: 0.8 };
+  if (archetype === "shrub-low") return { width: 1.1, depth: 0.9, height: 0.55 };
   if (archetype === "rock") return { width: 0.8, depth: 0.7, height: 0.5 };
+  if (archetype === "rock-stack") return { width: 1.25, depth: 1, height: 0.8 };
   if (archetype === "desk") return { width: 1.8, depth: 0.9, height: 0.9 };
+  if (archetype === "workbench-rich") return { width: 2.5, depth: 1.1, height: 1.1 };
+  if (archetype === "monitor-desk") return { width: 1.8, depth: 1, height: 1.5 };
   if (archetype === "chair") return { width: 0.7, depth: 0.7, height: 1.2 };
   if (archetype === "screen") return { width: 0.9, depth: 0.25, height: 1.1 };
+  if (archetype === "display-rack") return { width: 2.5, depth: 1.2, height: 1.9 };
   if (archetype === "path-detail") return { width: 1.4, depth: 0.4, height: 0.05 };
+  if (archetype === "timeline-arch") return { width: 2.7, depth: 0.55, height: 2.5 };
+  if (archetype === "milestone-station") return { width: 1.6, depth: 1.6, height: 2.1 };
+  if (archetype === "skill-garden-landmark") return { width: 2.8, depth: 2.8, height: 3.2 };
+  if (archetype === "person-scale-marker") return { width: 0.8, depth: 0.8, height: 1.9 };
   if (archetype === "navigation-anchor") return { width: 0.45, depth: 0.45, height: 0.45 };
   return { width: 1, depth: 1, height: 1 };
 }
 
 function inferCollisionMode(archetype: PrefabArchetype): CollisionMode {
-  if (archetype === "platform" || archetype === "round-platform" || archetype === "bridge" || archetype === "steps") return "walkable";
+  if (archetype === "platform" || archetype === "round-platform" || archetype === "bridge" || archetype === "steps" || archetype === "path-section") return "walkable";
   if (archetype === "path-detail" || archetype === "navigation-anchor") return "none";
   return "blocking";
 }
@@ -274,6 +491,150 @@ const shortMediumLong = [
 ];
 
 const CATALOG_SEEDS: CatalogSeed[] = [
+  { name: "Portfolio V2 Scale Reference", category: "navigation", archetype: "person-scale-marker", collisionMode: "none", tags: ["portfolio-v2", "editor-helper", "scale-reference"] },
+  { name: "Portfolio V2 Foundation Square", category: "architecture", archetype: "platform", variants: sizeVariants, tags: ["portfolio-v2", "architecture", "foundation"] },
+  { name: "Portfolio V2 Foundation Rectangle", category: "architecture", archetype: "platform", variants: [{ id: "standard", label: "Standard", size: "standard", scale: { x: 1.6, y: 1, z: 0.9 }, footprint: { width: 3.2, depth: 1.8, height: 0.25 } }, { id: "large", label: "Large", size: "large", scale: { x: 2.5, y: 1, z: 1.35 }, footprint: { width: 5, depth: 2.7, height: 0.25 } }], tags: ["portfolio-v2", "architecture", "foundation"] },
+  { name: "Portfolio V2 Raised Foundation", category: "architecture", archetype: "platform", variants: [{ id: "standard", label: "Standard", size: "standard", scale: { x: 1.8, y: 1.8, z: 1.2 }, footprint: { width: 3.6, depth: 2.4, height: 0.45 } }], tags: ["portfolio-v2", "architecture", "foundation"] },
+  { name: "Portfolio V2 Wall Solid", category: "architecture", archetype: "wall", variants: shortMediumLong, tags: ["portfolio-v2", "architecture", "wall"] },
+  { name: "Portfolio V2 Wall Window", category: "architecture", archetype: "wall-window", variants: shortMediumLong, tags: ["portfolio-v2", "architecture", "wall"] },
+  { name: "Portfolio V2 Wall Doorway", category: "architecture", archetype: "wall-door", variants: shortMediumLong, tags: ["portfolio-v2", "architecture", "wall"] },
+  { name: "Portfolio V2 Wall Corner", category: "architecture", archetype: "gate", tags: ["portfolio-v2", "architecture", "wall"] },
+  { name: "Portfolio V2 Roof Flat", category: "architecture", archetype: "platform", variants: shortMediumLong, tags: ["portfolio-v2", "architecture", "roof"] },
+  { name: "Portfolio V2 Roof Stepped", category: "architecture", archetype: "workshop-compound", variants: [{ id: "cap", label: "Cap", size: "small", scale: { x: 0.5, y: 0.22, z: 0.42 }, footprint: { width: 3.5, depth: 2.4, height: 0.75 } }], tags: ["portfolio-v2", "architecture", "roof"] },
+  { name: "Portfolio V2 Porch", category: "architecture", archetype: "pavilion", variants: sizeVariants.slice(0, 2), tags: ["portfolio-v2", "architecture", "porch"] },
+  { name: "Portfolio V2 Canopy", category: "architecture", archetype: "pavilion", variants: [{ id: "standard", label: "Standard", size: "standard", scale: { x: 1, y: 0.65, z: 0.65 } }], tags: ["portfolio-v2", "architecture", "canopy"] },
+  { name: "Portfolio V2 Exterior Stair", category: "infrastructure", archetype: "steps", variants: sizeVariants, tags: ["portfolio-v2", "infrastructure", "stair"] },
+  { name: "Portfolio V2 Ramp", category: "infrastructure", archetype: "platform", variants: shortMediumLong, tags: ["portfolio-v2", "infrastructure", "ramp"] },
+  { name: "Portfolio V2 Handrail", category: "infrastructure", archetype: "fence", variants: shortMediumLong, tags: ["portfolio-v2", "infrastructure", "rail"] },
+  { name: "Portfolio V2 Main Path Straight", category: "roads-and-paths", archetype: "path-section", variants: shortMediumLong, tags: ["portfolio-v2", "path"] },
+  { name: "Portfolio V2 Main Path Corner", category: "roads-and-paths", archetype: "path-section", variants: shortMediumLong, tags: ["portfolio-v2", "path"] },
+  { name: "Portfolio V2 Path Junction", category: "roads-and-paths", archetype: "round-platform", variants: sizeVariants, tags: ["portfolio-v2", "path"] },
+  { name: "Portfolio V2 Secondary Path", category: "roads-and-paths", archetype: "path-section", variants: shortMediumLong, tags: ["portfolio-v2", "path"] },
+  { name: "Portfolio V2 Stepping Stone", category: "roads-and-paths", archetype: "path-detail", variants: sizeVariants, tags: ["portfolio-v2", "path"] },
+  { name: "Portfolio V2 Curb", category: "infrastructure", archetype: "wall", variants: shortMediumLong, tags: ["portfolio-v2", "infrastructure", "curb"] },
+  { name: "Portfolio V2 Retaining Wall", category: "infrastructure", archetype: "wall", variants: shortMediumLong, tags: ["portfolio-v2", "infrastructure", "retaining"] },
+  { name: "Portfolio V2 Fence Straight", category: "infrastructure", archetype: "fence", variants: shortMediumLong, tags: ["portfolio-v2", "infrastructure", "fence"] },
+  { name: "Portfolio V2 Fence Gate", category: "infrastructure", archetype: "gate", tags: ["portfolio-v2", "infrastructure", "fence"] },
+  { name: "Portfolio V2 Bridge Section", category: "infrastructure", archetype: "bridge", variants: shortMediumLong, tags: ["portfolio-v2", "infrastructure", "bridge"] },
+  { name: "Portfolio V2 Bollard", category: "street-furniture", archetype: "post", tags: ["portfolio-v2", "infrastructure"] },
+  { name: "Portfolio V2 Path Lamp", category: "street-furniture", archetype: "post", variants: [{ id: "short", label: "Short", size: "short", scale: { x: 0.8, y: 0.75, z: 0.8 } }], tags: ["portfolio-v2", "lighting"] },
+  { name: "Portfolio V2 Building Lamp", category: "street-furniture", archetype: "post", variants: [{ id: "wall", label: "Wall", size: "small", scale: { x: 0.55, y: 0.45, z: 0.55 } }], tags: ["portfolio-v2", "lighting"] },
+  { name: "Portfolio V2 Bench", category: "street-furniture", archetype: "bench", variants: sizeVariants.slice(0, 2), tags: ["portfolio-v2", "seating"] },
+  { name: "Portfolio V2 Planter", category: "street-furniture", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "vegetation"] },
+  { name: "Portfolio V2 Raised Garden Bed", category: "nature", archetype: "garden-bed", variants: shortMediumLong, tags: ["portfolio-v2", "vegetation"] },
+  { name: "Portfolio V2 Utility Cabinet", category: "infrastructure", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "infrastructure"] },
+  { name: "Portfolio V2 Drainage Cover", category: "infrastructure", archetype: "path-detail", tags: ["portfolio-v2", "infrastructure"] },
+  { name: "Portfolio V2 Direction Sign", category: "signage", archetype: "zone-board", tags: ["portfolio-v2", "signage"] },
+  { name: "Portfolio V2 Zone Entrance Sign", category: "signage", archetype: "zone-board", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "wide", label: "Wide", size: "wide", scale: { x: 1.25, y: 1, z: 1 } }], tags: ["portfolio-v2", "signage"] },
+  { name: "Portfolio V2 Noticeboard", category: "signage", archetype: "board", tags: ["portfolio-v2", "signage"] },
+  { name: "Portfolio V2 Map Board", category: "signage", archetype: "zone-board", variants: [{ id: "wide", label: "Wide", size: "wide", scale: { x: 1.45, y: 1.05, z: 1 } }], tags: ["portfolio-v2", "signage"] },
+  { name: "Portfolio V2 Orientation Monument", category: "portfolio", archetype: "orientation-monument", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "tall", label: "Tall", size: "tall", scale: { x: 1.15, y: 1.2, z: 1.15 } }], tags: ["portfolio-v2", "arrival", "landmark"] },
+  { name: "Portfolio V2 Loader Origin Surround", category: "portfolio", archetype: "round-platform", variants: [{ id: "standard", label: "Standard", size: "standard", scale: { x: 1.1, y: 0.8, z: 1.1 } }], tags: ["portfolio-v2", "arrival"] },
+  { name: "Portfolio V2 Intro Board", category: "portfolio", archetype: "zone-board", variants: [{ id: "wide", label: "Wide", size: "wide", scale: { x: 1.6, y: 1.1, z: 1 } }], tags: ["portfolio-v2", "arrival", "interactive"] },
+  { name: "Portfolio V2 Info Pedestal", category: "portfolio", archetype: "container", tags: ["portfolio-v2", "interactive"] },
+  { name: "Portfolio V2 Plaza Seating", category: "street-furniture", archetype: "bench", variants: sizeVariants, tags: ["portfolio-v2", "arrival", "seating"] },
+  { name: "Portfolio V2 Plaza Planter", category: "street-furniture", archetype: "garden-bed", variants: sizeVariants, tags: ["portfolio-v2", "arrival", "vegetation"] },
+  { name: "Portfolio V2 Arrival Marker", category: "portfolio", archetype: "navigation-anchor", collisionMode: "trigger", tags: ["portfolio-v2", "arrival", "interactive"] },
+  { name: "Portfolio V2 Developer Workshop", category: "architecture", archetype: "workshop-compound", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "large", label: "Large", size: "large", scale: { x: 1.18, y: 1.08, z: 1.12 }, footprint: { width: 8.3, depth: 6.3, height: 3.5 } }], tags: ["portfolio-v2", "projects", "structure"], futureAssetSlot: "future/v2/projects-workshop" },
+  { name: "Portfolio V2 Workshop Annex", category: "architecture", archetype: "studio-compound", variants: sizeVariants.slice(0, 2), tags: ["portfolio-v2", "projects", "structure"] },
+  { name: "Portfolio V2 Covered Workspace", category: "architecture", archetype: "pavilion", variants: sizeVariants, tags: ["portfolio-v2", "projects", "structure"] },
+  { name: "Portfolio V2 Project Exhibition Canopy", category: "portfolio", archetype: "pavilion", variants: sizeVariants, tags: ["portfolio-v2", "projects", "display"] },
+  { name: "Portfolio V2 Project Display Table", category: "portfolio", archetype: "workbench-rich", variants: sizeVariants, tags: ["portfolio-v2", "projects", "display"] },
+  { name: "Portfolio V2 Workbench", category: "portfolio", archetype: "workbench-rich", variants: shortMediumLong, tags: ["portfolio-v2", "projects"] },
+  { name: "Portfolio V2 Project Board", category: "portfolio", archetype: "display-rack", variants: sizeVariants, tags: ["portfolio-v2", "projects", "interactive"] },
+  { name: "Portfolio V2 Featured Project Pedestal", category: "portfolio", archetype: "landmark", variants: sizeVariants, tags: ["portfolio-v2", "projects", "interactive"] },
+  { name: "Portfolio V2 Folder", category: "portfolio", archetype: "paper-stack", variants: sizeVariants, tags: ["portfolio-v2", "projects", "document"] },
+  { name: "Portfolio V2 Document Stack", category: "portfolio", archetype: "paper-stack", variants: shortMediumLong, tags: ["portfolio-v2", "projects", "document"] },
+  { name: "Portfolio V2 Storage Shelf", category: "office", archetype: "display-rack", variants: sizeVariants, tags: ["portfolio-v2", "projects", "storage"] },
+  { name: "Portfolio V2 Tool Cabinet", category: "office", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "projects", "storage"] },
+  { name: "Portfolio V2 Crate Stack", category: "street-furniture", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "projects", "storage"] },
+  { name: "Portfolio V2 Cable Utility Box", category: "infrastructure", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "projects", "utility"] },
+  { name: "Portfolio V2 Workshop Entrance Sign", category: "signage", archetype: "zone-board", tags: ["portfolio-v2", "projects", "signage"] },
+  { name: "Portfolio V2 Timeline Entrance Arch", category: "portfolio", archetype: "timeline-arch", variants: sizeVariants, tags: ["portfolio-v2", "experience", "landmark"] },
+  { name: "Portfolio V2 Milestone Marker A", category: "portfolio", archetype: "milestone-station", variants: sizeVariants, tags: ["portfolio-v2", "experience", "interactive"] },
+  { name: "Portfolio V2 Milestone Marker B", category: "portfolio", archetype: "milestone-station", variants: sizeVariants, tags: ["portfolio-v2", "experience", "interactive"] },
+  { name: "Portfolio V2 Milestone Marker C", category: "portfolio", archetype: "milestone-station", variants: sizeVariants, tags: ["portfolio-v2", "experience", "interactive"] },
+  { name: "Portfolio V2 Information Plaque", category: "portfolio", archetype: "board", tags: ["portfolio-v2", "interactive"] },
+  { name: "Portfolio V2 Timeline Railing", category: "infrastructure", archetype: "fence", variants: shortMediumLong, tags: ["portfolio-v2", "experience", "rail"] },
+  { name: "Portfolio V2 Career Path Marker", category: "portfolio", archetype: "navigation-anchor", collisionMode: "trigger", tags: ["portfolio-v2", "experience", "interactive"] },
+  { name: "Portfolio V2 Education Branch Marker", category: "portfolio", archetype: "zone-board", tags: ["portfolio-v2", "experience", "interactive"] },
+  { name: "Portfolio V2 Lookout Platform", category: "infrastructure", archetype: "round-platform", variants: sizeVariants, tags: ["portfolio-v2", "experience"] },
+  { name: "Portfolio V2 Current Position Landmark", category: "portfolio", archetype: "orientation-monument", variants: sizeVariants, tags: ["portfolio-v2", "experience", "landmark"] },
+  { name: "Portfolio V2 Reflection Seat", category: "street-furniture", archetype: "bench", tags: ["portfolio-v2", "experience"] },
+  { name: "Portfolio V2 Personal Studio", category: "architecture", archetype: "studio-compound", variants: sizeVariants, tags: ["portfolio-v2", "about", "structure"], futureAssetSlot: "future/v2/about-studio" },
+  { name: "Portfolio V2 Studio Annex", category: "architecture", archetype: "building", variants: sizeVariants, tags: ["portfolio-v2", "about", "structure"] },
+  { name: "Portfolio V2 Exterior Workspace", category: "portfolio", archetype: "monitor-desk", variants: sizeVariants, tags: ["portfolio-v2", "about", "interactive"] },
+  { name: "Portfolio V2 Chair", category: "office", archetype: "chair", variants: sizeVariants, tags: ["portfolio-v2", "about"] },
+  { name: "Portfolio V2 Bookshelf", category: "office", archetype: "display-rack", variants: sizeVariants, tags: ["portfolio-v2", "about"] },
+  { name: "Portfolio V2 Profile Pedestal", category: "portfolio", archetype: "landmark", tags: ["portfolio-v2", "about", "interactive"] },
+  { name: "Portfolio V2 CV Stand", category: "portfolio", archetype: "board", tags: ["portfolio-v2", "about", "interactive"] },
+  { name: "Portfolio V2 About Entrance Sign", category: "signage", archetype: "zone-board", tags: ["portfolio-v2", "about", "signage"] },
+  { name: "Portfolio V2 Skill Tree", category: "portfolio", archetype: "skill-garden-landmark", variants: sizeVariants, tags: ["portfolio-v2", "skills", "landmark"] },
+  { name: "Portfolio V2 Skill Stand A", category: "portfolio", archetype: "display-rack", variants: sizeVariants, tags: ["portfolio-v2", "skills", "interactive"] },
+  { name: "Portfolio V2 Skill Stand B", category: "portfolio", archetype: "display-rack", variants: sizeVariants, tags: ["portfolio-v2", "skills", "interactive"] },
+  { name: "Portfolio V2 Skill Stand C", category: "portfolio", archetype: "display-rack", variants: sizeVariants, tags: ["portfolio-v2", "skills", "interactive"] },
+  { name: "Portfolio V2 Frontend Marker", category: "portfolio", archetype: "zone-board", tags: ["portfolio-v2", "skills", "interactive"] },
+  { name: "Portfolio V2 Backend Marker", category: "portfolio", archetype: "zone-board", tags: ["portfolio-v2", "skills", "interactive"] },
+  { name: "Portfolio V2 Tooling Marker", category: "portfolio", archetype: "zone-board", tags: ["portfolio-v2", "skills", "interactive"] },
+  { name: "Portfolio V2 Design UX Marker", category: "portfolio", archetype: "zone-board", tags: ["portfolio-v2", "skills", "interactive"] },
+  { name: "Portfolio V2 Technology Garden Bed", category: "nature", archetype: "garden-bed", variants: sizeVariants, tags: ["portfolio-v2", "skills", "vegetation"] },
+  { name: "Portfolio V2 Modular Skill Branch", category: "portfolio", archetype: "fence", variants: shortMediumLong, tags: ["portfolio-v2", "skills"] },
+  { name: "Portfolio V2 Skill Token", category: "portfolio", archetype: "navigation-anchor", collisionMode: "trigger", tags: ["portfolio-v2", "skills", "interactive"] },
+  { name: "Portfolio V2 Maintenance Shelter", category: "architecture", archetype: "pavilion", tags: ["portfolio-v2", "skills", "structure"] },
+  { name: "Portfolio V2 Skills Entrance Sign", category: "signage", archetype: "zone-board", tags: ["portfolio-v2", "skills", "signage"] },
+  { name: "Portfolio V2 Communication Building", category: "architecture", archetype: "communication-station", variants: sizeVariants, tags: ["portfolio-v2", "contact", "structure"], futureAssetSlot: "future/v2/contact-building" },
+  { name: "Portfolio V2 Contact Kiosk", category: "architecture", archetype: "building", variants: sizeVariants, tags: ["portfolio-v2", "contact", "structure"] },
+  { name: "Portfolio V2 Mailbox", category: "portfolio", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "contact", "interactive"] },
+  { name: "Portfolio V2 Mailbox Cluster", category: "portfolio", archetype: "mailbox-bank", variants: sizeVariants, tags: ["portfolio-v2", "contact", "interactive"] },
+  { name: "Portfolio V2 Contact Noticeboard", category: "portfolio", archetype: "zone-board", tags: ["portfolio-v2", "contact", "interactive"] },
+  { name: "Portfolio V2 Writing Counter", category: "portfolio", archetype: "workbench-rich", tags: ["portfolio-v2", "contact"] },
+  { name: "Portfolio V2 Communication Mast", category: "portfolio", archetype: "post", variants: [{ id: "tall", label: "Tall", size: "tall", scale: { x: 1.2, y: 2.1, z: 1.2 } }], tags: ["portfolio-v2", "contact", "landmark"] },
+  { name: "Portfolio V2 Radio Cabinet", category: "infrastructure", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "contact"] },
+  { name: "Portfolio V2 Social Link Marker", category: "portfolio", archetype: "navigation-anchor", collisionMode: "trigger", tags: ["portfolio-v2", "contact", "interactive"] },
+  { name: "Portfolio V2 Contact Form Marker", category: "portfolio", archetype: "landmark", collisionMode: "trigger", tags: ["portfolio-v2", "contact", "interactive"] },
+  { name: "Portfolio V2 CV Download Marker", category: "portfolio", archetype: "board", collisionMode: "trigger", tags: ["portfolio-v2", "contact", "interactive"] },
+  { name: "Portfolio V2 Flyer", category: "portfolio", archetype: "paper-stack", variants: sizeVariants, tags: ["portfolio-v2", "contact", "flyer"] },
+  { name: "Portfolio V2 Flyer Pile", category: "portfolio", archetype: "paper-stack", variants: shortMediumLong, tags: ["portfolio-v2", "contact", "flyer"] },
+  { name: "Portfolio V2 Wall Poster", category: "portfolio", archetype: "board", tags: ["portfolio-v2", "contact", "flyer"] },
+  { name: "Portfolio V2 Contact Entrance Sign", category: "signage", archetype: "zone-board", tags: ["portfolio-v2", "contact", "signage"] },
+  { name: "Portfolio V2 Broad Canopy Tree", category: "nature", archetype: "tree-wide", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
+  { name: "Portfolio V2 Tall Narrow Tree", category: "nature", archetype: "tree-columnar", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
+  { name: "Portfolio V2 Ornamental Tree", category: "nature", archetype: "tree", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
+  { name: "Portfolio V2 Large Shrub", category: "nature", archetype: "bush", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
+  { name: "Portfolio V2 Low Shrub", category: "nature", archetype: "shrub-low", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
+  { name: "Portfolio V2 Grass Cluster", category: "nature", archetype: "shrub-low", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
+  { name: "Portfolio V2 Flower Cluster", category: "nature", archetype: "shrub-low", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
+  { name: "Portfolio V2 Large Rock", category: "nature", archetype: "rock-stack", variants: sizeVariants, tags: ["portfolio-v2", "nature", "rock"] },
+  { name: "Portfolio V2 Medium Rock", category: "nature", archetype: "rock", variants: sizeVariants, tags: ["portfolio-v2", "nature", "rock"] },
+  { name: "Portfolio V2 Small Rock Cluster", category: "nature", archetype: "rock-stack", variants: sizeVariants, tags: ["portfolio-v2", "nature", "rock"] },
+  { name: "Portfolio V2 Fallen Log", category: "nature", archetype: "tree", variants: [{ id: "standard", label: "Standard", size: "standard", scale: { x: 1.4, y: 0.35, z: 0.35 }, footprint: { width: 1.4, depth: 0.35, height: 0.75 } }], tags: ["portfolio-v2", "nature"] },
+  { name: "Portfolio V2 Timber Stack", category: "nature", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "nature"] },
+  { name: "Portfolio V2 Ground Debris", category: "decoration", archetype: "rock-stack", variants: sizeVariants, tags: ["portfolio-v2", "decoration"] },
+  { name: "Portfolio V2 Crate", category: "street-furniture", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "decoration"] },
+  { name: "Portfolio V2 Barrel Container", category: "street-furniture", archetype: "round-platform", variants: sizeVariants, tags: ["portfolio-v2", "decoration"] },
+  { name: "Scale Reference Mannequin", category: "navigation", archetype: "person-scale-marker", collisionMode: "none", tags: ["navigation", "editor-helper", "scale-reference"] },
+  { name: "Central Orientation Monument", category: "portfolio", archetype: "orientation-monument", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "tall", label: "Tall", size: "tall", scale: { x: 1.1, y: 1.18, z: 1.1 }, footprint: { width: 2.9, depth: 2.9, height: 3.8 } }] },
+  { name: "Portfolio Workshop Compound", category: "architecture", archetype: "workshop-compound", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "large", label: "Large", size: "large", scale: { x: 1.15, y: 1.05, z: 1.1 }, footprint: { width: 8, depth: 6.2, height: 3.5 } }], futureAssetSlot: "future/modular-workshop" },
+  { name: "Personal Studio Compound", category: "architecture", archetype: "studio-compound", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "wide", label: "Wide", size: "wide", scale: { x: 1.2, y: 1, z: 1.05 }, footprint: { width: 7, depth: 5, height: 2.8 } }], futureAssetSlot: "future/personal-studio" },
+  { name: "Communication Station", category: "architecture", archetype: "communication-station", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "compact", label: "Compact", size: "small", scale: { x: 0.85, y: 0.9, z: 0.85 }, footprint: { width: 4.3, depth: 3.6, height: 4.1 } }], futureAssetSlot: "future/contact-station" },
+  { name: "Wall With Window", category: "architecture", archetype: "wall-window", variants: shortMediumLong },
+  { name: "Wall With Doorway", category: "architecture", archetype: "wall-door", variants: shortMediumLong },
+  { name: "Main Path Section", category: "roads-and-paths", archetype: "path-section", variants: shortMediumLong },
+  { name: "Secondary Path Section", category: "roads-and-paths", archetype: "path-section", variants: [{ id: "short", label: "Short", size: "short", scale: { x: 0.75, y: 1, z: 0.72 }, footprint: { width: 2.2, depth: 1.1, height: 0.25 } }, { id: "long", label: "Long", size: "long", scale: { x: 1.4, y: 1, z: 0.72 }, footprint: { width: 4.2, depth: 1.1, height: 0.25 } }] },
+  { name: "Zone Identity Board", category: "signage", archetype: "zone-board", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "wide", label: "Wide", size: "wide", scale: { x: 1.35, y: 1, z: 1 }, footprint: { width: 2.5, depth: 0.65, height: 2.1 } }] },
+  { name: "Project Display Rack", category: "portfolio", archetype: "display-rack", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "wide", label: "Wide", size: "wide", scale: { x: 1.25, y: 1, z: 1 }, footprint: { width: 3.2, depth: 1.2, height: 1.9 } }] },
+  { name: "Skill Display Stand", category: "portfolio", archetype: "display-rack", variants: [{ id: "standard", label: "Standard", size: "standard", scale: { x: 0.75, y: 0.9, z: 0.85 }, footprint: { width: 1.9, depth: 1, height: 1.75 } }, { id: "wide", label: "Wide", size: "wide", scale: UNIT_SCALE }] },
+  { name: "Timeline Arch", category: "portfolio", archetype: "timeline-arch", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "wide", label: "Wide", size: "wide", scale: { x: 1.25, y: 1, z: 1 }, footprint: { width: 3.4, depth: 0.6, height: 2.5 } }] },
+  { name: "Milestone Station", category: "portfolio", archetype: "milestone-station", variants: sizeVariants },
+  { name: "Skill Branch Landmark", category: "portfolio", archetype: "skill-garden-landmark", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "large", label: "Large", size: "large", scale: { x: 1.18, y: 1.12, z: 1.18 }, footprint: { width: 3.3, depth: 3.3, height: 3.6 } }] },
+  { name: "Mailbox Bank", category: "portfolio", archetype: "mailbox-bank", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "long", label: "Long", size: "long", scale: { x: 1.35, y: 1, z: 1 }, footprint: { width: 3.6, depth: 0.7, height: 1.35 } }] },
+  { name: "Raised Garden Bed", category: "nature", archetype: "garden-bed", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "long", label: "Long", size: "long", scale: { x: 1.55, y: 1, z: 1 }, footprint: { width: 4, depth: 1.7, height: 0.4 } }] },
+  { name: "Wide Canopy Tree", category: "nature", archetype: "tree-wide", variants: sizeVariants },
+  { name: "Columnar Tree", category: "nature", archetype: "tree-columnar", variants: sizeVariants },
+  { name: "Low Shrub Cluster", category: "nature", archetype: "shrub-low", variants: sizeVariants },
+  { name: "Stacked Rock Cluster", category: "nature", archetype: "rock-stack", variants: sizeVariants },
+  { name: "Development Workbench", category: "portfolio", archetype: "workbench-rich", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "wide", label: "Wide", size: "wide", scale: { x: 1.25, y: 1, z: 1 }, footprint: { width: 3.1, depth: 1.1, height: 1.1 } }] },
+  { name: "Desk With Monitor", category: "portfolio", archetype: "monitor-desk", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "compact", label: "Compact", size: "small", scale: { x: 0.82, y: 0.9, z: 0.85 }, footprint: { width: 1.5, depth: 0.9, height: 1.4 } }] },
   ...["Building Mass", "Workshop Shell"].map((name) => ({ name, category: "architecture" as const, archetype: "building" as const, variants: sizeVariants })),
   ...["Open Pavilion"].map((name) => ({ name, category: "architecture" as const, archetype: "pavilion" as const, variants: sizeVariants.slice(0, 2) })),
   ...["Shed", "Kiosk", "Open Shelter", "Door Frame", "Window Frame", "Flat Roof", "Simple Sloped Roof", "Archway", "Entrance Gate"].map((name) => ({ name, category: "architecture" as const, archetype: (name.includes("Gate") || name.includes("Frame") || name === "Archway") ? "gate" as const : "building" as const })),

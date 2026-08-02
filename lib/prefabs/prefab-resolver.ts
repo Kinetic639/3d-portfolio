@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { PlacedMapEntity, SerializableTransform } from "@/lib/maps/map-entities";
+import type { PlacedMapEntity, PrimitiveType, SerializableTransform } from "@/lib/maps/map-entities";
 import { isPrefabMaterialRole, resolvePrefabMaterialColor } from "./prefab-materials";
 import { getPrefabDefinition } from "./prefab-library";
 import type { PrefabDefinition, PrefabPartDefinition, PrefabVariantDefinition, ResolvedPrefabPart } from "./prefab-types";
@@ -44,6 +44,52 @@ export function resolvePrefabCollisionMode(entity: PlacedMapEntity) {
   if (entity.collisionModeOverride) return entity.collisionModeOverride;
   if (entity.entityType !== "prefab" || !entity.prefabId) return entity.collisionMode;
   return getPrefabDefinition(entity.prefabId)?.collisionMode ?? entity.collisionMode;
+}
+
+export type PrefabVisualBounds = {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  minZ: number;
+  maxZ: number;
+};
+
+export function resolvePrefabVisualBounds(entity: PlacedMapEntity): PrefabVisualBounds | null {
+  const resolved = resolvePrefabInstance(entity);
+  if (!resolved.parts.length) {
+    return null;
+  }
+
+  const bounds: PrefabVisualBounds = {
+    minX: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY,
+    minZ: Number.POSITIVE_INFINITY,
+    maxZ: Number.NEGATIVE_INFINITY,
+  };
+
+  for (const part of resolved.parts) {
+    const extents = getPrimitiveExtents(part.primitive);
+    const matrix = new THREE.Matrix4().compose(
+      new THREE.Vector3(part.transform.position.x, part.transform.position.y, part.transform.position.z),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(part.transform.rotation.x, part.transform.rotation.y, part.transform.rotation.z)),
+      new THREE.Vector3(part.transform.scale.x, part.transform.scale.y, part.transform.scale.z),
+    );
+
+    for (const corner of getBoundsCorners(extents)) {
+      corner.applyMatrix4(matrix);
+      bounds.minX = Math.min(bounds.minX, corner.x);
+      bounds.maxX = Math.max(bounds.maxX, corner.x);
+      bounds.minY = Math.min(bounds.minY, corner.y);
+      bounds.maxY = Math.max(bounds.maxY, corner.y);
+      bounds.minZ = Math.min(bounds.minZ, corner.z);
+      bounds.maxZ = Math.max(bounds.maxZ, corner.z);
+    }
+  }
+
+  return bounds;
 }
 
 function resolvePrefabPart(
@@ -126,4 +172,30 @@ function createMissingPrefabPart(entity: PlacedMapEntity): ResolvedPrefabPart {
 
 function round(value: number) {
   return Number(value.toFixed(5));
+}
+
+function getPrimitiveExtents(primitive: PrimitiveType) {
+  switch (primitive) {
+    case "plane":
+      return { x: 0.5, y: 0.02, z: 0.5 };
+    case "platform":
+      return { x: 0.5, y: 0.11, z: 0.5 };
+    case "sign":
+      return { x: 0.5, y: 0.36, z: 0.04 };
+    default:
+      return { x: 0.5, y: 0.5, z: 0.5 };
+  }
+}
+
+function getBoundsCorners(extents: { x: number; y: number; z: number }) {
+  return [
+    new THREE.Vector3(-extents.x, -extents.y, -extents.z),
+    new THREE.Vector3(extents.x, -extents.y, -extents.z),
+    new THREE.Vector3(-extents.x, extents.y, -extents.z),
+    new THREE.Vector3(extents.x, extents.y, -extents.z),
+    new THREE.Vector3(-extents.x, -extents.y, extents.z),
+    new THREE.Vector3(extents.x, -extents.y, extents.z),
+    new THREE.Vector3(-extents.x, extents.y, extents.z),
+    new THREE.Vector3(extents.x, extents.y, extents.z),
+  ];
 }

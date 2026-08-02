@@ -1,6 +1,10 @@
 import {
   createPhase45AuthoringTestMapDefinition,
+  createPortfolioMainAuthoredV2MapDefinition,
+  createPortfolioMainGreyboxBasicBackupMapDefinition,
+  createPortfolioMainGreyboxMapDefinition,
   createPortfolioPhase4MapDefinition,
+  createPortfolioV2PrefabShowcaseMapDefinition,
   createPrefabCatalogMapDefinition,
   createPrefabDensityTestMapDefinition,
   createPrefabDiversityStressMapDefinition,
@@ -19,7 +23,7 @@ import {
   type MapRuntimeMode,
 } from "./map-definition";
 
-export const DEFAULT_AUTHORED_MAP_ID = "portfolio-phase4";
+export const DEFAULT_AUTHORED_MAP_ID = "portfolio-main-authored-v2";
 export const MAP_DRAFT_STORAGE_PREFIX = "portfolio-map-definition-draft.v1:";
 
 export type MapRegistryEntry = {
@@ -40,9 +44,13 @@ type BundledMapSource = {
 };
 
 const BUNDLED_MAPS: BundledMapSource[] = [
+  createBundledEntry(createPortfolioMainAuthoredV2MapDefinition, "bundled:portfolio-main-authored-v2", false),
+  createBundledEntry(createPortfolioMainGreyboxMapDefinition, "bundled:portfolio-main-greybox-v1", false),
+  createBundledEntry(createPortfolioMainGreyboxBasicBackupMapDefinition, "bundled:portfolio-main-greybox-v1-basic-backup", true),
   createBundledEntry(createPortfolioPhase4MapDefinition, "bundled:portfolio-phase4", false),
   createBundledEntry(createTinyExampleMapDefinition, "bundled:tiny-example", true),
   createBundledEntry(createPhase45AuthoringTestMapDefinition, "bundled:phase45-authoring-test", true),
+  createBundledEntry(createPortfolioV2PrefabShowcaseMapDefinition, "bundled:portfolio-v2-prefab-showcase", true),
   createBundledEntry(createPrefabCatalogMapDefinition, "bundled:phase49-prefab-catalog", true),
   createBundledEntry(createPrefabDensityTestMapDefinition, "bundled:phase49-prefab-density-test", true),
   createBundledEntry(createPrefabRepetitionStressMapDefinition, "bundled:phase49-prefab-repetition-stress", true),

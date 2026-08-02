@@ -17,6 +17,7 @@ import { buildSurfaceChunkMesh, type SurfaceChunkMeshData } from "@/lib/terrain/
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import { parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
 import type { GridCoordinate } from "@/lib/world/world-config";
+import { getTerrainSurfaceAt } from "@/lib/world/surface-query";
 import { MapEditorSession, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
 import { createMapPresetWorld, type MapPresetId } from "@/lib/editor/map-presets";
 import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
@@ -32,6 +33,7 @@ import {
   validateEntityPlacement,
 } from "@/lib/editor/entity-authoring";
 import { BUILT_IN_PREFABS, getPrefabDefinition } from "@/lib/prefabs/prefab-library";
+import { groundEntityOnTerrain } from "@/lib/prefabs/prefab-placement";
 import { resolvePrefabInstance } from "@/lib/prefabs/prefab-resolver";
 import type { ResolvedPrefabPart } from "@/lib/prefabs/prefab-types";
 import {
@@ -1403,7 +1405,7 @@ function ExperienceScene({
     setEditorMessage({ type: "info", text: "Marker removed." });
   };
 
-  const placeEntityAtBasePosition = (basePosition: THREE.Vector3 | { x: number; y: number; z: number }) => {
+  const placeEntityAtSurface = (surfacePosition: THREE.Vector3 | { x: number; y: number; z: number }) => {
     if (isLayerLocked(layerStates, "entities")) {
       setEditorMessage({ type: "error", text: "The entity layer is locked." });
       return;
@@ -1414,7 +1416,7 @@ function ExperienceScene({
       color: entityColor,
       collisionMode,
       transform: {
-        position: { x: basePosition.x, y: basePosition.y + 0.5, z: basePosition.z },
+        position: { x: surfacePosition.x, y: surfacePosition.y, z: surfacePosition.z },
         rotation: { x: 0, y: 0, z: 0 },
         scale: getDefaultEntityScale(primitiveType),
       },
@@ -1433,7 +1435,7 @@ function ExperienceScene({
     setTool("select");
   };
 
-  const placePrefabAtBasePosition = (basePosition: THREE.Vector3 | { x: number; y: number; z: number }) => {
+  const placePrefabAtSurface = (surfacePosition: THREE.Vector3 | { x: number; y: number; z: number }) => {
     if (isLayerLocked(layerStates, "entities")) {
       setEditorMessage({ type: "error", text: "The entity layer is locked." });
       return;
@@ -1456,21 +1458,26 @@ function ExperienceScene({
       variantId: variant.id,
       color: entityColor,
       transform: {
-        position: { x: basePosition.x, y: basePosition.y + 0.5, z: basePosition.z },
+        position: { x: surfacePosition.x, y: surfacePosition.y, z: surfacePosition.z },
         rotation: { x: 0, y: 0, z: 0 },
         scale: { x: 1, y: 1, z: 1 },
       },
       collisionModeOverride: collisionMode === prefab.collisionMode ? undefined : collisionMode,
     }, new Set(currentMap.entities.map((candidate) => candidate.id)));
-    const validation = validateEntityPlacement(currentMap, entity);
+    const grounded = groundEntityOnTerrain(editorSession.world, entity, { supportMode: "single-cell" });
+    if (!grounded.ok) {
+      setEditorMessage({ type: "error", text: grounded.reason });
+      return;
+    }
+    const validation = validateEntityPlacement(currentMap, grounded.entity);
     setValidationSummary(validation.messages);
     if (validation.severity === "invalid") {
       setEditorMessage({ type: "error", text: validation.messages[0] ?? "Prefab placement is invalid." });
       return;
     }
 
-    commitMapDefinitionChange(addEntity(currentMap, entity), `Placed ${prefab.name}.`);
-    setSelectedEntityIds([entity.id]);
+    commitMapDefinitionChange(addEntity(currentMap, grounded.entity), `Placed ${prefab.name}.`);
+    setSelectedEntityIds([grounded.entity.id]);
     setSelectedCell(null);
     setSelectedMarkerId(null);
   };
@@ -1481,11 +1488,15 @@ function ExperienceScene({
       setEditorMessage({ type: "error", text: "No terrain surface under this object placement." });
       return;
     }
-    const basePosition = editorSession.world.gridToWorld(coordinate.x, topY, coordinate.z);
+    const surface = getTerrainSurfaceAt(editorSession.world, coordinate.x, coordinate.z);
+    if (!surface.valid) {
+      setEditorMessage({ type: "error", text: surface.reason });
+      return;
+    }
     if (activePrefabId) {
-      placePrefabAtBasePosition(basePosition);
+      placePrefabAtSurface(surface.worldPosition);
     } else {
-      placeEntityAtBasePosition(basePosition);
+      placeEntityAtSurface(surface.worldPosition);
     }
     setTool("select");
   };
@@ -3271,7 +3282,11 @@ function ObjectPlacementPreview({
     return null;
   }
 
-  const basePosition = world.gridToWorld(coordinate.x, topY, coordinate.z);
+  const surface = getTerrainSurfaceAt(world, coordinate.x, coordinate.z);
+  if (!surface.valid) {
+    return null;
+  }
+  const surfacePosition = surface.worldPosition;
   const scale = getDefaultEntityScale(primitiveType);
   const prefab = prefabId ? getPrefabDefinition(prefabId) : null;
   if (prefab) {
@@ -3280,12 +3295,14 @@ function ObjectPlacementPreview({
       prefabId: prefab.id,
       variantId: variantId || prefab.defaultVariantId,
       transform: {
-        position: { x: basePosition.x, y: basePosition.y + 0.5, z: basePosition.z },
+        position: { x: surfacePosition.x, y: surfacePosition.y, z: surfacePosition.z },
         rotation: { x: 0, y: 0, z: 0 },
         scale: { x: 1, y: 1, z: 1 },
       },
     }, new Set());
-    const resolved = resolvePrefabInstance(entity);
+    const grounded = groundEntityOnTerrain(world, entity, { supportMode: "single-cell" });
+    if (!grounded.ok) return null;
+    const resolved = resolvePrefabInstance(grounded.entity);
     return (
       <group>
         {resolved.parts.map((part) => (
@@ -3304,7 +3321,7 @@ function ObjectPlacementPreview({
   }
 
   return (
-    <group position={[basePosition.x, basePosition.y + 0.5, basePosition.z]}>
+    <group position={[surfacePosition.x, surfacePosition.y, surfacePosition.z]}>
       <mesh
         geometry={geometries[primitiveType]}
         material={material}
