@@ -49,6 +49,16 @@ describe("dirty chunk rebuilds", () => {
     expect(cell?.color[0]).toBeCloseTo(expectedRed);
   });
 
+  it("keeps default ground neutral for blank authoring maps", () => {
+    const terrain = createTerrainData();
+    const chunk = terrain.chunks[0];
+    const cell = chunk.cells.find((candidate) => candidate.x === 2 && candidate.y === 0 && candidate.z === 3);
+
+    expect(getBlockDefinition(BLOCK_IDS.Ground).developmentColor).toBe("#8a8a8a");
+    expect(cell?.blockId).toBe(BLOCK_IDS.Ground);
+    expect(cell?.color).toEqual([0x8a / 255, 0x8a / 255, 0x8a / 255]);
+  });
+
   it("documents the renderer capacity strategy", () => {
     expect(CHUNK_MAX_INSTANCE_COUNT).toBe(16 * 16 * 12);
   });

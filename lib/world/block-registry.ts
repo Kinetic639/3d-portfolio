@@ -33,7 +33,7 @@ export const BLOCK_REGISTRY = {
     displayName: "Ground",
     renderable: true,
     solid: true,
-    developmentColor: "#637f73",
+    developmentColor: "#8a8a8a",
   },
   [BLOCK_IDS.Path]: {
     id: BLOCK_IDS.Path,
