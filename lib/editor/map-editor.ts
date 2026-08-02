@@ -1,7 +1,6 @@
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import {
   createMapStateFromDocument,
-  documentsEqual,
   type MapDocument,
   type MapEntityAnchor,
   serializeMapDocument,
@@ -84,27 +83,37 @@ export class MapEditorSession {
   savedDocument: MapDocument;
   private undoStack: EditorCommand[] = [];
   private redoStack: EditorCommand[] = [];
+  private currentDocument: MapDocument;
+  private documentDirty = false;
+  private hasPendingChanges = false;
+  private cachedSnapshot: EditorSnapshot | null = null;
 
   constructor(world = createFlatVoxelWorld(), entities: MapEntityAnchor[] = []) {
     this.world = world;
     this.entities = entities.map(cloneEntity);
     this.savedDocument = serializeMapDocument(this.world, this.entities);
+    this.currentDocument = this.savedDocument;
   }
 
   getSnapshot(): EditorSnapshot {
-    const document = serializeMapDocument(this.world, this.entities);
+    if (this.cachedSnapshot && !this.documentDirty) {
+      return this.cachedSnapshot;
+    }
 
-    return {
+    const document = this.getCurrentDocument();
+    this.cachedSnapshot = {
       world: this.world,
       entities: this.entities.map(cloneEntity),
       savedDocument: this.savedDocument,
       undoDepth: this.undoStack.length,
       redoDepth: this.redoStack.length,
-      hasUnsavedChanges: !documentsEqual(document, this.savedDocument),
+      hasUnsavedChanges: this.hasPendingChanges,
       blockEditCount: document.edits.length,
       zoneAssignmentCount: document.zones.length,
       entityAnchorCount: document.entities.length,
     };
+
+    return this.cachedSnapshot;
   }
 
   applyTool(tool: EditorTool, coordinate: GridCoordinate, paintBlockId: BlockId, zoneId: number): EditorActionResult {
@@ -372,6 +381,7 @@ export class MapEditorSession {
 
     this.applyCommandState(command, "before");
     this.redoStack.push(command);
+    this.markDocumentDirty();
 
     return this.flushDirtyChunks();
   }
@@ -384,16 +394,21 @@ export class MapEditorSession {
 
     this.applyCommandState(command, "after");
     this.undoStack.push(command);
+    this.markDocumentDirty();
 
     return this.flushDirtyChunks();
   }
 
   replaceWithDocument(document: MapDocument, markSaved: boolean): EditorActionResult {
-    const beforeDocument = serializeMapDocument(this.world, this.entities);
+    const beforeDocument = this.getCurrentDocument();
     const imported = createMapStateFromDocument(document);
 
     this.world = imported.world;
     this.entities = imported.entities;
+    this.currentDocument = document;
+    this.documentDirty = false;
+    this.cachedSnapshot = null;
+    this.hasPendingChanges = !markSaved;
     this.world.createRenderChunks().forEach((chunk) => this.world.dirtyChunks.add(chunk.id));
 
     const result = this.flushDirtyChunks();
@@ -407,7 +422,8 @@ export class MapEditorSession {
     this.redoStack = [];
 
     if (markSaved) {
-      this.savedDocument = serializeMapDocument(this.world, this.entities);
+      this.savedDocument = this.currentDocument;
+      this.hasPendingChanges = false;
     }
 
     return result;
@@ -422,7 +438,9 @@ export class MapEditorSession {
   }
 
   markSaved() {
-    this.savedDocument = serializeMapDocument(this.world, this.entities);
+    this.savedDocument = this.getCurrentDocument();
+    this.hasPendingChanges = false;
+    this.cachedSnapshot = null;
   }
 
   private applyCommand(command: EditorCommand): EditorActionResult {
@@ -440,6 +458,7 @@ export class MapEditorSession {
     this.undoStack.push(command);
     this.trimHistory();
     this.redoStack = [];
+    this.markDocumentDirty();
 
     return this.flushDirtyChunks();
   }
@@ -456,6 +475,21 @@ export class MapEditorSession {
     if (command.entities) {
       this.entities = command.entities[side].map(cloneEntity);
     }
+  }
+
+  private getCurrentDocument() {
+    if (this.documentDirty) {
+      this.currentDocument = serializeMapDocument(this.world, this.entities);
+      this.documentDirty = false;
+    }
+
+    return this.currentDocument;
+  }
+
+  private markDocumentDirty() {
+    this.documentDirty = true;
+    this.hasPendingChanges = true;
+    this.cachedSnapshot = null;
   }
 
   private flushDirtyChunks(): EditorActionResult {

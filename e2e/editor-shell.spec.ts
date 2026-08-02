@@ -8,7 +8,7 @@ for (const viewport of [
 ]) {
   test(`editor shell remains usable at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
-    await page.goto("/");
+    await page.goto("/?editor=1");
 
     const experience = page.locator(".experience-shell");
     await expect(experience).toHaveAttribute("data-phase", "ready", { timeout: 10_000 });

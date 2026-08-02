@@ -66,6 +66,16 @@ export function getPathFootprint(center: GridCoordinate, settings: TerrainBrushS
   });
 }
 
+export function getTerrainOperationFootprint(
+  center: GridCoordinate,
+  operation: TerrainBrushOperation,
+  settings: TerrainBrushSettings,
+): GridCoordinate[] {
+  return operation === "paint-path" || operation === "remove-path"
+    ? getPathFootprint(center, settings)
+    : getBrushFootprint(center, settings);
+}
+
 export function createTerrainMutations(input: {
   world: VoxelWorld;
   operation: TerrainBrushOperation;
@@ -75,9 +85,7 @@ export function createTerrainMutations(input: {
   zoneId: number;
 }): TerrainCellMutation[] {
   const settings = { ...DEFAULT_TERRAIN_BRUSH, ...input.settings };
-  const footprint = input.operation === "paint-path" || input.operation === "remove-path"
-    ? getPathFootprint(input.center, settings)
-    : getBrushFootprint(input.center, settings);
+  const footprint = getTerrainOperationFootprint(input.center, input.operation, settings);
   const seen = new Set<string>();
   const mutations: TerrainCellMutation[] = [];
 

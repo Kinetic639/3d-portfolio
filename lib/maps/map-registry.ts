@@ -1,4 +1,14 @@
-import { createPhase45AuthoringTestMapDefinition, createPortfolioPhase4MapDefinition, createTinyExampleMapDefinition } from "./bundled-maps";
+import {
+  createPhase45AuthoringTestMapDefinition,
+  createPortfolioPhase4MapDefinition,
+  createPrefabCatalogMapDefinition,
+  createPrefabDensityTestMapDefinition,
+  createPrefabDiversityStressMapDefinition,
+  createPrefabMaximumEntityStressMapDefinition,
+  createPrefabRepetitionStressMapDefinition,
+  createTinyExampleMapDefinition,
+} from "./bundled-maps";
+import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
 import {
   cloneMapDefinition,
   createLoadedMapState,
@@ -33,6 +43,11 @@ const BUNDLED_MAPS: BundledMapSource[] = [
   createBundledEntry(createPortfolioPhase4MapDefinition, "bundled:portfolio-phase4", false),
   createBundledEntry(createTinyExampleMapDefinition, "bundled:tiny-example", true),
   createBundledEntry(createPhase45AuthoringTestMapDefinition, "bundled:phase45-authoring-test", true),
+  createBundledEntry(createPrefabCatalogMapDefinition, "bundled:phase49-prefab-catalog", true),
+  createBundledEntry(createPrefabDensityTestMapDefinition, "bundled:phase49-prefab-density-test", true),
+  createBundledEntry(createPrefabRepetitionStressMapDefinition, "bundled:phase49-prefab-repetition-stress", true),
+  createBundledEntry(createPrefabDiversityStressMapDefinition, "bundled:phase49-prefab-diversity-stress", true),
+  createBundledEntry(createPrefabMaximumEntityStressMapDefinition, "bundled:phase49-prefab-maximum-stress", true),
 ];
 
 export function listMapRegistryEntries(options: { includeDevelopment?: boolean } = {}) {
@@ -106,6 +121,7 @@ export function validateMapRegistry() {
 export function saveMapDraft(storage: Storage, map: MapDefinition) {
   const nextMap = cloneMapDefinition(map);
   nextMap.metadata.updatedAt = new Date().toISOString();
+  incrementEditorPerfCounter("draftWrites");
   storage.setItem(getMapDraftStorageKey(nextMap.id), JSON.stringify(nextMap));
   return nextMap;
 }

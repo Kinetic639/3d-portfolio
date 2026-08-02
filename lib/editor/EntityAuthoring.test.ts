@@ -4,6 +4,7 @@ import { createPlacedEntity } from "@/lib/maps/map-entities";
 import {
   addEntity,
   createEntityFromDraft,
+  createPrefabEntityFromDraft,
   duplicateEntities,
   groupEntities,
   snapTransform,
@@ -51,7 +52,7 @@ describe("entity authoring", () => {
     });
   });
 
-  it("detects invalid placement, duplicate IDs and blocking overlap", () => {
+  it("detects invalid placement, duplicate IDs and overlapping entity bounds", () => {
     const map = addEntity(
       createBlankMapDefinition({ id: "validation-test", name: "Validation Test" }),
       createPlacedEntity({
@@ -73,7 +74,36 @@ describe("entity authoring", () => {
       transform: { position: { x: 0.5, y: 1, z: 0.5 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } },
       collisionMode: "blocking",
     });
-    expect(validateEntityPlacement(map, overlap).messages).toContain("Blocking overlap with building.");
+    expect(validateEntityPlacement(map, overlap).messages).toContain("Placement overlaps building.");
+  });
+
+  it("creates prefab entities and validates their collision footprint", () => {
+    const base = createBlankMapDefinition({ id: "prefab-authoring", name: "Prefab Authoring", flatBaseLayer: true });
+    const bench = createPrefabEntityFromDraft({
+      name: "Bench",
+      prefabId: "bench",
+      variantId: "standard",
+      transform: { position: { x: 0, y: 0.5, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } },
+    }, new Set());
+    expect(bench.entityType).toBe("prefab");
+    expect(bench.prefabVersion).toBe(1);
+
+    const map = addEntity(base, bench);
+    const overlap = createPrefabEntityFromDraft({
+      name: "Bench",
+      prefabId: "bench",
+      variantId: "standard",
+      transform: { position: { x: 0.2, y: 0.5, z: 0.2 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } },
+    }, new Set(map.entities.map((entity) => entity.id)));
+    expect(validateEntityPlacement(map, overlap).messages).toContain("Placement overlaps bench.");
+
+    const helper = createPrefabEntityFromDraft({
+      name: "Walk Node",
+      prefabId: "walk-node",
+      variantId: "standard",
+      transform: { position: { x: 0.2, y: 0.5, z: 0.2 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } },
+    }, new Set(map.entities.map((entity) => entity.id)));
+    expect(validateEntityPlacement(map, helper).severity).toBe("valid");
   });
 
   it("updates properties and preserves world transforms when grouping and ungrouping", () => {

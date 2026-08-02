@@ -1,6 +1,7 @@
 import { type BlockId, isKnownBlockId } from "./block-registry";
 import { createFlatVoxelWorld, type VoxelWorld } from "./voxel-world";
 import { WORLD_CONFIG, type GridCoordinate } from "./world-config";
+import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
 
 export const MAP_DOCUMENT_VERSION = 1;
 export const MAP_DOCUMENT_FILENAME = "portfolio-map.v1.json";
@@ -47,6 +48,7 @@ export type ImportedMapState = {
 };
 
 export function serializeMapDocument(world: VoxelWorld, entities: MapEntityAnchor[]): MapDocument {
+  incrementEditorPerfCounter("mapSerializations");
   const baseWorld = createFlatVoxelWorld();
   const edits: MapBlockEdit[] = [];
   const zones: MapZoneAssignment[] = [];

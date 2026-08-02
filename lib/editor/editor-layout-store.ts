@@ -1,5 +1,5 @@
 export type EditorWorkspace = "map" | "terrain" | "objects" | "zones" | "navigation" | "review";
-export type BottomDockTab = "library" | "validation" | "history" | "performance";
+export type BottomDockTab = "overview" | "validation" | "history" | "performance";
 export type EditorPanelId = "left" | "right" | "bottom" | "outliner" | "inspector";
 
 export const EDITOR_LAYOUT_STORAGE_KEY = "portfolio-editor-layout.v1";
@@ -27,7 +27,7 @@ export type EditorLayoutState = {
 export const DEFAULT_EDITOR_LAYOUT: EditorLayoutState = {
   version: 1,
   activeWorkspace: "terrain",
-  activeBottomTab: "library",
+  activeBottomTab: "overview",
   commandSearchOpen: false,
   shortcutsOpen: false,
   cleanPreview: false,
@@ -89,6 +89,7 @@ export function parseEditorLayout(input: unknown): EditorLayoutState {
   return {
     ...createDefaultEditorLayout(),
     ...input,
+    activeBottomTab: isBottomDockTab(input.activeBottomTab) ? input.activeBottomTab : "overview",
     dimensions: {
       ...DEFAULT_EDITOR_LAYOUT.dimensions,
       ...(isRecord(input.dimensions) ? input.dimensions : {}),
@@ -102,6 +103,10 @@ export function parseEditorLayout(input: unknown): EditorLayoutState {
       ...booleanRecord(input.outlinerExpanded),
     },
   };
+}
+
+function isBottomDockTab(value: unknown): value is BottomDockTab {
+  return value === "overview" || value === "validation" || value === "history" || value === "performance";
 }
 
 export function loadEditorLayout(storage: Pick<Storage, "getItem">): EditorLayoutState {

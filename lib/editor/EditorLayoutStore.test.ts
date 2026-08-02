@@ -38,6 +38,7 @@ describe("editor layout store", () => {
     expect(backing.has(EDITOR_LAYOUT_STORAGE_KEY)).toBe(true);
     expect(loadEditorLayout(storage).activeWorkspace).toBe("objects");
     expect(parseEditorLayout({ version: 99 }).activeWorkspace).toBe("terrain");
+    expect(parseEditorLayout({ version: 1, activeBottomTab: "library" }).activeBottomTab).toBe("overview");
     expect(resetEditorLayout().collapsed.bottom).toBe(false);
   });
 });

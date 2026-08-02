@@ -9,6 +9,7 @@ import {
 } from "@/lib/world/map-document";
 import { VoxelWorld } from "@/lib/world/voxel-world";
 import { WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
+import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
 import {
   cloneEntityGroup,
   clonePlacedEntity,
@@ -18,6 +19,7 @@ import {
   type EntityGroupDefinition,
   type PlacedMapEntity,
 } from "./map-entities";
+import { getPrefabDefinition } from "@/lib/prefabs/prefab-library";
 import {
   cloneNavigationDefinition,
   createEmptyNavigationDefinition,
@@ -303,6 +305,7 @@ export function createLoadedMapState(map: MapDefinition): LoadedMapState {
 }
 
 export function validateMapDefinition(input: unknown): MapDefinitionValidationResult {
+  incrementEditorPerfCounter("mapValidations");
   const errors: string[] = [];
   if (!isRecord(input)) {
     return { ok: false, errors: ["Map definition must be an object."] };
@@ -519,8 +522,28 @@ function validatePlacedEntities(
     if (!ENTITY_TYPES.includes(entity.entityType as never)) errors.push(`Entity ${String(entity.id)} has invalid type.`);
     if (!ENTITY_PRIMITIVE_TYPES.includes(entity.primitiveType as never)) errors.push(`Entity ${String(entity.id)} has invalid primitive.`);
     if (!ENTITY_COLLISION_MODES.includes(entity.collisionMode as never)) errors.push(`Entity ${String(entity.id)} has invalid collision mode.`);
+    if (entity.entityType === "prefab") {
+      if (typeof entity.prefabId !== "string" || !isStableId(entity.prefabId)) {
+        errors.push(`Prefab entity ${String(entity.id)} must include a stable prefab id.`);
+      } else {
+        const prefab = getPrefabDefinition(entity.prefabId);
+        if (!prefab) {
+          errors.push(`Prefab entity ${String(entity.id)} references missing prefab ${entity.prefabId}.`);
+        } else if (typeof entity.variantId !== "string" || !prefab.variants.some((variant) => variant.id === entity.variantId)) {
+          errors.push(`Prefab entity ${String(entity.id)} references missing variant ${String(entity.variantId)}.`);
+        } else if (typeof entity.prefabVersion !== "number" || !Number.isInteger(entity.prefabVersion) || entity.prefabVersion < 1) {
+          errors.push(`Prefab entity ${String(entity.id)} must include a valid prefab version.`);
+        } else if (entity.prefabVersion > prefab.version) {
+          errors.push(`Prefab entity ${String(entity.id)} was saved with unsupported newer prefab version ${entity.prefabVersion}.`);
+        }
+      }
+    }
     if (!isSerializableTransform(entity.transform)) errors.push(`Entity ${String(entity.id)} transform is invalid.`);
     if (!isFootprint(entity.footprint)) errors.push(`Entity ${String(entity.id)} footprint is invalid.`);
+    if (entity.footprintOverride !== undefined && !isFootprint(entity.footprintOverride)) errors.push(`Entity ${String(entity.id)} footprint override is invalid.`);
+    if (entity.collisionModeOverride !== undefined && !ENTITY_COLLISION_MODES.includes(entity.collisionModeOverride as never)) {
+      errors.push(`Entity ${String(entity.id)} collision override is invalid.`);
+    }
     if (!isRecord(entity.appearance) || typeof entity.appearance.color !== "string" || !/^#[0-9a-f]{6}$/i.test(entity.appearance.color)) {
       errors.push(`Entity ${String(entity.id)} must include a hex colour.`);
     }

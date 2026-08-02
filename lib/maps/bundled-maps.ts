@@ -2,6 +2,7 @@ import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import { VoxelWorld } from "@/lib/world/voxel-world";
 import { WORLD_CONFIG } from "@/lib/world/world-config";
 import {
+  createBlankMapDefinition,
   createDefaultOverviewCameraPreset,
   createMapDefinitionFromWorld,
   type MapCameraPreset,
@@ -11,6 +12,8 @@ import {
 } from "./map-definition";
 import { createPlacedEntity, type EntityGroupDefinition, type PlacedMapEntity } from "./map-entities";
 import type { MapNavigationDefinition } from "./map-navigation";
+import { BUILT_IN_PREFABS } from "@/lib/prefabs/prefab-library";
+import type { PrefabDefinition, PrefabVariantDefinition } from "@/lib/prefabs/prefab-types";
 
 const PHASE4_CREATED_AT = "2026-08-01T00:00:00.000Z";
 
@@ -230,6 +233,93 @@ export function createPhase45AuthoringTestMapDefinition(): MapDefinition {
   };
 }
 
+export function createPrefabCatalogMapDefinition(): MapDefinition {
+  return createPrefabFixtureMap({
+    id: "phase49-prefab-catalog",
+    name: "Phase 4.9 Prefab Catalog",
+    description: "Development-only catalog map containing every built-in gray-box prefab and its authored variants.",
+    entities: createCatalogPrefabEntities(),
+    authoringVersion: "phase-4.9",
+  });
+}
+
+export function createPrefabDensityTestMapDefinition(): MapDefinition {
+  const prefabs = ["bench", "lamp-post", "deciduous-tree", "section-sign", "square-platform"]
+    .map((id) => BUILT_IN_PREFABS.find((prefab) => prefab.id === id))
+    .filter((prefab): prefab is PrefabDefinition => Boolean(prefab));
+  const entities: PlacedMapEntity[] = [];
+  for (let z = -24; z <= 24; z += 4) {
+    for (let x = -24; x <= 24; x += 4) {
+      const prefab = prefabs[Math.abs(x + z + entities.length) % prefabs.length];
+      entities.push(createPrefabMapEntity(prefab, prefab.defaultVariantId, `density-${entities.length}`, x, z, ((entities.length % 4) * Math.PI) / 2));
+    }
+  }
+
+  return createPrefabFixtureMap({
+    id: "phase49-prefab-density-test",
+    name: "Phase 4.9 Prefab Density Test",
+    description: "Moderately dense reusable-prefab fixture representative of an authored portfolio map.",
+    entities,
+    authoringVersion: "phase-4.9",
+  });
+}
+
+export function createPrefabRepetitionStressMapDefinition(): MapDefinition {
+  const prefab = BUILT_IN_PREFABS.find((candidate) => candidate.id === "lamp-post") ?? BUILT_IN_PREFABS[0];
+  const entities: PlacedMapEntity[] = [];
+  for (let z = -30; z <= 30; z += 2) {
+    for (let x = -30; x <= 30; x += 2) {
+      entities.push(createPrefabMapEntity(prefab, prefab.defaultVariantId, `repeat-${entities.length}`, x, z, 0));
+    }
+  }
+
+  return createPrefabFixtureMap({
+    id: "phase49-prefab-repetition-stress",
+    name: "Phase 4.9 Prefab Repetition Stress",
+    description: "High-count repeated-prefab fixture for verifying instanced batching efficiency.",
+    entities,
+    authoringVersion: "phase-4.9",
+  });
+}
+
+export function createPrefabDiversityStressMapDefinition(): MapDefinition {
+  const entities: PlacedMapEntity[] = [];
+  for (let z = -28; z <= 28; z += 4) {
+    for (let x = -28; x <= 28; x += 4) {
+      const prefab = BUILT_IN_PREFABS[entities.length % BUILT_IN_PREFABS.length];
+      const variant = prefab.variants[entities.length % prefab.variants.length];
+      entities.push(createPrefabMapEntity(prefab, variant.id, `diverse-${entities.length}`, x, z, ((entities.length % 4) * Math.PI) / 2));
+    }
+  }
+
+  return createPrefabFixtureMap({
+    id: "phase49-prefab-diversity-stress",
+    name: "Phase 4.9 Prefab Diversity Stress",
+    description: "Many prefab types and material roles for checking batching under high visual variety.",
+    entities,
+    authoringVersion: "phase-4.9",
+  });
+}
+
+export function createPrefabMaximumEntityStressMapDefinition(): MapDefinition {
+  const entities: PlacedMapEntity[] = [];
+  for (let z = -31; z <= 31; z += 2) {
+    for (let x = -31; x <= 31; x += 2) {
+      const prefab = BUILT_IN_PREFABS[entities.length % BUILT_IN_PREFABS.length];
+      const variant = prefab.variants[entities.length % prefab.variants.length];
+      entities.push(createPrefabMapEntity(prefab, variant.id, `max-prefab-${entities.length}`, x, z, ((entities.length % 4) * Math.PI) / 2));
+    }
+  }
+
+  return createPrefabFixtureMap({
+    id: "phase49-prefab-maximum-stress",
+    name: "Phase 4.9 Prefab Maximum Stress",
+    description: "Maximum-density prefab fixture for production FPS and frame-time stress checks.",
+    entities,
+    authoringVersion: "phase-4.9",
+  });
+}
+
 function createAuthoringEntity(
   id: string,
   name: string,
@@ -258,6 +348,80 @@ function createAuthoringEntity(
     zoneId,
     groupId,
     tags: ["fixture"],
+  });
+}
+
+function createPrefabFixtureMap(input: { id: string; name: string; description: string; entities: PlacedMapEntity[]; authoringVersion: string }): MapDefinition {
+  const map = createBlankMapDefinition({
+    id: input.id,
+    name: input.name,
+    kind: "test",
+    runtimeMode: "dynamic-voxel",
+    flatBaseLayer: true,
+  });
+
+  return {
+    ...map,
+    description: input.description,
+    entities: input.entities,
+    metadata: {
+      ...map.metadata,
+      createdAt: PHASE4_CREATED_AT,
+      updatedAt: PHASE4_CREATED_AT,
+      authoringVersion: input.authoringVersion,
+    },
+  };
+}
+
+function createCatalogPrefabEntities() {
+  const entities: PlacedMapEntity[] = [];
+  const placements: Array<{ prefab: PrefabDefinition; variant: PrefabVariantDefinition }> = [];
+  for (const prefab of BUILT_IN_PREFABS) {
+    placements.push({ prefab, variant: prefab.variants.find((variant) => variant.id === prefab.defaultVariantId) ?? prefab.variants[0] });
+    if (prefab.variants.length > 1) {
+      placements.push({ prefab, variant: prefab.variants[prefab.variants.length - 1] });
+    }
+  }
+
+  const columns = 14;
+  const spacing = 4.4;
+  for (const [index, placement] of placements.entries()) {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = -28.6 + column * spacing;
+    const z = -28.6 + row * spacing;
+    if (z > 30) break;
+    entities.push(createPrefabMapEntity(placement.prefab, placement.variant.id, `catalog-${placement.prefab.id}-${placement.variant.id}`, x, z, ((index % 4) * Math.PI) / 2));
+  }
+  return entities;
+}
+
+function createPrefabMapEntity(prefab: PrefabDefinition, variantId: string, id: string, x: number, z: number, rotationY: number): PlacedMapEntity {
+  const variant = prefab.variants.find((candidate) => candidate.id === variantId) ?? prefab.variants[0];
+  return createPlacedEntity({
+    id,
+    name: `${prefab.name} ${variant.label}`,
+    entityType: "prefab",
+    primitiveType: "box",
+    prefabId: prefab.id,
+    prefabVersion: prefab.version,
+    variantId: variant.id,
+    transform: {
+      position: { x, y: 0.5, z },
+      rotation: { x: 0, y: rotationY, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+    },
+    placement: {
+      anchor: prefab.placement.anchor,
+      snapToGrid: prefab.placement.snapToGrid,
+      surfaceAttached: prefab.placement.surfaceAttached,
+      surfaceOffset: 0,
+    },
+    appearance: { color: "#9ca3af", visibleAtRuntime: true, visibleInEditor: true },
+    footprint: variant.footprintOverride ?? prefab.footprint,
+    collisionMode: prefab.collisionMode,
+    assetReference: prefab.futureAssetSlot,
+    tags: ["prefab-fixture", prefab.category, ...prefab.tags],
   });
 }
 

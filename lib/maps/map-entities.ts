@@ -2,7 +2,7 @@ import type { MapContentReference } from "./map-definition";
 
 export type PrimitiveType = "box" | "cylinder" | "sphere" | "plane" | "platform" | "sign";
 export type CollisionMode = "none" | "blocking" | "walkable" | "trigger";
-export type PlacedEntityType = "primitive" | "sign" | "decoration-anchor" | "landmark-placeholder";
+export type PlacedEntityType = "primitive" | "sign" | "prefab" | "decoration-anchor" | "landmark-placeholder";
 
 export type SerializableVector3 = {
   x: number;
@@ -33,6 +33,9 @@ export type PlacedMapEntity = {
   name: string;
   entityType: PlacedEntityType;
   primitiveType: PrimitiveType;
+  prefabId?: string;
+  prefabVersion?: number;
+  variantId?: string;
   transform: SerializableTransform;
   placement: {
     anchor: "bottom" | "center";
@@ -46,8 +49,14 @@ export type PlacedMapEntity = {
     visibleAtRuntime: boolean;
     visibleInEditor: boolean;
   };
+  appearanceOverrides?: {
+    materialRoles?: Record<string, string>;
+    colors?: Record<string, string>;
+  };
   footprint: EntityFootprint;
+  footprintOverride?: EntityFootprint;
   collisionMode: CollisionMode;
+  collisionModeOverride?: CollisionMode;
   zoneId?: string;
   markerId?: string;
   contentReference?: MapContentReference;
@@ -67,7 +76,7 @@ export type EntityGroupDefinition = {
 
 export const ENTITY_PRIMITIVE_TYPES: PrimitiveType[] = ["box", "cylinder", "sphere", "plane", "platform", "sign"];
 export const ENTITY_COLLISION_MODES: CollisionMode[] = ["none", "blocking", "walkable", "trigger"];
-export const ENTITY_TYPES: PlacedEntityType[] = ["primitive", "sign", "decoration-anchor", "landmark-placeholder"];
+export const ENTITY_TYPES: PlacedEntityType[] = ["primitive", "sign", "prefab", "decoration-anchor", "landmark-placeholder"];
 
 export function createDefaultTransform(position: SerializableVector3 = { x: 0, y: 0.5, z: 0 }): SerializableTransform {
   return {
@@ -84,6 +93,9 @@ export function createPlacedEntity(input: Partial<PlacedMapEntity> & { id: strin
     name: input.name ?? input.id,
     entityType: input.entityType ?? (primitiveType === "sign" ? "sign" : "primitive"),
     primitiveType,
+    prefabId: input.prefabId,
+    prefabVersion: input.prefabVersion,
+    variantId: input.variantId,
     transform: cloneTransform(input.transform ?? createDefaultTransform()),
     placement: {
       anchor: input.placement?.anchor ?? "bottom",
@@ -97,12 +109,15 @@ export function createPlacedEntity(input: Partial<PlacedMapEntity> & { id: strin
       visibleAtRuntime: input.appearance?.visibleAtRuntime ?? true,
       visibleInEditor: input.appearance?.visibleInEditor ?? true,
     },
+    appearanceOverrides: input.appearanceOverrides ? cloneAppearanceOverrides(input.appearanceOverrides) : undefined,
     footprint: {
       width: input.footprint?.width ?? 1,
       depth: input.footprint?.depth ?? 1,
       height: input.footprint?.height ?? 1,
     },
+    footprintOverride: input.footprintOverride ? { ...input.footprintOverride } : undefined,
     collisionMode: input.collisionMode ?? "blocking",
+    collisionModeOverride: input.collisionModeOverride,
     zoneId: input.zoneId,
     markerId: input.markerId,
     contentReference: input.contentReference ? { ...input.contentReference } : undefined,
@@ -129,10 +144,19 @@ export function clonePlacedEntity(entity: PlacedMapEntity): PlacedMapEntity {
       visibleAtRuntime: true,
       visibleInEditor: true,
     },
+    appearanceOverrides: entity.appearanceOverrides ? cloneAppearanceOverrides(entity.appearanceOverrides) : undefined,
     footprint: entity.footprint ? { ...entity.footprint } : { width: 1, depth: 1, height: 1 },
+    footprintOverride: entity.footprintOverride ? { ...entity.footprintOverride } : undefined,
     contentReference: entity.contentReference ? { ...entity.contentReference } : undefined,
     tags: Array.isArray(entity.tags) ? [...entity.tags] : [],
     sign: entity.sign ? { ...entity.sign } : undefined,
+  };
+}
+
+function cloneAppearanceOverrides(overrides: NonNullable<PlacedMapEntity["appearanceOverrides"]>) {
+  return {
+    materialRoles: overrides.materialRoles ? { ...overrides.materialRoles } : undefined,
+    colors: overrides.colors ? { ...overrides.colors } : undefined,
   };
 }
 

@@ -10,6 +10,8 @@ import {
   type SerializableVector3,
 } from "@/lib/maps/map-entities";
 import { WORLD_CONFIG } from "@/lib/world/world-config";
+import { getPrefabDefinition } from "@/lib/prefabs/prefab-library";
+import { resolvePrefabCollisionMode, resolvePrefabFootprint } from "@/lib/prefabs/prefab-resolver";
 
 export type PlacementSeverity = "valid" | "warning" | "invalid";
 
@@ -24,6 +26,18 @@ export type EntityPlacementDraft = {
   transform: SerializableTransform;
   color: string;
   collisionMode: CollisionMode;
+  zoneId?: string;
+  markerId?: string;
+  assetReference?: string;
+};
+
+export type PrefabPlacementDraft = {
+  prefabId: string;
+  variantId: string;
+  name: string;
+  transform: SerializableTransform;
+  color?: string;
+  collisionModeOverride?: CollisionMode;
   zoneId?: string;
   markerId?: string;
   assetReference?: string;
@@ -82,6 +96,44 @@ export function createEntityFromDraft(draft: EntityPlacementDraft, existingIds: 
   });
 }
 
+export function createPrefabEntityFromDraft(draft: PrefabPlacementDraft, existingIds: Set<string>) {
+  const prefab = getPrefabDefinition(draft.prefabId);
+  const variant = prefab?.variants.find((candidate) => candidate.id === draft.variantId);
+  const id = createStableEntityId(draft.name || prefab?.name || "prefab", existingIds);
+  const footprint = variant?.footprintOverride ?? prefab?.footprint ?? { width: 1, depth: 1, height: 1 };
+  const collisionMode = draft.collisionModeOverride ?? prefab?.collisionMode ?? "blocking";
+
+  return createPlacedEntity({
+    id,
+    name: draft.name || prefab?.name || id,
+    entityType: "prefab",
+    primitiveType: "box",
+    prefabId: draft.prefabId,
+    prefabVersion: prefab?.version ?? 0,
+    variantId: draft.variantId,
+    transform: cloneTransform(draft.transform),
+    placement: {
+      anchor: prefab?.placement.anchor ?? "bottom",
+      snapToGrid: prefab?.placement.snapToGrid ?? true,
+      surfaceAttached: prefab?.placement.surfaceAttached ?? true,
+      surfaceOffset: 0,
+    },
+    appearance: {
+      color: draft.color ?? "#9ca3af",
+      visibleAtRuntime: true,
+      visibleInEditor: true,
+    },
+    appearanceOverrides: draft.color ? { colors: { "accent-blue": draft.color } } : undefined,
+    footprint,
+    collisionMode,
+    collisionModeOverride: draft.collisionModeOverride,
+    zoneId: draft.zoneId,
+    markerId: draft.markerId,
+    assetReference: draft.assetReference ?? prefab?.futureAssetSlot,
+    tags: [...(prefab?.tags ?? []), "prefab-instance"],
+  });
+}
+
 export function validateEntityPlacement(map: MapDefinition, entity: PlacedMapEntity, options: { force?: boolean } = {}): PlacementValidationResult {
   const messages: string[] = [];
   const warnings: string[] = [];
@@ -94,15 +146,30 @@ export function validateEntityPlacement(map: MapDefinition, entity: PlacedMapEnt
   if (entity.transform.position.y < 0) messages.push("Entity cannot be placed underground.");
   if (entity.zoneId && !map.zones.some((zone) => zone.id === entity.zoneId)) messages.push(`Unknown zone: ${entity.zoneId}.`);
   if (entity.markerId && !map.markers.some((marker) => marker.id === entity.markerId)) messages.push(`Unknown marker: ${entity.markerId}.`);
-
-  if (entity.collisionMode === "blocking") {
-    for (const other of map.entities) {
-      if (other.id !== entity.id && other.collisionMode === "blocking" && boxesOverlap(getEntityBounds(entity), getEntityBounds(other))) {
-        messages.push(`Blocking overlap with ${other.id}.`);
+  if (entity.entityType === "prefab") {
+    if (!entity.prefabId) {
+      messages.push(`Entity ${entity.id} is missing prefab id.`);
+    } else {
+      const prefab = getPrefabDefinition(entity.prefabId);
+      if (!prefab) {
+        messages.push(`Missing prefab definition: ${entity.prefabId}.`);
+      } else if (!prefab.variants.some((variant) => variant.id === (entity.variantId ?? prefab.defaultVariantId))) {
+        messages.push(`Missing prefab variant: ${entity.prefabId}/${entity.variantId ?? prefab.defaultVariantId}.`);
+      } else if (entity.prefabVersion !== undefined && entity.prefabVersion > prefab.version) {
+        warnings.push(`Prefab ${entity.prefabId} was saved with newer version ${entity.prefabVersion}.`);
       }
     }
-  } else if (map.entities.some((other) => other.id !== entity.id && other.collisionMode === "blocking" && boxesOverlap(getEntityBounds(entity), getEntityBounds(other)))) {
-    warnings.push("Placement overlaps a blocking entity but this entity is non-blocking.");
+  }
+
+  for (const other of map.entities) {
+    if (
+      other.id !== entity.id &&
+      resolvePrefabCollisionMode(entity) !== "none" &&
+      resolvePrefabCollisionMode(other) !== "none" &&
+      boxesOverlap(getEntityBounds(entity), getEntityBounds(other))
+    ) {
+      messages.push(`Placement overlaps ${other.id}.`);
+    }
   }
 
   return {
@@ -175,9 +242,10 @@ export function ungroupEntities(map: MapDefinition, groupId: string): MapDefinit
 }
 
 export function getEntityBounds(entity: PlacedMapEntity) {
-  const halfWidth = Math.abs(entity.footprint.width) / 2;
-  const halfDepth = Math.abs(entity.footprint.depth) / 2;
-  const height = Math.abs(entity.footprint.height);
+  const footprint = resolvePrefabFootprint(entity);
+  const halfWidth = Math.abs(footprint.width) / 2;
+  const halfDepth = Math.abs(footprint.depth) / 2;
+  const height = Math.abs(footprint.height);
   const anchorOffset = entity.placement.anchor === "bottom" ? height / 2 : 0;
 
   return {

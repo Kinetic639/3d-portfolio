@@ -1,11 +1,11 @@
 "use client";
 
 import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
-import { MapControls, Text } from "@react-three/drei";
+import { MapControls, Text, TransformControls } from "@react-three/drei";
 import gsap from "gsap";
 import { LockKeyhole, RotateCcw, UnlockKeyhole } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
 import {
   CHUNK_MAX_INSTANCE_COUNT,
@@ -19,8 +19,10 @@ import { parseMapDocument, serializeMapDocument } from "@/lib/world/map-document
 import type { GridCoordinate } from "@/lib/world/world-config";
 import { MapEditorSession, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
 import { createMapPresetWorld, type MapPresetId } from "@/lib/editor/map-presets";
+import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
 import {
   addEntity,
+  createPrefabEntityFromDraft,
   createEntityFromDraft,
   deleteEntities,
   duplicateEntities,
@@ -29,10 +31,13 @@ import {
   updateEntity,
   validateEntityPlacement,
 } from "@/lib/editor/entity-authoring";
+import { BUILT_IN_PREFABS, getPrefabDefinition } from "@/lib/prefabs/prefab-library";
+import { resolvePrefabInstance } from "@/lib/prefabs/prefab-resolver";
+import type { ResolvedPrefabPart } from "@/lib/prefabs/prefab-types";
 import {
   DEFAULT_TERRAIN_BRUSH,
   createTerrainMutations,
-  getBrushFootprint,
+  getTerrainOperationFootprint,
   type BrushShape,
   type TerrainBrushOperation,
   type TerrainBrushSettings,
@@ -59,7 +64,7 @@ import {
   loadMapStateSync,
   saveMapDraft,
 } from "@/lib/maps/map-registry";
-import type { EditorLayerId, EditorLayerState, EditorViewportLayoutState, MapEditorToolbarProps } from "@/components/experience/MapEditorToolbar";
+import type { EditorLayerId, EditorLayerState, EditorViewportLayoutState, EntityTransformMode, MapEditorToolbarProps } from "@/components/experience/MapEditorToolbar";
 import { createBrowsingState, reduceBrowsingState, type BrowsingState } from "@/lib/portfolio/browsing-state";
 import { PORTFOLIO_CONTENT, resolveContentReference } from "@/lib/portfolio/content";
 import {
@@ -305,14 +310,19 @@ export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MA
   }, []);
 
   useEffect(() => {
+    if (editorActive) {
+      return;
+    }
+
     const timer = window.setInterval(() => {
       if (window.__portfolioExperienceMetrics) {
+        incrementEditorPerfCounter("reactMetricUpdates");
         setMetrics(window.__portfolioExperienceMetrics);
       }
     }, 250);
 
     return () => window.clearInterval(timer);
-  }, []);
+  }, [editorActive]);
 
   return (
     <section
@@ -342,6 +352,12 @@ export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MA
               flat
               gl={{ antialias: true, powerPreference: "high-performance", alpha: false }}
               onCreated={({ gl }) => {
+                incrementEditorPerfCounter("canvasMounts");
+                const originalSetSize = gl.setSize.bind(gl);
+                gl.setSize = ((width: number, height: number, updateStyle?: boolean) => {
+                  incrementEditorPerfCounter("rendererSetSizeCalls");
+                  return originalSetSize(width, height, updateStyle);
+                }) as typeof gl.setSize;
                 gl.setClearColor("#edf1ed");
               }}
             >
@@ -362,7 +378,7 @@ export default function PortfolioExperience({ initialMapId = DEFAULT_AUTHORED_MA
               <FixedDiagnostics metrics={metrics} />
             )
           ) : null}
-          {editorActive && editorPanel ? <MapEditorToolbar {...editorPanel} fps={metrics?.fps ?? null} frameMs={metrics?.frameMs ?? null} onLayoutChange={setEditorLayout} /> : null}
+          {editorActive && editorPanel ? <MapEditorToolbar {...editorPanel} onLayoutChange={setEditorLayout} /> : null}
           {canOpenEditor ? (
             <button
               className="map-editor-reopen"
@@ -740,8 +756,13 @@ function ExperienceScene({
   const [selectedCell, setSelectedCell] = useState<GridCoordinate | null>(null);
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>([]);
-  const [brushSettings, setBrushSettings] = useState<TerrainBrushSettings>(DEFAULT_TERRAIN_BRUSH);
+  const [brushSettingsByTool, setBrushSettingsByTool] = useState<Partial<Record<EditorTool, TerrainBrushSettings>>>(() => createDefaultToolBrushSettings());
   const [primitiveType, setPrimitiveType] = useState<PrimitiveType>("box");
+  const [activePrefabId, setActivePrefabId] = useState(BUILT_IN_PREFABS[0]?.id ?? "");
+  const [activePrefabVariantId, setActivePrefabVariantId] = useState(BUILT_IN_PREFABS[0]?.defaultVariantId ?? "");
+  const [prefabSearch, setPrefabSearch] = useState("");
+  const [entityTransformMode, setEntityTransformMode] = useState<EntityTransformMode>("translate");
+  const [entityTransformDragging, setEntityTransformDragging] = useState(false);
   const [collisionMode, setCollisionMode] = useState<CollisionMode>("blocking");
   const [entityColor, setEntityColor] = useState("#9ca3af");
   const [entityName, setEntityName] = useState("Placeholder");
@@ -754,6 +775,7 @@ function ExperienceScene({
   );
   const [lastRebuiltChunks, setLastRebuiltChunks] = useState<string[]>([]);
   const [lastChunkRebuildMs, setLastChunkRebuildMs] = useState(0);
+  const [previewRevision, setPreviewRevision] = useState(0);
   const [editorRevision, setEditorRevision] = useState(0);
   const [autosaveStatus, setAutosaveStatus] = useState("local idle");
   const uniforms = useMemo<TerrainUniforms>(
@@ -774,6 +796,7 @@ function ExperienceScene({
   const { gl, scene, camera } = useThree();
   const initializedRef = useRef(false);
   const editorAvailable = editorEnabled && phase === "explore";
+  const lastEditorPanelSignature = useRef<string | null>(null);
   const activeRenderMode: TerrainRenderMode = phase === "explore" ? renderMode : "instanced";
   const dynamicStats = editorSession.world.getStats();
   const snapshot = editorSession.getSnapshot();
@@ -787,7 +810,111 @@ function ExperienceScene({
     : null;
   const selectedZoneId = selectedCell ? editorSession.world.getZone(selectedCell.x, selectedCell.y, selectedCell.z) : 0;
   const selectedEntity = currentMap.entities.find((entity) => selectedEntityIds.includes(entity.id)) ?? null;
-  const brushAffectedCellCount = hoveredCell ? getBrushFootprint(hoveredCell, brushSettings).length : 0;
+  const brushSettings = useMemo(() => getBrushSettingsForTool(tool, brushSettingsByTool), [brushSettingsByTool, tool]);
+  const effectiveBrushSettings = useMemo(() => getEffectiveTerrainBrushSettings(tool, brushSettings), [brushSettings, tool]);
+  const brushAffectedCellCount = useMemo(
+    () => {
+      if (!getTerrainBrushOperation(tool)) {
+        return 0;
+      }
+      void previewRevision;
+      return hoveredCell ? getToolPreviewFootprint(hoveredCell, tool, effectiveBrushSettings, editorSession.world, paintBlockId, zoneId).length : 0;
+    },
+    [editorSession.world, effectiveBrushSettings, hoveredCell, paintBlockId, previewRevision, tool, zoneId],
+  );
+  const editorPanelSignature = useMemo(() => JSON.stringify({
+    available: editorAvailable,
+    mapId: activeMapId,
+    mapName: currentMap.name,
+    mapDescription: currentMap.description ?? "",
+    tool,
+    paintBlockId,
+    presetId,
+    renderMode,
+    zoneId,
+    hovered: coordinateKeyOrEmpty(hoveredCell),
+    selected: coordinateKeyOrEmpty(selectedCell),
+    selectedBlockId,
+    selectedZoneId,
+    selectedMarkerId,
+    selectedEntityId: selectedEntity?.id ?? "",
+    selectedEntityIds: selectedEntityIds.join(","),
+    entityCount: currentMap.entities.length,
+    primitiveType,
+    activePrefabId,
+    activePrefabVariantId,
+    prefabSearch,
+    collisionMode,
+    entityTransformMode,
+    entityColor,
+    entityName,
+    brushSettings,
+    brushAffectedCellCount,
+    layerStates: layerStates.map((layer) => `${layer.id}:${layer.visible ? 1 : 0}:${layer.locked ? 1 : 0}`).join("|"),
+    cleanPreview,
+    navigationNodeType,
+    navigationNodeCount: currentMap.navigation.nodes.length,
+    navigationEdgeCount: currentMap.navigation.edges.length,
+    routeCount: currentMap.navigation.routes.length,
+    validationSummary: validationSummary.join("|"),
+    dirtyChunks: editorSession.world.dirtyChunks.size,
+    lastRebuiltChunks: lastRebuiltChunks.join(","),
+    snapshot: {
+      blockEditCount: snapshot.blockEditCount,
+      zoneAssignmentCount: snapshot.zoneAssignmentCount,
+      entityAnchorCount: snapshot.entityAnchorCount,
+      undoDepth: snapshot.undoDepth,
+      redoDepth: snapshot.redoDepth,
+      hasUnsavedChanges: snapshot.hasUnsavedChanges,
+    },
+    autosaveStatus,
+    message: editorMessage ? `${editorMessage.type}:${editorMessage.text}` : "",
+  }), [
+    activeMapId,
+    autosaveStatus,
+    brushAffectedCellCount,
+    brushSettings,
+    cleanPreview,
+    collisionMode,
+    entityTransformMode,
+    currentMap.description,
+    currentMap.entities.length,
+    currentMap.name,
+    currentMap.navigation.edges.length,
+    currentMap.navigation.nodes.length,
+    currentMap.navigation.routes.length,
+    editorAvailable,
+    editorMessage,
+    editorSession.world.dirtyChunks.size,
+    entityColor,
+    entityName,
+    hoveredCell,
+    lastRebuiltChunks,
+    layerStates,
+    navigationNodeType,
+    paintBlockId,
+    presetId,
+    primitiveType,
+    activePrefabId,
+    activePrefabVariantId,
+    prefabSearch,
+    renderMode,
+    selectedBlockId,
+    selectedCell,
+    selectedEntity?.id,
+    selectedEntityIds,
+    selectedMarkerId,
+    selectedZoneId,
+    snapshot.blockEditCount,
+    snapshot.entityAnchorCount,
+    snapshot.hasUnsavedChanges,
+    snapshot.redoDepth,
+    snapshot.undoDepth,
+    snapshot.zoneAssignmentCount,
+    tool,
+    validationSummary,
+    zoneId,
+  ]);
   const availableMaps = useMemo(() => listMapRegistryEntries({ includeDevelopment: process.env.NODE_ENV !== "production" }), []);
   const activeCameraPreset = useMemo(() => getBrowsingCameraPreset(currentMap, browsing), [browsing, currentMap]);
 
@@ -849,6 +976,7 @@ function ExperienceScene({
     const rebuiltTerrainChunks = new Map(rebuiltChunks.map((chunk) => [chunk.id, toTerrainChunk(chunk)]));
     const rebuiltSurfaceChunks = new Map(rebuiltChunks.map((chunk) => [chunk.id, buildSurfaceChunkMesh(editorSession.world, chunk.chunkX, chunk.chunkZ)]));
     const rebuildMs = Number((performance.now() - startedAt).toFixed(3));
+    incrementEditorPerfCounter("terrainChunkRebuilds", rebuiltChunks.length);
 
     setTerrain((currentTerrain) => ({
       ...currentTerrain,
@@ -880,6 +1008,11 @@ function ExperienceScene({
       return;
     }
 
+    if (tool === "entity") {
+      placeObjectAtGridColumn(coordinate);
+      return;
+    }
+
     const editCoordinate = getToolTargetCoordinate(editorSession, tool, coordinate);
     if (!editCoordinate) {
       setEditorMessage({ type: "error", text: "No valid cell for this tool." });
@@ -898,7 +1031,7 @@ function ExperienceScene({
           world: editorSession.world,
           operation: brushOperation,
           center: editCoordinate,
-          settings: brushSettings,
+          settings: effectiveBrushSettings,
           blockId: brushOperation === "paint-path" ? BLOCK_IDS.Path : paintBlockId,
           zoneId,
         }),
@@ -910,6 +1043,7 @@ function ExperienceScene({
       setEditorMessage({ type: "info", text: `${tool} applied at ${editCoordinate.x},${editCoordinate.y},${editCoordinate.z}.` });
     }
     replaceRebuiltChunks(result.rebuiltChunks);
+    if (result.changed) setPreviewRevision((revision) => revision + 1);
   };
 
   const handleEditorCells = (coordinates: GridCoordinate[]) => {
@@ -934,7 +1068,7 @@ function ExperienceScene({
         world: editorSession.world,
         operation: brushOperation,
         center: editCoordinate,
-        settings: brushSettings,
+        settings: effectiveBrushSettings,
         blockId: brushOperation === "paint-path" ? BLOCK_IDS.Path : paintBlockId,
         zoneId,
       });
@@ -945,6 +1079,7 @@ function ExperienceScene({
     setSelectedMarkerId(null);
     setSelectedEntityIds([]);
     replaceRebuiltChunks(result.rebuiltChunks);
+    if (result.changed) setPreviewRevision((revision) => revision + 1);
   };
 
   const handleUndo = () => {
@@ -1187,12 +1322,11 @@ function ExperienceScene({
     setEditorMessage({ type: "info", text: "Marker removed." });
   };
 
-  const handlePlaceEntity = () => {
+  const placeEntityAtBasePosition = (basePosition: THREE.Vector3 | { x: number; y: number; z: number }) => {
     if (isLayerLocked(layerStates, "entities")) {
       setEditorMessage({ type: "error", text: "The entity layer is locked." });
       return;
     }
-    const basePosition = selectedWorldPosition ?? { x: 0, y: 1, z: 0 };
     const entity = createEntityFromDraft({
       name: entityName,
       primitiveType,
@@ -1201,7 +1335,7 @@ function ExperienceScene({
       transform: {
         position: { x: basePosition.x, y: basePosition.y + 0.5, z: basePosition.z },
         rotation: { x: 0, y: 0, z: 0 },
-        scale: primitiveType === "plane" ? { x: 2, y: 0.08, z: 2 } : { x: 1, y: 1, z: 1 },
+        scale: getDefaultEntityScale(primitiveType),
       },
     }, new Set(currentMap.entities.map((entity) => entity.id)));
     const validation = validateEntityPlacement(currentMap, entity);
@@ -1215,6 +1349,73 @@ function ExperienceScene({
     setSelectedEntityIds([entity.id]);
     setSelectedCell(null);
     setSelectedMarkerId(null);
+    setTool("select");
+  };
+
+  const placePrefabAtBasePosition = (basePosition: THREE.Vector3 | { x: number; y: number; z: number }) => {
+    if (isLayerLocked(layerStates, "entities")) {
+      setEditorMessage({ type: "error", text: "The entity layer is locked." });
+      return;
+    }
+
+    const prefab = getPrefabDefinition(activePrefabId);
+    if (!prefab) {
+      setEditorMessage({ type: "error", text: "Select a valid prefab before placement." });
+      return;
+    }
+    const variant = prefab.variants.find((candidate) => candidate.id === activePrefabVariantId) ?? prefab.variants[0];
+    if (!variant) {
+      setEditorMessage({ type: "error", text: "Selected prefab has no valid variant." });
+      return;
+    }
+
+    const entity = createPrefabEntityFromDraft({
+      name: prefab.name,
+      prefabId: prefab.id,
+      variantId: variant.id,
+      color: entityColor,
+      transform: {
+        position: { x: basePosition.x, y: basePosition.y + 0.5, z: basePosition.z },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+      collisionModeOverride: collisionMode === prefab.collisionMode ? undefined : collisionMode,
+    }, new Set(currentMap.entities.map((candidate) => candidate.id)));
+    const validation = validateEntityPlacement(currentMap, entity);
+    setValidationSummary(validation.messages);
+    if (validation.severity === "invalid") {
+      setEditorMessage({ type: "error", text: validation.messages[0] ?? "Prefab placement is invalid." });
+      return;
+    }
+
+    commitMapDefinitionChange(addEntity(currentMap, entity), `Placed ${prefab.name}.`);
+    setSelectedEntityIds([entity.id]);
+    setSelectedCell(null);
+    setSelectedMarkerId(null);
+  };
+
+  const placeObjectAtGridColumn = (coordinate: GridCoordinate) => {
+    const topY = editorSession.world.getHighestNonAirY(coordinate.x, coordinate.z);
+    if (topY === null) {
+      setEditorMessage({ type: "error", text: "No terrain surface under this object placement." });
+      return;
+    }
+    const basePosition = editorSession.world.gridToWorld(coordinate.x, topY, coordinate.z);
+    if (activePrefabId) {
+      placePrefabAtBasePosition(basePosition);
+    } else {
+      placeEntityAtBasePosition(basePosition);
+    }
+    setTool("select");
+  };
+
+  const handlePlaceEntity = () => {
+    if (selectedCell) {
+      placeObjectAtGridColumn(selectedCell);
+      return;
+    }
+    setTool("entity");
+    setEditorMessage({ type: "info", text: "Click a terrain surface to place the selected object." });
   };
 
   const handleDuplicateEntity = () => {
@@ -1252,6 +1453,37 @@ function ExperienceScene({
       ...entity,
       appearance: { ...entity.appearance, visibleInEditor: !entity.appearance.visibleInEditor },
     })), "Entity visibility toggled.");
+  };
+
+  const handleTransformEntity = (id: string, transform: Pick<PlacedMapEntity["transform"], "position" | "rotation">) => {
+    const entity = currentMap.entities.find((candidate) => candidate.id === id);
+    if (!entity) {
+      return false;
+    }
+
+    const nextEntity = {
+      ...entity,
+      transform: {
+        ...entity.transform,
+        position: transform.position,
+        rotation: transform.rotation,
+      },
+    };
+    const validation = validateEntityPlacement(
+      { ...currentMap, entities: currentMap.entities.filter((candidate) => candidate.id !== id) },
+      nextEntity,
+    );
+    setValidationSummary(validation.messages);
+    if (validation.severity === "invalid") {
+      setEditorMessage({ type: "error", text: validation.messages[0] ?? "Entity transform is invalid." });
+      return false;
+    }
+
+    commitMapDefinitionChange(updateEntity(currentMap, id, () => nextEntity), `Moved ${entity.name}.`);
+    setSelectedEntityIds([id]);
+    setSelectedCell(null);
+    setSelectedMarkerId(null);
+    return true;
   };
 
   const handlePlaceNavigationNode = () => {
@@ -1305,9 +1537,17 @@ function ExperienceScene({
 
   useEffect(() => {
     if (!editorAvailable) {
+      if (lastEditorPanelSignature.current !== null) {
+        lastEditorPanelSignature.current = null;
+      }
       onEditorStateChange(null);
       return;
     }
+
+    if (lastEditorPanelSignature.current === editorPanelSignature) {
+      return;
+    }
+    lastEditorPanelSignature.current = editorPanelSignature;
 
     onEditorStateChange({
       available: editorAvailable,
@@ -1342,6 +1582,10 @@ function ExperienceScene({
       entityCount: currentMap.entities.length,
       selectedEntityIds,
       primitiveType,
+      activePrefabId,
+      activePrefabVariantId,
+      prefabSearch,
+      entityTransformMode,
       collisionMode,
       entityColor,
       entityName,
@@ -1373,11 +1617,20 @@ function ExperienceScene({
       onClearDraft: handleClearDraft,
       onClose: onCloseEditor,
       onRemoveMarker: handleRemoveMarker,
-      onBrushShapeChange: (shape: BrushShape) => setBrushSettings((settings) => ({ ...settings, shape })),
-      onBrushSizeChange: (size: number) => setBrushSettings((settings) => ({ ...settings, size: Math.max(1, Math.min(9, Math.floor(size) || 1)) })),
-      onPathWidthChange: (pathWidth: number) => setBrushSettings((settings) => ({ ...settings, pathWidth: Math.max(1, Math.min(9, Math.floor(pathWidth) || 1)) })),
-      onFlattenHeightChange: (flattenHeight: number) => setBrushSettings((settings) => ({ ...settings, flattenHeight: Math.max(0, Math.min(11, Math.floor(flattenHeight) || 0)) })),
+      onBrushShapeChange: (shape: BrushShape) => updateToolBrushSettings(setBrushSettingsByTool, tool, (settings) => ({ ...settings, shape })),
+      onBrushSizeChange: (size: number) => updateToolBrushSettings(setBrushSettingsByTool, tool, (settings) => ({ ...settings, size: Math.max(1, Math.min(9, Math.floor(size) || 1)) })),
+      onPathWidthChange: (pathWidth: number) => updateToolBrushSettings(setBrushSettingsByTool, tool, (settings) => ({ ...settings, pathWidth: Math.max(1, Math.min(9, Math.floor(pathWidth) || 1)) })),
+      onFlattenHeightChange: (flattenHeight: number) => updateToolBrushSettings(setBrushSettingsByTool, tool, (settings) => ({ ...settings, flattenHeight: Math.max(0, Math.min(11, Math.floor(flattenHeight) || 0)) })),
       onPrimitiveTypeChange: setPrimitiveType,
+      onActivePrefabChange: (prefabId) => {
+        const prefab = getPrefabDefinition(prefabId);
+        setActivePrefabId(prefabId);
+        setActivePrefabVariantId(prefab?.defaultVariantId ?? "");
+        setTool("entity");
+      },
+      onActivePrefabVariantChange: setActivePrefabVariantId,
+      onPrefabSearchChange: setPrefabSearch,
+      onEntityTransformModeChange: setEntityTransformMode,
       onCollisionModeChange: setCollisionMode,
       onEntityColorChange: setEntityColor,
       onEntityNameChange: setEntityName,
@@ -1396,6 +1649,7 @@ function ExperienceScene({
       onLayerLockChange: (id, locked) => updateLayer(id, { locked }),
       onCleanPreviewChange: setCleanPreview,
     });
+    incrementEditorPerfCounter("editorPanelPublishes");
   }, [
     autosaveStatus,
     activeMapId,
@@ -1403,10 +1657,13 @@ function ExperienceScene({
     currentMap,
     brushAffectedCellCount,
     brushSettings,
+    editorPanelSignature,
+    effectiveBrushSettings,
     cleanPreview,
     collisionMode,
     entityColor,
     entityName,
+    entityTransformMode,
     editorAvailable,
     editorMessage,
     editorRevision,
@@ -1417,6 +1674,9 @@ function ExperienceScene({
     paintBlockId,
     presetId,
     primitiveType,
+    activePrefabId,
+    activePrefabVariantId,
+    prefabSearch,
     renderMode,
     selectedBlockId,
     selectedCell,
@@ -1462,7 +1722,7 @@ function ExperienceScene({
   }, [browsing, currentMap, hoveredZoneId, onMapUiStateChange, phase]);
 
   useEffect(() => {
-    if (!editorAvailable) {
+    if (!editorAvailable || !snapshot.hasUnsavedChanges) {
       return;
     }
 
@@ -1500,7 +1760,7 @@ function ExperienceScene({
     }, 450);
 
     return () => window.clearTimeout(timer);
-  }, [editorAvailable, editorRevision, editorSession]);
+  }, [editorAvailable, editorRevision, editorSession, snapshot.hasUnsavedChanges]);
 
   useEffect(() => {
     if (phase !== "explore" || editorAvailable) {
@@ -1643,7 +1903,7 @@ function ExperienceScene({
       />
       <WorldEntryItem visible={phase === "ready"} onActivate={startExpansion} />
       <ConstrainedMapControls
-        enabled={isInteractivePhase(phase)}
+        enabled={isInteractivePhase(phase) && !entityTransformDragging}
         phase={phase}
         focusPreset={activeCameraPreset}
         reducedMotion={reducedMotion}
@@ -1651,19 +1911,39 @@ function ExperienceScene({
       />
       <RenderInvalidator phase={phase} />
       <EditorInteractionOverlay
-        editorEnabled={editorAvailable}
+        editorEnabled={editorAvailable && !entityTransformDragging}
         tool={tool}
         renderMode={activeRenderMode}
         chunks={terrain.chunks}
         surfaceChunks={terrain.surfaceChunks}
+        entities={currentMap.entities}
         world={editorSession.world}
         hoveredCell={hoveredCell}
         onHoverCell={setHoveredCell}
         onEditCell={handleEditorCell}
         onEditCells={handleEditorCells}
       />
-      <BrushFootprintIndicator coordinate={hoveredCell} settings={brushSettings} visible={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "developmentHelpers")} color={TOOL_COLORS[tool]} />
-      <SelectionIndicator coordinate={selectedCell} visible={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "developmentHelpers")} color="#f59e0b" />
+      <BrushFootprintIndicator
+        coordinate={hoveredCell}
+        tool={tool}
+        settings={effectiveBrushSettings}
+        world={editorSession.world}
+        blockId={paintBlockId}
+        zoneId={zoneId}
+        revision={previewRevision}
+        visible={editorAvailable && tool !== "entity" && !cleanPreview && isLayerVisible(layerStates, "developmentHelpers")}
+        color={TOOL_COLORS[tool]}
+      />
+      <ObjectPlacementPreview
+        coordinate={hoveredCell}
+        tool={tool}
+        world={editorSession.world}
+        primitiveType={primitiveType}
+        prefabId={activePrefabId}
+        variantId={activePrefabVariantId}
+        color={entityColor}
+        visible={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "entities") && !isLayerLocked(layerStates, "entities")}
+      />
       <EditorMarkers
         editorEnabled={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "markers")}
         entities={editorSession.entities}
@@ -1676,16 +1956,35 @@ function ExperienceScene({
         }}
       />
       <EditorPlacedEntities
-        editorEnabled={editorAvailable}
+        editorEnabled={phase === "explore"}
         cleanPreview={cleanPreview}
         layerVisible={isLayerVisible(layerStates, "entities")}
-        entities={currentMap.entities}
+        entities={currentMap.entities.filter((entity) => entity.entityType !== "prefab")}
         selectedEntityIds={selectedEntityIds}
+        transformMode={entityTransformMode}
+        transformEnabled={!cleanPreview && selectedEntityIds.length === 1}
         onSelectEntity={(id, additive) => {
           setSelectedEntityIds((ids) => additive ? [...new Set([...ids, id])] : [id]);
           setSelectedCell(null);
           setSelectedMarkerId(null);
         }}
+        onTransformDraggingChange={setEntityTransformDragging}
+        onTransformEntity={handleTransformEntity}
+      />
+      <EditorPrefabEntities
+        visible={phase === "explore" && isLayerVisible(layerStates, "entities")}
+        cleanPreview={cleanPreview}
+        entities={currentMap.entities.filter((entity) => entity.entityType === "prefab")}
+        selectedEntityIds={selectedEntityIds}
+        transformMode={entityTransformMode}
+        transformEnabled={editorAvailable && !cleanPreview && selectedEntityIds.length === 1}
+        onSelectEntity={(id, additive) => {
+          setSelectedEntityIds((ids) => additive ? [...new Set([...ids, id])] : [id]);
+          setSelectedCell(null);
+          setSelectedMarkerId(null);
+        }}
+        onTransformDraggingChange={setEntityTransformDragging}
+        onTransformEntity={handleTransformEntity}
       />
       <EditorNavigationHelpers
         editorEnabled={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "navigation")}
@@ -2072,6 +2371,7 @@ function EditorInteractionOverlay({
   renderMode,
   chunks,
   surfaceChunks,
+  entities,
   world,
   hoveredCell,
   onHoverCell,
@@ -2083,6 +2383,7 @@ function EditorInteractionOverlay({
   renderMode: TerrainRenderMode;
   chunks: TerrainChunk[];
   surfaceChunks: SurfaceChunkMeshData[];
+  entities: PlacedMapEntity[];
   world: MapEditorSession["world"];
   hoveredCell: GridCoordinate | null;
   onHoverCell: (coordinate: GridCoordinate | null) => void;
@@ -2100,6 +2401,30 @@ function EditorInteractionOverlay({
   const groundPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const planeIntersection = useRef(new THREE.Vector3());
   const shouldRaycast = useRef(true);
+  const editorTargets = useRef<{ chunks: THREE.InstancedMesh[]; surfaces: THREE.Mesh[]; entities: THREE.Mesh[] }>({ chunks: [], surfaces: [], entities: [] });
+  const raycastHits = useRef<THREE.Intersection[]>([]);
+
+  useEffect(() => {
+    const chunksList: THREE.InstancedMesh[] = [];
+    const surfacesList: THREE.Mesh[] = [];
+    const entitiesList: THREE.Mesh[] = [];
+
+    scene.traverse((object) => {
+      incrementEditorPerfCounter("sceneTraversals");
+      if ((object as THREE.InstancedMesh).isInstancedMesh && typeof object.userData.portfolioChunkId === "string") {
+        chunksList.push(object as THREE.InstancedMesh);
+      }
+      if ((object as THREE.Mesh).isMesh && typeof object.userData.portfolioSurfaceChunkId === "string") {
+        surfacesList.push(object as THREE.Mesh);
+      }
+      if ((object as THREE.Mesh).isMesh && typeof object.userData.portfolioEntityId === "string") {
+        entitiesList.push(object as THREE.Mesh);
+      }
+    });
+
+    editorTargets.current = { chunks: chunksList, surfaces: surfacesList, entities: entitiesList };
+    shouldRaycast.current = true;
+  }, [chunks, entities, scene, surfaceChunks]);
 
   useEffect(() => {
     if (!editorEnabled) {
@@ -2128,7 +2453,8 @@ function EditorInteractionOverlay({
 
     const paintCurrentHover = () => {
       raycaster.setFromCamera(mousePosition.current, camera);
-      const currentHover = getHoveredEditorCell(scene, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
+      incrementEditorPerfCounter("raycasts");
+      const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
       if (!currentHover) {
         return false;
       }
@@ -2202,7 +2528,11 @@ function EditorInteractionOverlay({
 
       if (moved <= 5) {
         raycaster.setFromCamera(mousePosition.current, camera);
-        const currentHover = getHoveredEditorCell(scene, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
+        incrementEditorPerfCounter("raycasts");
+        if ((tool === "entity" || tool === "select") && hasHoveredEditorEntity(editorTargets.current.entities, raycastHits.current, raycaster)) {
+          return;
+        }
+        const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
         if (currentHover) {
           event.preventDefault();
           onEditCell(currentHover);
@@ -2228,7 +2558,7 @@ function EditorInteractionOverlay({
       window.removeEventListener("pointerup", handlePointerUp, { capture: true });
       window.removeEventListener("pointercancel", handlePointerCancel, { capture: true });
     };
-  }, [camera, chunkById, editorEnabled, gl.domElement, onEditCell, onEditCells, onHoverCell, raycaster, renderMode, scene, surfaceChunkById, tool, world]);
+  }, [camera, chunkById, editorEnabled, gl.domElement, onEditCell, onEditCells, onHoverCell, raycaster, renderMode, surfaceChunkById, tool, world]);
 
   useEffect(() => {
     shouldRaycast.current = true;
@@ -2241,8 +2571,10 @@ function EditorInteractionOverlay({
 
     shouldRaycast.current = false;
     raycaster.setFromCamera(mousePosition.current, camera);
+    incrementEditorPerfCounter("raycasts");
     const nextHoveredCell = getHoveredEditorCell(
-      scene,
+      editorTargets.current,
+      raycastHits.current,
       raycaster,
       chunkById,
       surfaceChunkById,
@@ -2262,7 +2594,8 @@ function EditorInteractionOverlay({
 }
 
 function getHoveredEditorCell(
-  scene: THREE.Scene,
+  terrainTargets: { chunks: THREE.InstancedMesh[]; surfaces: THREE.Mesh[] },
+  hits: THREE.Intersection[],
   raycaster: THREE.Raycaster,
   chunkById: Map<string, TerrainChunk>,
   surfaceChunkById: Map<string, SurfaceChunkMeshData>,
@@ -2272,19 +2605,8 @@ function getHoveredEditorCell(
   groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0),
   planeIntersection = new THREE.Vector3(),
 ) {
-  const chunkMeshes: THREE.InstancedMesh[] = [];
-  const surfaceMeshes: THREE.Mesh[] = [];
-
-  scene.traverse((object) => {
-    if ((object as THREE.InstancedMesh).isInstancedMesh && typeof object.userData.portfolioChunkId === "string") {
-      chunkMeshes.push(object as THREE.InstancedMesh);
-    }
-    if ((object as THREE.Mesh).isMesh && typeof object.userData.portfolioSurfaceChunkId === "string") {
-      surfaceMeshes.push(object as THREE.Mesh);
-    }
-  });
-
-  const hits = raycaster.intersectObjects(renderMode === "surface" ? surfaceMeshes : chunkMeshes, false);
+  hits.length = 0;
+  raycaster.intersectObjects(renderMode === "surface" ? terrainTargets.surfaces : terrainTargets.chunks, false, hits);
   const hit = hits[0];
 
   if (hit && hit.instanceId !== undefined) {
@@ -2326,6 +2648,16 @@ function getHoveredEditorCell(
   }
 
   return null;
+}
+
+function hasHoveredEditorEntity(
+  entityTargets: THREE.Mesh[],
+  hits: THREE.Intersection[],
+  raycaster: THREE.Raycaster,
+) {
+  hits.length = 0;
+  raycaster.intersectObjects(entityTargets, false, hits);
+  return hits.length > 0;
 }
 
 function getAdjacentFaceCoordinate(
@@ -2398,28 +2730,104 @@ function SelectionIndicator({
 
 function BrushFootprintIndicator({
   coordinate,
+  tool,
   settings,
+  world,
+  blockId,
+  zoneId,
+  revision,
   visible,
   color,
 }: {
   coordinate: GridCoordinate | null;
+  tool: EditorTool;
   settings: TerrainBrushSettings;
+  world: MapEditorSession["world"];
+  blockId: BlockId;
+  zoneId: number;
+  revision: number;
   visible: boolean;
   color: string;
 }) {
-  const cells = useMemo(() => coordinate ? getBrushFootprint(coordinate, settings) : [], [coordinate, settings]);
+  const cells = useMemo(
+    () => {
+      void revision;
+      return coordinate ? getToolPreviewFootprint(coordinate, tool, settings, world, blockId, zoneId) : [];
+    },
+    [blockId, coordinate, revision, settings, tool, world, zoneId],
+  );
+  const previewStyle = getBrushPreviewStyle(tool);
   return (
     <>
       {cells.map((cell) => (
-        <SelectionIndicator
-          key={`${cell.x}-${cell.y}-${cell.z}`}
-          coordinate={cell}
-          visible={visible}
-          color={color}
-          filled
-        />
+        previewStyle === "cube" ? (
+          <SelectionIndicator
+            key={`${cell.x}-${cell.y}-${cell.z}`}
+            coordinate={cell}
+            visible={visible}
+            color={color}
+            filled
+          />
+        ) : (
+          <SurfaceBrushCellIndicator
+            key={`${cell.x}-${cell.y}-${cell.z}`}
+            coordinate={cell}
+            visible={visible}
+            color={color}
+          />
+        )
       ))}
     </>
+  );
+}
+
+function SurfaceBrushCellIndicator({
+  coordinate,
+  visible,
+  color,
+}: {
+  coordinate: GridCoordinate;
+  visible: boolean;
+  color: string;
+}) {
+  const lineGeometry = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
+      -0.5, 0, -0.5, 0.5, 0, -0.5,
+      0.5, 0, -0.5, 0.5, 0, 0.5,
+      0.5, 0, 0.5, -0.5, 0, 0.5,
+      -0.5, 0, 0.5, -0.5, 0, -0.5,
+    ]), 3));
+    return geometry;
+  }, []);
+  const fillGeometry = useMemo(() => new THREE.PlaneGeometry(0.94, 0.94), []);
+  const lineMaterial = useMemo(
+    () => new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95, depthTest: false }),
+    [color],
+  );
+  const fillMaterial = useMemo(
+    () => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, depthWrite: false, depthTest: false }),
+    [color],
+  );
+
+  useEffect(() => {
+    return () => {
+      lineGeometry.dispose();
+      fillGeometry.dispose();
+      lineMaterial.dispose();
+      fillMaterial.dispose();
+    };
+  }, [fillGeometry, fillMaterial, lineGeometry, lineMaterial]);
+
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <group position={[coordinate.x - 31.5, coordinate.y + 1.012, coordinate.z - 31.5]} renderOrder={11}>
+      <mesh geometry={fillGeometry} material={fillMaterial} rotation={[-Math.PI / 2, 0, 0]} />
+      <lineSegments geometry={lineGeometry} material={lineMaterial} />
+    </group>
   );
 }
 
@@ -2646,29 +3054,366 @@ function EditorMarkers({
   );
 }
 
+function ObjectPlacementPreview({
+  coordinate,
+  tool,
+  world,
+  primitiveType,
+  prefabId,
+  variantId,
+  color,
+  visible,
+}: {
+  coordinate: GridCoordinate | null;
+  tool: EditorTool;
+  world: MapEditorSession["world"];
+  primitiveType: PrimitiveType;
+  prefabId: string;
+  variantId: string;
+  color: string;
+  visible: boolean;
+}) {
+  const geometries = useMemo(() => createEntityPrimitiveGeometries(), []);
+  const material = useMemo(
+    () => new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.38, depthWrite: false }),
+    [color],
+  );
+
+  useEffect(() => {
+    return () => {
+      Object.values(geometries).forEach((geometry) => geometry.dispose());
+      material.dispose();
+    };
+  }, [geometries, material]);
+
+  if (!visible || tool !== "entity" || !coordinate) {
+    return null;
+  }
+
+  const topY = world.getHighestNonAirY(coordinate.x, coordinate.z);
+  if (topY === null) {
+    return null;
+  }
+
+  const basePosition = world.gridToWorld(coordinate.x, topY, coordinate.z);
+  const scale = getDefaultEntityScale(primitiveType);
+  const prefab = prefabId ? getPrefabDefinition(prefabId) : null;
+  if (prefab) {
+    const entity = createPrefabEntityFromDraft({
+      name: prefab.name,
+      prefabId: prefab.id,
+      variantId: variantId || prefab.defaultVariantId,
+      transform: {
+        position: { x: basePosition.x, y: basePosition.y + 0.5, z: basePosition.z },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }, new Set());
+    const resolved = resolvePrefabInstance(entity);
+    return (
+      <group>
+        {resolved.parts.map((part) => (
+          <mesh
+            key={`${part.partId}-${part.primitive}`}
+            geometry={geometries[part.primitive]}
+            material={material}
+            position={[part.transform.position.x, part.transform.position.y, part.transform.position.z]}
+            rotation={[part.transform.rotation.x, part.transform.rotation.y, part.transform.rotation.z]}
+            scale={[part.transform.scale.x, part.transform.scale.y, part.transform.scale.z]}
+            renderOrder={11}
+          />
+        ))}
+      </group>
+    );
+  }
+
+  return (
+    <group position={[basePosition.x, basePosition.y + 0.5, basePosition.z]}>
+      <mesh
+        geometry={geometries[primitiveType]}
+        material={material}
+        position={[0, getEntityVisualAnchorOffset(primitiveType), 0]}
+        scale={[scale.x, scale.y, scale.z]}
+        renderOrder={11}
+      />
+    </group>
+  );
+}
+
+type PrefabBatch = {
+  key: string;
+  primitive: PrimitiveType;
+  color: string;
+  parts: ResolvedPrefabPart[];
+};
+
+function EditorPrefabEntities({
+  visible,
+  cleanPreview,
+  entities,
+  selectedEntityIds,
+  transformMode,
+  transformEnabled,
+  onSelectEntity,
+  onTransformDraggingChange,
+  onTransformEntity,
+}: {
+  visible: boolean;
+  cleanPreview: boolean;
+  entities: PlacedMapEntity[];
+  selectedEntityIds: string[];
+  transformMode: EntityTransformMode;
+  transformEnabled: boolean;
+  onSelectEntity: (id: string, additive: boolean) => void;
+  onTransformDraggingChange: (dragging: boolean) => void;
+  onTransformEntity: (id: string, transform: Pick<PlacedMapEntity["transform"], "position" | "rotation">) => boolean;
+}) {
+  const geometries = useMemo(() => createEntityPrimitiveGeometries(), []);
+  const selectedMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#ffffff", wireframe: true, depthTest: false }), []);
+  const selectedEntity = entities.find((entity) => selectedEntityIds.includes(entity.id)) ?? null;
+  const batches = useMemo(() => createPrefabBatches(entities.filter((entity) => !selectedEntityIds.includes(entity.id) && (entity.appearance.visibleInEditor || cleanPreview))), [cleanPreview, entities, selectedEntityIds]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(geometries).forEach((geometry) => geometry.dispose());
+      selectedMaterial.dispose();
+    };
+  }, [geometries, selectedMaterial]);
+
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <group>
+      {batches.map((batch) => (
+        <PrefabInstancedBatch
+          key={batch.key}
+          batch={batch}
+          geometry={geometries[batch.primitive]}
+          onSelectEntity={onSelectEntity}
+        />
+      ))}
+      {selectedEntity ? (
+        <EditablePrefabEntity
+          entity={selectedEntity}
+          geometries={geometries}
+          selectedMaterial={selectedMaterial}
+          transformMode={transformMode}
+          transformEnabled={transformEnabled}
+          onSelectEntity={onSelectEntity}
+          onTransformDraggingChange={onTransformDraggingChange}
+          onTransformEntity={onTransformEntity}
+        />
+      ) : null}
+    </group>
+  );
+}
+
+function PrefabInstancedBatch({
+  batch,
+  geometry,
+  onSelectEntity,
+}: {
+  batch: PrefabBatch;
+  geometry: THREE.BufferGeometry;
+  onSelectEntity: (id: string, additive: boolean) => void;
+}) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const material = useMemo(() => new THREE.MeshBasicMaterial({ color: batch.color }), [batch.color]);
+  const instanceToEntityId = useMemo(() => batch.parts.map((part) => part.entityId), [batch.parts]);
+
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const matrix = new THREE.Matrix4();
+    const position = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    for (let index = 0; index < batch.parts.length; index += 1) {
+      const transform = batch.parts[index].transform;
+      position.set(transform.position.x, transform.position.y, transform.position.z);
+      quaternion.setFromEuler(new THREE.Euler(transform.rotation.x, transform.rotation.y, transform.rotation.z));
+      scale.set(transform.scale.x, transform.scale.y, transform.scale.z);
+      matrix.compose(position, quaternion, scale);
+      mesh.setMatrixAt(index, matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  }, [batch.parts]);
+
+  useEffect(() => () => material.dispose(), [material]);
+
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[geometry, material, batch.parts.length]}
+      userData={{ portfolioPrefabBatchKey: batch.key }}
+      onPointerUp={(event) => {
+        event.stopPropagation();
+        if (event.instanceId === undefined) return;
+        const entityId = instanceToEntityId[event.instanceId];
+        if (entityId) onSelectEntity(entityId, event.shiftKey);
+      }}
+    />
+  );
+}
+
+function EditablePrefabEntity({
+  entity,
+  geometries,
+  selectedMaterial,
+  transformMode,
+  transformEnabled,
+  onSelectEntity,
+  onTransformDraggingChange,
+  onTransformEntity,
+}: {
+  entity: PlacedMapEntity;
+  geometries: Record<PrimitiveType, THREE.BufferGeometry>;
+  selectedMaterial: THREE.Material;
+  transformMode: EntityTransformMode;
+  transformEnabled: boolean;
+  onSelectEntity: (id: string, additive: boolean) => void;
+  onTransformDraggingChange: (dragging: boolean) => void;
+  onTransformEntity: (id: string, transform: Pick<PlacedMapEntity["transform"], "position" | "rotation">) => boolean;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const transformActive = useRef(false);
+  const [transformObject, setTransformObject] = useState<THREE.Group | null>(null);
+  const resolved = useMemo(() => resolvePrefabInstance({ ...entity, transform: { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: entity.transform.scale } }), [entity]);
+  const setGroupRef = useCallback((node: THREE.Group | null) => {
+    groupRef.current = node;
+    setTransformObject(node);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (transformActive.current) return;
+    const group = groupRef.current;
+    if (!group) return;
+    group.position.set(entity.transform.position.x, entity.transform.position.y, entity.transform.position.z);
+    group.rotation.set(entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z);
+    group.scale.set(1, 1, 1);
+  }, [entity.transform.position.x, entity.transform.position.y, entity.transform.position.z, entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z]);
+
+  const restoreTransform = () => {
+    const group = groupRef.current;
+    if (!group) return;
+    group.position.set(entity.transform.position.x, entity.transform.position.y, entity.transform.position.z);
+    group.rotation.set(entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z);
+    group.scale.set(1, 1, 1);
+  };
+
+  const commitTransform = () => {
+    const group = groupRef.current;
+    if (!group) return;
+    transformActive.current = false;
+    onTransformDraggingChange(false);
+    const changed = onTransformEntity(entity.id, {
+      position: {
+        x: snapEntityTransformValue(group.position.x),
+        y: snapEntityTransformValue(group.position.y),
+        z: snapEntityTransformValue(group.position.z),
+      },
+      rotation: {
+        x: snapEntityRotationValue(group.rotation.x),
+        y: snapEntityRotationValue(group.rotation.y),
+        z: snapEntityRotationValue(group.rotation.z),
+      },
+    });
+    if (!changed) restoreTransform();
+  };
+
+  return (
+    <>
+      <group ref={setGroupRef}>
+        {resolved.parts.map((part) => (
+          <group key={part.partId}>
+            <mesh
+              geometry={geometries[part.primitive]}
+              position={[part.transform.position.x, part.transform.position.y, part.transform.position.z]}
+              rotation={[part.transform.rotation.x, part.transform.rotation.y, part.transform.rotation.z]}
+              scale={[part.transform.scale.x, part.transform.scale.y, part.transform.scale.z]}
+              userData={{ portfolioEntityId: entity.id, portfolioPrefabPartId: part.partId }}
+              onPointerUp={(event) => {
+                event.stopPropagation();
+                onSelectEntity(entity.id, event.shiftKey);
+              }}
+            >
+              <meshBasicMaterial color={part.color} />
+            </mesh>
+            <mesh
+              geometry={geometries[part.primitive]}
+              material={selectedMaterial}
+              position={[part.transform.position.x, part.transform.position.y, part.transform.position.z]}
+              rotation={[part.transform.rotation.x, part.transform.rotation.y, part.transform.rotation.z]}
+              scale={[part.transform.scale.x * 1.04, part.transform.scale.y * 1.04, part.transform.scale.z * 1.04]}
+              renderOrder={12}
+            />
+          </group>
+        ))}
+      </group>
+      {transformEnabled && transformObject ? (
+        <TransformControls
+          object={transformObject}
+          mode={transformMode}
+          size={0.82}
+          space="world"
+          onMouseDown={() => {
+            transformActive.current = true;
+            onTransformDraggingChange(true);
+          }}
+          onMouseUp={commitTransform}
+          onPointerMissed={restoreTransform}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function createPrefabBatches(entities: PlacedMapEntity[]): PrefabBatch[] {
+  const batches = new Map<string, PrefabBatch>();
+  for (const entity of entities) {
+    const resolved = resolvePrefabInstance(entity);
+    for (const part of resolved.parts) {
+      const chunkX = Math.max(0, Math.min(3, Math.floor((part.transform.position.x + 32) / 16)));
+      const chunkZ = Math.max(0, Math.min(3, Math.floor((part.transform.position.z + 32) / 16)));
+      const key = `${chunkX}:${chunkZ}:${part.primitive}:${part.color}`;
+      const existing = batches.get(key);
+      if (existing) {
+        existing.parts.push(part);
+      } else {
+        batches.set(key, { key, primitive: part.primitive, color: part.color, parts: [part] });
+      }
+    }
+  }
+  return [...batches.values()];
+}
+
 function EditorPlacedEntities({
   editorEnabled,
   cleanPreview,
   layerVisible,
   entities,
   selectedEntityIds,
+  transformMode,
+  transformEnabled,
   onSelectEntity,
+  onTransformDraggingChange,
+  onTransformEntity,
 }: {
   editorEnabled: boolean;
   cleanPreview: boolean;
   layerVisible: boolean;
   entities: PlacedMapEntity[];
   selectedEntityIds: string[];
+  transformMode: EntityTransformMode;
+  transformEnabled: boolean;
   onSelectEntity: (id: string, additive: boolean) => void;
+  onTransformDraggingChange: (dragging: boolean) => void;
+  onTransformEntity: (id: string, transform: Pick<PlacedMapEntity["transform"], "position" | "rotation">) => boolean;
 }) {
-  const geometries = useMemo(() => ({
-    box: new THREE.BoxGeometry(1, 1, 1),
-    cylinder: new THREE.CylinderGeometry(0.5, 0.5, 1, 16),
-    sphere: new THREE.SphereGeometry(0.5, 16, 10),
-    plane: new THREE.BoxGeometry(1, 0.04, 1),
-    platform: new THREE.BoxGeometry(1, 0.22, 1),
-    sign: new THREE.BoxGeometry(1, 0.72, 0.08),
-  }), []);
+  const geometries = useMemo(() => createEntityPrimitiveGeometries(), []);
   const selectedMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#ffffff", wireframe: true, depthTest: false }), []);
 
   useEffect(() => {
@@ -2688,48 +3433,149 @@ function EditorPlacedEntities({
         if (cleanPreview && !entity.appearance.visibleAtRuntime) return null;
         const selected = selectedEntityIds.includes(entity.id);
         return (
-          <group key={entity.id}>
-            <mesh
-              geometry={geometries[entity.primitiveType]}
-              position={[entity.transform.position.x, entity.transform.position.y, entity.transform.position.z]}
-              rotation={[entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z]}
-              scale={[entity.transform.scale.x, entity.transform.scale.y, entity.transform.scale.z]}
-              onPointerUp={(event) => {
-                event.stopPropagation();
-                onSelectEntity(entity.id, event.shiftKey);
-              }}
-            >
-              <meshBasicMaterial
-                color={entity.appearance.color}
-                transparent={entity.appearance.opacity !== undefined}
-                opacity={entity.appearance.opacity ?? 1}
-              />
-            </mesh>
-            {selected ? (
-              <mesh
-                geometry={geometries[entity.primitiveType]}
-                material={selectedMaterial}
-                position={[entity.transform.position.x, entity.transform.position.y, entity.transform.position.z]}
-                rotation={[entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z]}
-                scale={[entity.transform.scale.x * 1.05, entity.transform.scale.y * 1.05, entity.transform.scale.z * 1.05]}
-                renderOrder={12}
-              />
-            ) : null}
-            {entity.primitiveType === "sign" && entity.sign?.label ? (
-              <HtmlSignLabel entity={entity} />
-            ) : null}
-          </group>
+          <EditorPlacedEntity
+            key={entity.id}
+            entity={entity}
+            geometry={geometries[entity.primitiveType]}
+            selected={selected}
+            selectedMaterial={selectedMaterial}
+            transformMode={transformMode}
+            transformEnabled={transformEnabled && selected}
+            onSelectEntity={onSelectEntity}
+            onTransformDraggingChange={onTransformDraggingChange}
+            onTransformEntity={onTransformEntity}
+          />
         );
       })}
     </group>
   );
 }
 
-function HtmlSignLabel({ entity }: { entity: PlacedMapEntity }) {
+function EditorPlacedEntity({
+  entity,
+  geometry,
+  selected,
+  selectedMaterial,
+  transformMode,
+  transformEnabled,
+  onSelectEntity,
+  onTransformDraggingChange,
+  onTransformEntity,
+}: {
+  entity: PlacedMapEntity;
+  geometry: THREE.BufferGeometry;
+  selected: boolean;
+  selectedMaterial: THREE.Material;
+  transformMode: EntityTransformMode;
+  transformEnabled: boolean;
+  onSelectEntity: (id: string, additive: boolean) => void;
+  onTransformDraggingChange: (dragging: boolean) => void;
+  onTransformEntity: (id: string, transform: Pick<PlacedMapEntity["transform"], "position" | "rotation">) => boolean;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const transformActive = useRef(false);
+  const [transformObject, setTransformObject] = useState<THREE.Group | null>(null);
+  const setGroupRef = useCallback((node: THREE.Group | null) => {
+    groupRef.current = node;
+    setTransformObject(node);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (transformActive.current) return;
+    const group = groupRef.current;
+    if (!group) return;
+    group.position.set(entity.transform.position.x, entity.transform.position.y, entity.transform.position.z);
+    group.rotation.set(entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z);
+    group.scale.set(entity.transform.scale.x, entity.transform.scale.y, entity.transform.scale.z);
+  }, [entity.transform.position.x, entity.transform.position.y, entity.transform.position.z, entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z, entity.transform.scale.x, entity.transform.scale.y, entity.transform.scale.z]);
+
+  const commitTransform = () => {
+    const group = groupRef.current;
+    if (!group) return;
+    transformActive.current = false;
+    onTransformDraggingChange(false);
+    const changed = onTransformEntity(entity.id, {
+      position: {
+        x: snapEntityTransformValue(group.position.x),
+        y: snapEntityTransformValue(group.position.y),
+        z: snapEntityTransformValue(group.position.z),
+      },
+      rotation: {
+        x: snapEntityRotationValue(group.rotation.x),
+        y: snapEntityRotationValue(group.rotation.y),
+        z: snapEntityRotationValue(group.rotation.z),
+      },
+    });
+    if (!changed) {
+      restoreTransform();
+    }
+  };
+
+  const restoreTransform = () => {
+    const group = groupRef.current;
+    if (!group) return;
+    group.position.set(entity.transform.position.x, entity.transform.position.y, entity.transform.position.z);
+    group.rotation.set(entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z);
+    group.scale.set(entity.transform.scale.x, entity.transform.scale.y, entity.transform.scale.z);
+  };
+
+  return (
+    <>
+      <group ref={setGroupRef}>
+        <mesh
+          geometry={geometry}
+          userData={{ portfolioEntityId: entity.id }}
+          position={[0, getEntityVisualAnchorOffset(entity.primitiveType), 0]}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+          }}
+          onPointerUp={(event) => {
+            event.stopPropagation();
+            onSelectEntity(entity.id, event.shiftKey);
+          }}
+        >
+          <meshBasicMaterial
+            color={entity.appearance.color}
+            transparent={entity.appearance.opacity !== undefined}
+            opacity={entity.appearance.opacity ?? 1}
+          />
+        </mesh>
+        {selected ? (
+          <mesh
+            geometry={geometry}
+            material={selectedMaterial}
+            position={[0, getEntityVisualAnchorOffset(entity.primitiveType), 0]}
+            scale={[1.05, 1.05, 1.05]}
+            renderOrder={12}
+          />
+        ) : null}
+        {entity.primitiveType === "sign" && entity.sign?.label ? (
+          <HtmlSignLabel entity={entity} local />
+        ) : null}
+      </group>
+      {transformEnabled && transformObject ? (
+        <TransformControls
+          object={transformObject}
+          mode={transformMode}
+          size={0.82}
+          space="world"
+          onMouseDown={() => {
+            transformActive.current = true;
+            onTransformDraggingChange(true);
+          }}
+          onMouseUp={commitTransform}
+          onPointerMissed={restoreTransform}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function HtmlSignLabel({ entity, local = false }: { entity: PlacedMapEntity; local?: boolean }) {
   return (
     <Text
-      position={[entity.transform.position.x, entity.transform.position.y + 0.12, entity.transform.position.z + 0.08]}
-      rotation={[entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z]}
+      position={local ? [0, 0.12, 0.08] : [entity.transform.position.x, entity.transform.position.y + 0.12, entity.transform.position.z + 0.08]}
+      rotation={local ? [0, 0, 0] : [entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z]}
       fontSize={0.22}
       color="#17201c"
       anchorX="center"
@@ -2739,6 +3585,36 @@ function HtmlSignLabel({ entity }: { entity: PlacedMapEntity }) {
       {entity.sign?.label ?? entity.name}
     </Text>
   );
+}
+
+function createEntityPrimitiveGeometries(): Record<PrimitiveType, THREE.BufferGeometry> {
+  return {
+    box: new THREE.BoxGeometry(1, 1, 1),
+    cylinder: new THREE.CylinderGeometry(0.5, 0.5, 1, 16),
+    sphere: new THREE.SphereGeometry(0.5, 16, 10),
+    plane: new THREE.BoxGeometry(1, 0.04, 1),
+    platform: new THREE.BoxGeometry(1, 0.22, 1),
+    sign: new THREE.BoxGeometry(1, 0.72, 0.08),
+  };
+}
+
+function getDefaultEntityScale(primitiveType: PrimitiveType) {
+  return primitiveType === "plane" ? { x: 2, y: 0.08, z: 2 } : { x: 1, y: 1, z: 1 };
+}
+
+function getEntityVisualAnchorOffset(primitiveType: PrimitiveType) {
+  if (primitiveType === "plane") return 0.02;
+  if (primitiveType === "platform") return 0.11;
+  if (primitiveType === "sign") return 0.36;
+  return 0.5;
+}
+
+function snapEntityTransformValue(value: number) {
+  return Number((Math.round(value * 4) / 4).toFixed(3));
+}
+
+function snapEntityRotationValue(value: number) {
+  return Number((Math.round(value / THREE.MathUtils.degToRad(5)) * THREE.MathUtils.degToRad(5)).toFixed(6));
 }
 
 function EditorNavigationHelpers({
@@ -2817,6 +3693,111 @@ function getToolTargetCoordinate(session: MapEditorSession, tool: EditorTool, co
   }
 
   return coordinate;
+}
+
+function createDefaultToolBrushSettings(): Partial<Record<EditorTool, TerrainBrushSettings>> {
+  const single = { ...DEFAULT_TERRAIN_BRUSH };
+  return {
+    paint: { ...single },
+    erase: { ...single },
+    raise: { ...single },
+    lower: { ...single },
+    flatten: { ...single },
+    fill: { ...single },
+    clear: { ...single },
+    path: { ...single },
+    removePath: { ...single },
+    zone: { ...single },
+    removeZone: { ...single },
+  };
+}
+
+function getBrushSettingsForTool(
+  tool: EditorTool,
+  settingsByTool: Partial<Record<EditorTool, TerrainBrushSettings>>,
+): TerrainBrushSettings {
+  return settingsByTool[tool] ?? DEFAULT_TERRAIN_BRUSH;
+}
+
+function updateToolBrushSettings(
+  setSettingsByTool: Dispatch<SetStateAction<Partial<Record<EditorTool, TerrainBrushSettings>>>>,
+  tool: EditorTool,
+  update: (settings: TerrainBrushSettings) => TerrainBrushSettings,
+) {
+  setSettingsByTool((settingsByTool) => {
+    const current = getBrushSettingsForTool(tool, settingsByTool);
+    return {
+      ...settingsByTool,
+      [tool]: update(current),
+    };
+  });
+}
+
+function getEffectiveTerrainBrushSettings(tool: EditorTool, settings: TerrainBrushSettings): TerrainBrushSettings {
+  if (tool === "path" || tool === "removePath") {
+    return settings;
+  }
+
+  if (
+    tool === "paint" ||
+    tool === "erase" ||
+    tool === "raise" ||
+    tool === "lower" ||
+    tool === "flatten" ||
+    tool === "fill" ||
+    tool === "clear" ||
+    tool === "zone" ||
+    tool === "removeZone"
+  ) {
+    return settings;
+  }
+
+  return {
+    ...settings,
+    shape: "single",
+    size: 1,
+    pathWidth: 1,
+  };
+}
+
+function getToolPreviewFootprint(
+  coordinate: GridCoordinate,
+  tool: EditorTool,
+  settings: TerrainBrushSettings,
+  world: MapEditorSession["world"],
+  blockId: BlockId,
+  zoneId: number,
+): GridCoordinate[] {
+  const operation = getTerrainBrushOperation(tool);
+  if (!operation) {
+    return [{ ...coordinate }];
+  }
+
+  if (operation === "raise") {
+    const footprint = getTerrainOperationFootprint(coordinate, operation, settings);
+    return footprint.flatMap((cell) => {
+      const topY = world.getHighestNonAirY(cell.x, cell.z);
+      return topY === null ? [] : [{ x: cell.x, y: topY, z: cell.z }];
+    });
+  }
+
+  const mutations = createTerrainMutations({
+    world,
+    operation,
+    center: coordinate,
+    settings,
+    blockId: operation === "paint-path" ? BLOCK_IDS.Path : blockId,
+    zoneId,
+  });
+  if (mutations.length > 0) {
+    return mutations.map((mutation) => mutation.coordinate);
+  }
+
+  return getTerrainOperationFootprint(coordinate, operation, settings);
+}
+
+function getBrushPreviewStyle(tool: EditorTool): "surface" | "cube" {
+  return tool === "add" || tool === "erase" || tool === "clear" ? "cube" : "surface";
 }
 
 function getTerrainBrushOperation(tool: EditorTool): TerrainBrushOperation | null {
@@ -2928,6 +3909,10 @@ function sameCoordinate(left: GridCoordinate | null, right: GridCoordinate | nul
 
 function editorCoordinateKey(coordinate: GridCoordinate) {
   return `${coordinate.x},${coordinate.y},${coordinate.z}`;
+}
+
+function coordinateKeyOrEmpty(coordinate: GridCoordinate | null) {
+  return coordinate ? editorCoordinateKey(coordinate) : "";
 }
 
 function isEditorUiEvent(event: PointerEvent) {
@@ -3357,6 +4342,7 @@ function DevelopmentMetrics({
   const projectionScreenMatrix = useRef(new THREE.Matrix4());
   const frustum = useRef(new THREE.Frustum());
   const chunkCenter = useRef(new THREE.Vector3());
+  const previousCanvasSize = useRef({ width: 0, height: 0, bufferWidth: 0, bufferHeight: 0 });
 
   useFrame(() => {
     const now = performance.now();
@@ -3371,6 +4357,25 @@ function DevelopmentMetrics({
     frameCount.current += 1;
     accumulatedMs.current += delta;
     frameTimes.current.push(delta);
+
+    const canvas = gl.domElement;
+    const nextCanvasSize = {
+      width: Math.round(canvas.clientWidth),
+      height: Math.round(canvas.clientHeight),
+      bufferWidth: canvas.width,
+      bufferHeight: canvas.height,
+    };
+    const previous = previousCanvasSize.current;
+    if (
+      previous.width !== 0 &&
+      (previous.width !== nextCanvasSize.width ||
+        previous.height !== nextCanvasSize.height ||
+        previous.bufferWidth !== nextCanvasSize.bufferWidth ||
+        previous.bufferHeight !== nextCanvasSize.bufferHeight)
+    ) {
+      incrementEditorPerfCounter("canvasResizes");
+    }
+    previousCanvasSize.current = nextCanvasSize;
 
     if (now - lastUpdate.current > 500) {
       const averageFrameMs = accumulatedMs.current / frameCount.current;

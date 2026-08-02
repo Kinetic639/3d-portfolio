@@ -17,6 +17,7 @@ import {
   MapPin,
   Minus,
   MousePointer2,
+  Move3D,
   Navigation,
   PanelBottomClose,
   PanelBottomOpen,
@@ -26,6 +27,7 @@ import {
   PanelRightOpen,
   Plus,
   Redo2,
+  Rotate3D,
   RotateCcw,
   Route,
   Save,
@@ -44,25 +46,32 @@ import {
   resetEditorLayout,
   resizeEditorPanel,
   saveEditorLayout,
+  serializeEditorLayout,
   type BottomDockTab,
   type EditorWorkspace,
 } from "@/lib/editor/editor-layout-store";
+import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
 import type { EditorMessage, EditorTool } from "@/lib/editor/map-editor";
 import { MAP_PRESETS, type MapPresetId } from "@/lib/editor/map-presets";
 import type { BrushShape, TerrainBrushSettings } from "@/lib/editor/terrain-brushes";
 import type { MapRegistryEntry } from "@/lib/maps/map-registry";
 import type { CollisionMode, PlacedMapEntity, PrimitiveType } from "@/lib/maps/map-entities";
 import type { NavigationNodeType } from "@/lib/maps/map-navigation";
+import { BUILT_IN_PREFABS, listPrefabCategories } from "@/lib/prefabs/prefab-library";
+import type { PrefabCategory } from "@/lib/prefabs/prefab-types";
 import { RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
 
 export type TerrainRenderMode = "instanced" | "surface";
+export type EntityTransformMode = "translate" | "rotate";
 
 type EditorIconKey =
   | EditorIconName
   | EditorTool
   | "warning"
   | "performance"
+  | "move"
+  | "rotate"
   | "restore-left"
   | "restore-right"
   | "restore-bottom"
@@ -122,6 +131,10 @@ export type EditorInspectorState = {
   entityCount: number;
   selectedEntityIds: string[];
   primitiveType: PrimitiveType;
+  activePrefabId: string;
+  activePrefabVariantId: string;
+  prefabSearch: string;
+  entityTransformMode: EntityTransformMode;
   collisionMode: CollisionMode;
   entityColor: string;
   entityName: string;
@@ -164,6 +177,10 @@ export type MapEditorToolbarProps = EditorInspectorState & {
   onPathWidthChange: (width: number) => void;
   onFlattenHeightChange: (height: number) => void;
   onPrimitiveTypeChange: (type: PrimitiveType) => void;
+  onActivePrefabChange: (prefabId: string) => void;
+  onActivePrefabVariantChange: (variantId: string) => void;
+  onPrefabSearchChange: (query: string) => void;
+  onEntityTransformModeChange: (mode: EntityTransformMode) => void;
   onCollisionModeChange: (mode: CollisionMode) => void;
   onEntityColorChange: (color: string) => void;
   onEntityNameChange: (name: string) => void;
@@ -241,8 +258,10 @@ const COLLAPSED_SIDE_DOCK_WIDTH = 32;
 const COLLAPSED_BOTTOM_DOCK_HEIGHT = 30;
 
 export default function MapEditorToolbar(props: MapEditorToolbarProps) {
+  incrementEditorPerfCounter("editorToolbarRenders");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const lastSavedLayoutRef = useRef<string | null>(null);
   const [layout, setLayout] = useState(() => (
     typeof window === "undefined" ? createDefaultEditorLayout() : loadEditorLayout(window.localStorage)
   ));
@@ -251,6 +270,12 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
 
   useEffect(() => {
+    const serialized = serializeEditorLayout(layout);
+    if (serialized === lastSavedLayoutRef.current) {
+      return;
+    }
+    lastSavedLayoutRef.current = serialized;
+    incrementEditorPerfCounter("layoutPersistenceWrites");
     saveEditorLayout(window.localStorage, layout);
   }, [layout]);
 
@@ -302,7 +327,7 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
     canPlaceNavigationEdge: props.navigationNodeCount > 1,
     actions: {
       newMap: props.onNewMap,
-      loadMap: () => patchLayout({ activeBottomTab: "library" }),
+      loadMap: () => patchLayout({ activeBottomTab: "overview" }),
       saveDraft: props.onSaveDraft,
       duplicateMap: props.onDuplicateMap,
       renameMap: props.onRenameMap,
@@ -393,7 +418,7 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
       <ToolRail workspace={layout.activeWorkspace} activeTool={props.tool} onToolChange={props.onToolChange} />
       {!layout.maximizedViewport ? (
         <aside className={`editor-left-dock ${layout.collapsed.left ? "editor-dock--collapsed" : ""}`} aria-label="Contextual palette" onPointerDown={(event) => event.stopPropagation()}>
-          <DockHeader title="Palette" side="left" collapsed={layout.collapsed.left} onToggle={() => setLayout((current) => ({ ...current, collapsed: { ...current.collapsed, left: !current.collapsed.left } }))} />
+          <DockHeader title="Tool Settings" side="left" collapsed={layout.collapsed.left} onToggle={() => setLayout((current) => ({ ...current, collapsed: { ...current.collapsed, left: !current.collapsed.left } }))} />
           {!layout.collapsed.left ? <Palette props={props} workspace={layout.activeWorkspace} fileInputRef={fileInputRef} setBottomTab={(tab) => patchLayout({ activeBottomTab: tab })} /> : null}
           {!layout.collapsed.left ? <ResizeHandle axis="x" side="left" onResize={(value) => setLayout((current) => resizeEditorPanel(current, "leftWidth", value, getViewport()))} onReset={() => setLayout((current) => resizeEditorPanel(current, "leftWidth", 244, getViewport()))} /> : null}
         </aside>
@@ -409,9 +434,9 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
       ) : null}
       {!layout.maximizedViewport ? (
         <section className={`editor-bottom-dock ${layout.collapsed.bottom ? "editor-dock--collapsed" : ""}`} aria-label="Editor bottom dock" onPointerDown={(event) => event.stopPropagation()}>
-          <DockHeader title="Timeline" side="bottom" collapsed={layout.collapsed.bottom} onToggle={() => setLayout((current) => ({ ...current, collapsed: { ...current.collapsed, bottom: !current.collapsed.bottom } }))} />
+          <DockHeader title="Reports" side="bottom" collapsed={layout.collapsed.bottom} onToggle={() => setLayout((current) => ({ ...current, collapsed: { ...current.collapsed, bottom: !current.collapsed.bottom } }))} />
           {!layout.collapsed.bottom ? <ResizeHandle axis="y" side="bottom" onResize={(value) => setLayout((current) => resizeEditorPanel(current, "bottomHeight", value, getViewport()))} onReset={() => setLayout((current) => resizeEditorPanel(current, "bottomHeight", 204, getViewport()))} /> : null}
-          {!layout.collapsed.bottom ? <BottomDock props={props} activeTab={layout.activeBottomTab} onTabChange={(activeBottomTab) => patchLayout({ activeBottomTab })} fileInputRef={fileInputRef} /> : null}
+          {!layout.collapsed.bottom ? <BottomDock props={props} workspace={layout.activeWorkspace} activeTab={layout.activeBottomTab} onTabChange={(activeBottomTab) => patchLayout({ activeBottomTab })} /> : null}
         </section>
       ) : null}
       <StatusBar props={props} workspace={layout.activeWorkspace} />
@@ -500,16 +525,56 @@ function ToolRail({ workspace, activeTool, onToolChange }: { workspace: EditorWo
 }
 
 function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapEditorToolbarProps; workspace: EditorWorkspace; fileInputRef: React.RefObject<HTMLInputElement | null>; setBottomTab: (tab: BottomDockTab) => void }) {
+  const activePrefab = BUILT_IN_PREFABS.find((prefab) => prefab.id === props.activePrefabId) ?? null;
+  const categories = useMemo(() => listPrefabCategories(), []);
+  const [activeCategory, setActiveCategory] = useState<PrefabCategory>(activePrefab?.category ?? "architecture");
+
   if (workspace === "objects") {
+    const selectPrimitive = (primitive: PrimitiveType) => {
+      props.onActivePrefabChange("");
+      props.onPrimitiveTypeChange(primitive);
+      props.onToolChange("entity");
+    };
+
+    const prefabs = BUILT_IN_PREFABS.filter((prefab) => {
+      const query = props.prefabSearch.trim().toLowerCase();
+      return prefab.category === activeCategory &&
+        (!query || prefab.name.toLowerCase().includes(query) || prefab.tags.some((tag) => tag.includes(query)));
+    });
+
     return (
       <Panel title="Primitive Palette">
-        <div className="editor-thumb-grid">
-          {PRIMITIVES.map((primitive) => <button key={primitive} type="button" className={props.primitiveType === primitive ? "active" : ""} onClick={() => props.onPrimitiveTypeChange(primitive)}>{primitive}</button>)}
-        </div>
+        <Section title="Prefab Library">
+          <input aria-label="Search prefabs" placeholder="Search prefabs" value={props.prefabSearch} onChange={(event) => props.onPrefabSearchChange(event.target.value)} />
+          <div className="editor-category-row">
+            {categories.map((category) => <button key={category} type="button" className={activeCategory === category ? "active" : ""} onClick={() => setActiveCategory(category)}>{category.replace(/-/g, " ")}</button>)}
+          </div>
+          <div className="editor-thumb-grid editor-thumb-grid--prefabs">
+            {prefabs.slice(0, 24).map((prefab) => (
+              <button key={prefab.id} type="button" className={props.activePrefabId === prefab.id ? "active" : ""} title={`${prefab.name}: ${prefab.description}`} onClick={() => props.onActivePrefabChange(prefab.id)}>
+                <span className="editor-prefab-icon">{prefab.name.slice(0, 2).toUpperCase()}</span>
+                <span>{prefab.name}</span>
+              </button>
+            ))}
+          </div>
+          {activePrefab ? (
+            <label>Variant<select value={props.activePrefabVariantId || activePrefab.defaultVariantId} onChange={(event) => props.onActivePrefabVariantChange(event.target.value)}>{activePrefab.variants.map((variant) => <option key={variant.id} value={variant.id}>{variant.label}</option>)}</select></label>
+          ) : null}
+          {activePrefab ? <span className="editor-muted">{activePrefab.category} · {activePrefab.collisionMode} · {activePrefab.footprint.width}x{activePrefab.footprint.depth}</span> : null}
+        </Section>
+        <Section title="Primitive Fallback">
+          <div className="editor-thumb-grid">
+            {PRIMITIVES.map((primitive) => <button key={primitive} type="button" className={props.primitiveType === primitive && !props.activePrefabId ? "active" : ""} onClick={() => selectPrimitive(primitive)}>{primitive}</button>)}
+          </div>
+        </Section>
         <label>Name<input value={props.entityName} onChange={(event) => props.onEntityNameChange(event.target.value)} /></label>
         <label>Colour<input type="color" value={props.entityColor} onChange={(event) => props.onEntityColorChange(event.target.value)} /></label>
         <label>Collision<select value={props.collisionMode} onChange={(event) => props.onCollisionModeChange(event.target.value as CollisionMode)}>{COLLISION_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></label>
-        <ActionButton icon="object" onClick={props.onPlaceEntity}>Place Entity</ActionButton>
+        <ActionButton icon="object" className={props.tool === "entity" ? "active" : ""} onClick={() => props.onToolChange("entity")}>Place Entity</ActionButton>
+        <div className="editor-segmented" role="group" aria-label="Object transform mode">
+          <button type="button" className={props.entityTransformMode === "translate" ? "active" : ""} onClick={() => props.onEntityTransformModeChange("translate")}><EditorIcon name="move" /><span>Move</span></button>
+          <button type="button" className={props.entityTransformMode === "rotate" ? "active" : ""} onClick={() => props.onEntityTransformModeChange("rotate")}><EditorIcon name="rotate" /><span>Rotate</span></button>
+        </div>
       </Panel>
     );
   }
@@ -534,7 +599,7 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
         <ActionButton icon="save" onClick={props.onSaveDraft}>Save Draft</ActionButton>
         <ActionButton icon="import" onClick={() => fileInputRef.current?.click()}>Import</ActionButton>
         <ActionButton icon="export" onClick={props.onExport}>Export</ActionButton>
-        <ActionButton icon="open" onClick={() => setBottomTab("library")}>Open Library</ActionButton>
+        <ActionButton icon="delete" onClick={props.onClearDraft}>Clear Draft</ActionButton>
       </Panel>
     );
   }
@@ -559,16 +624,25 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
     );
   }
 
+  const showsBlockPicker = ["paint", "add", "raise", "fill"].includes(props.tool);
+  const showsBrushShape = ["paint", "erase", "raise", "lower", "flatten", "fill", "clear", "zone", "removeZone"].includes(props.tool);
+  const showsBrushSize = showsBrushShape;
+  const showsPathWidth = props.tool === "path" || props.tool === "removePath";
+  const showsFlattenHeight = props.tool === "flatten";
+
   return (
     <Panel title="Terrain Palette">
       <label>Preset<select value={props.presetId} onChange={(event) => props.onPresetChange(event.target.value as MapPresetId)}>{MAP_PRESET_OPTIONS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>
-      <label>Block<select value={props.paintBlockId} onChange={(event) => props.onPaintBlockChange(Number(event.target.value) as BlockId)}>{RENDERABLE_BLOCK_DEFINITIONS.map((block) => <option key={block.id} value={block.id}>{block.displayName}</option>)}</select></label>
-      <label>Brush<select value={props.brushSettings.shape} onChange={(event) => props.onBrushShapeChange(event.target.value as BrushShape)}><option value="single">Single</option><option value="square">Square</option><option value="circle">Circle</option></select></label>
-      <div className="editor-field-row">
-        <label>Size<input type="number" min={1} max={9} value={props.brushSettings.size} onChange={(event) => props.onBrushSizeChange(Number(event.target.value))} /></label>
-        <label>Path<input type="number" min={1} max={9} value={props.brushSettings.pathWidth} onChange={(event) => props.onPathWidthChange(Number(event.target.value))} /></label>
-      </div>
-      <label>Flatten Y<input type="number" min={0} max={11} value={props.brushSettings.flattenHeight} onChange={(event) => props.onFlattenHeightChange(Number(event.target.value))} /></label>
+      {props.tool === "select" ? <SelectionSummary props={props} /> : null}
+      {showsBlockPicker ? <label>Block<select value={props.paintBlockId} onChange={(event) => props.onPaintBlockChange(Number(event.target.value) as BlockId)}>{RENDERABLE_BLOCK_DEFINITIONS.map((block) => <option key={block.id} value={block.id}>{block.displayName}</option>)}</select></label> : null}
+      {showsBrushShape ? <label>Brush<select value={props.brushSettings.shape} onChange={(event) => props.onBrushShapeChange(event.target.value as BrushShape)}><option value="single">Single</option><option value="square">Square</option><option value="circle">Circle</option></select></label> : null}
+      {(showsBrushSize || showsPathWidth) ? (
+        <div className="editor-field-row">
+          {showsBrushSize ? <label>Size<input type="number" min={1} max={9} value={props.brushSettings.size} onChange={(event) => props.onBrushSizeChange(Number(event.target.value))} /></label> : null}
+          {showsPathWidth ? <label>Path<input type="number" min={1} max={9} value={props.brushSettings.pathWidth} onChange={(event) => props.onPathWidthChange(Number(event.target.value))} /></label> : null}
+        </div>
+      ) : null}
+      {showsFlattenHeight ? <label>Flatten Y<input type="number" min={0} max={11} value={props.brushSettings.flattenHeight} onChange={(event) => props.onFlattenHeightChange(Number(event.target.value))} /></label> : null}
       <span className="editor-muted">{props.brushAffectedCellCount} affected cells</span>
     </Panel>
   );
@@ -625,10 +699,13 @@ function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspa
   }
 
   return (
-    <Panel title="Inspector">
+    <Panel title={workspace === "map" ? "Map Inspector" : "Inspector"}>
       <Section title="Map Summary">
         <KeyValue label="Workspace" value={workspace} />
         <KeyValue label="Map" value={props.mapName} />
+        <KeyValue label="Description" value={props.mapDescription || "-"} />
+        <KeyValue label="Renderer" value={props.renderMode} />
+        <KeyValue label="Autosave" value={props.autosaveStatus} />
         <KeyValue label="Dimensions" value="64 x 64 x 12" mono />
         <KeyValue label="Blocks" value={`${props.blockEditCount} edits`} mono />
         <KeyValue label="Entities" value={String(props.entityCount)} mono />
@@ -640,36 +717,95 @@ function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspa
   );
 }
 
-function BottomDock({ props, activeTab, onTabChange, fileInputRef }: { props: MapEditorToolbarProps; activeTab: BottomDockTab; onTabChange: (tab: BottomDockTab) => void; fileInputRef: React.RefObject<HTMLInputElement | null> }) {
-  const tabs: BottomDockTab[] = ["library", "validation", "history", "performance"];
+function BottomDock({ props, workspace, activeTab, onTabChange }: { props: MapEditorToolbarProps; workspace: EditorWorkspace; activeTab: BottomDockTab; onTabChange: (tab: BottomDockTab) => void }) {
+  const tabs = bottomTabsForWorkspace(workspace);
+  const resolvedTab = tabs.includes(activeTab) ? activeTab : tabs[0];
   return (
     <>
       <div className="editor-tabs" role="tablist" aria-label="Bottom dock tabs">
-        {tabs.map((tab) => <button key={tab} type="button" role="tab" aria-selected={activeTab === tab} className={activeTab === tab ? "active" : ""} onClick={() => onTabChange(tab)}><EditorIcon name={bottomTabIcon(tab)} /><span>{title(tab)}</span></button>)}
+        {tabs.map((tab) => <button key={tab} type="button" role="tab" aria-selected={resolvedTab === tab} className={resolvedTab === tab ? "active" : ""} onClick={() => onTabChange(tab)}><EditorIcon name={bottomTabIcon(tab)} /><span>{title(tab)}</span></button>)}
       </div>
       <div className="editor-bottom-content">
-        {activeTab === "library" ? <LibraryTab props={props} fileInputRef={fileInputRef} /> : null}
-        {activeTab === "validation" ? <ValidationTab props={props} /> : null}
-        {activeTab === "history" ? <HistoryTab props={props} /> : null}
-        {activeTab === "performance" ? <PerformanceTab props={props} /> : null}
+        {resolvedTab === "overview" ? <WorkspaceOverviewTab props={props} workspace={workspace} /> : null}
+        {resolvedTab === "validation" ? <ValidationTab props={props} /> : null}
+        {resolvedTab === "history" ? <HistoryTab props={props} /> : null}
+        {resolvedTab === "performance" ? <PerformanceTab props={props} /> : null}
       </div>
     </>
   );
 }
 
-function LibraryTab({ props, fileInputRef }: { props: MapEditorToolbarProps; fileInputRef: React.RefObject<HTMLInputElement | null> }) {
+function WorkspaceOverviewTab({ props, workspace }: { props: MapEditorToolbarProps; workspace: EditorWorkspace }) {
+  if (workspace === "map") {
+    return (
+      <dl className="editor-metrics-grid">
+        <KeyValue label="Map" value={props.mapName} />
+        <KeyValue label="ID" value={props.mapId} mono />
+        <KeyValue label="Available" value={String(props.availableMaps.length)} mono />
+        <KeyValue label="Unsaved" value={props.hasUnsavedChanges ? "yes" : "no"} />
+        <KeyValue label="Description" value={props.mapDescription || "-"} />
+        <KeyValue label="Autosave" value={props.autosaveStatus} />
+      </dl>
+    );
+  }
+
+  if (workspace === "terrain") {
+    return (
+      <dl className="editor-metrics-grid">
+        <KeyValue label="Tool" value={TOOL_LABELS[props.tool]} />
+        <KeyValue label="Block" value={getBlockDefinition(props.paintBlockId).displayName} />
+        <KeyValue label="Brush cells" value={String(props.brushAffectedCellCount)} mono />
+        <KeyValue label="Selected" value={formatCoordinate(props.selected)} mono />
+        <KeyValue label="Dirty chunks" value={String(props.dirtyChunks)} mono />
+        <KeyValue label="Last rebuilt" value={props.lastRebuiltChunks.join(", ") || "-"} mono />
+      </dl>
+    );
+  }
+
+  if (workspace === "objects") {
+    return (
+      <dl className="editor-metrics-grid">
+        <KeyValue label="Entities" value={String(props.entityCount)} mono />
+        <KeyValue label="Selected" value={String(props.selectedEntityIds.length)} mono />
+        <KeyValue label="Primitive" value={props.primitiveType} />
+        <KeyValue label="Prefab" value={props.activePrefabId || "-"} />
+        <KeyValue label="Variant" value={props.activePrefabVariantId || "-"} />
+        <KeyValue label="Transform" value={props.entityTransformMode} />
+        <KeyValue label="Collision" value={props.collisionMode} />
+        <KeyValue label="Draft name" value={props.entityName} />
+        <KeyValue label="Draft colour" value={props.entityColor} mono />
+      </dl>
+    );
+  }
+
+  if (workspace === "navigation") {
+    return (
+      <dl className="editor-metrics-grid">
+        <KeyValue label="Node type" value={props.navigationNodeType} />
+        <KeyValue label="Nodes" value={String(props.navigationNodeCount)} mono />
+        <KeyValue label="Edges" value={String(props.navigationEdgeCount)} mono />
+        <KeyValue label="Routes" value={String(props.routeCount)} mono />
+        <KeyValue label="Can connect" value={props.navigationNodeCount > 1 ? "yes" : "no"} />
+        <KeyValue label="Layer" value={layerStateLabel(props, "navigation")} />
+      </dl>
+    );
+  }
+
+  if (workspace === "zones") {
+    return (
+      <dl className="editor-metrics-grid">
+        <KeyValue label="Current zone" value={String(props.zoneId)} mono />
+        <KeyValue label="Assignments" value={String(props.zoneAssignmentCount)} mono />
+        <KeyValue label="Selected zone" value={String(props.selectedZoneId)} mono />
+        <KeyValue label="Selected cell" value={formatCoordinate(props.selected)} mono />
+        <KeyValue label="Layer" value={layerStateLabel(props, "zones")} />
+        <KeyValue label="Tool" value={TOOL_LABELS[props.tool]} />
+      </dl>
+    );
+  }
+
   return (
-    <div className="editor-table">
-      {props.availableMaps.map((map) => <button key={map.id} type="button" className={props.mapId === map.id ? "active" : ""} onClick={() => props.onMapChange(map.id)}><span>{map.name}</span><code>{map.id}</code><span>{map.kind}</span></button>)}
-      <div className="editor-inline-actions">
-        <ActionButton icon="new" onClick={props.onNewMap}>New</ActionButton>
-        <ActionButton icon="duplicate" onClick={props.onDuplicateMap}>Duplicate</ActionButton>
-        <ActionButton icon="save" onClick={props.onSaveDraft}>Save Draft</ActionButton>
-        <ActionButton icon="import" onClick={() => fileInputRef.current?.click()}>Import</ActionButton>
-        <ActionButton icon="export" onClick={props.onExport}>Export</ActionButton>
-        <ActionButton icon="delete" onClick={props.onClearDraft}>Clear Draft</ActionButton>
-      </div>
-    </div>
+    <PerformanceTab props={props} />
   );
 }
 
@@ -680,11 +816,14 @@ function ValidationTab({ props }: { props: MapEditorToolbarProps }) {
 
 function HistoryTab({ props }: { props: MapEditorToolbarProps }) {
   return (
-    <div className="editor-history">
-      <ActionButton icon="undo" onClick={props.onUndo} disabled={props.undoDepth === 0}>Undo ({props.undoDepth})</ActionButton>
-      <ActionButton icon="redo" onClick={props.onRedo} disabled={props.redoDepth === 0}>Redo ({props.redoDepth})</ActionButton>
-      <span className="editor-muted">Command names are summarized until the authoring command stack exposes labels.</span>
-    </div>
+    <dl className="editor-metrics-grid">
+      <KeyValue label="Undo depth" value={String(props.undoDepth)} mono />
+      <KeyValue label="Redo depth" value={String(props.redoDepth)} mono />
+      <KeyValue label="Unsaved" value={props.hasUnsavedChanges ? "yes" : "no"} />
+      <KeyValue label="Autosave" value={props.autosaveStatus} />
+      <KeyValue label="Last message" value={props.message?.text ?? "-"} />
+      <KeyValue label="Message type" value={props.message?.type ?? "-"} />
+    </dl>
   );
 }
 
@@ -741,7 +880,32 @@ function ShortcutsDialog({ commands, onClose }: { commands: EditorCommand[]; onC
 }
 
 function StatusBar({ props, workspace }: { props: MapEditorToolbarProps; workspace: EditorWorkspace }) {
-  return <footer className="editor-status-bar"><span>{workspace}</span><span>{TOOL_LABELS[props.tool]}</span><span>{formatCoordinate(props.hovered)}</span><span>{props.selectedEntityIds.length || (props.selected ? 1 : 0)} selected</span><span>Zone {props.zoneId}</span><span>{formatPerformance(props.fps, props.frameMs)}</span><span>{props.autosaveStatus}</span></footer>;
+  const metrics = useEditorStatusMetrics();
+
+  return <footer className="editor-status-bar"><span>{workspace}</span><span>{TOOL_LABELS[props.tool]}</span><span>{formatCoordinate(props.hovered)}</span><span>{props.selectedEntityIds.length || (props.selected ? 1 : 0)} selected</span><span>Zone {props.zoneId}</span><span>{formatPerformance(metrics?.fps ?? null, metrics?.frameMs ?? null)}</span><span>{props.autosaveStatus}</span></footer>;
+}
+
+function useEditorStatusMetrics() {
+  const [metrics, setMetrics] = useState<{ fps: number; frameMs: number } | null>(null);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const nextMetrics = window.__portfolioExperienceMetrics;
+      if (!nextMetrics) {
+        return;
+      }
+
+      setMetrics((current) => (
+        current?.fps === nextMetrics.fps && current.frameMs === nextMetrics.frameMs
+          ? current
+          : { fps: nextMetrics.fps, frameMs: nextMetrics.frameMs }
+      ));
+    }, 250);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return metrics;
 }
 
 function ResizeHandle({ axis, side, onResize, onReset }: { axis: "x" | "y"; side: string; onResize: (value: number) => void; onReset: () => void }) {
@@ -771,6 +935,17 @@ function LayerList({ props, ids }: { props: MapEditorToolbarProps; ids: EditorLa
   return <div className="editor-layer-list">{props.layerStates.filter((layer) => ids.includes(layer.id)).map((layer) => <div key={layer.id}><span>{layer.label}</span><label><input type="checkbox" checked={layer.visible} onChange={(event) => props.onLayerVisibilityChange(layer.id, event.target.checked)} /> show</label><label><input type="checkbox" checked={layer.locked} onChange={(event) => props.onLayerLockChange(layer.id, event.target.checked)} /> lock</label></div>)}</div>;
 }
 
+function SelectionSummary({ props }: { props: MapEditorToolbarProps }) {
+  return (
+    <dl className="editor-mini-summary">
+      <KeyValue label="Selected" value={formatCoordinate(props.selected)} mono />
+      <KeyValue label="Hovered" value={formatCoordinate(props.hovered)} mono />
+      <KeyValue label="Block" value={props.selectedBlockId === null ? "-" : getBlockDefinition(props.selectedBlockId).displayName} />
+      <KeyValue label="Zone" value={String(props.selectedZoneId)} mono />
+    </dl>
+  );
+}
+
 function Panel({ title: panelTitle, className = "", children }: { title: string; className?: string; children: React.ReactNode }) {
   return <section className={`editor-panel ${className}`}><header><strong>{panelTitle}</strong></header>{children}</section>;
 }
@@ -784,7 +959,7 @@ function KeyValue({ label, value, mono = false }: { label: string; value: string
 }
 
 function TreeRow({ label, value, selected }: { label: string; value: string; selected: boolean }) {
-  return <button type="button" className={selected ? "selected" : ""}><span>{label}</span><code>{value}</code></button>;
+  return <div className={`editor-tree-row ${selected ? "selected" : ""}`}><span>{label}</span><code>{value}</code></div>;
 }
 
 function IconButton({ command }: { command?: EditorCommand }) {
@@ -827,6 +1002,7 @@ const EDITOR_ICONS: Record<EditorIconKey, LucideIcon> = {
   layout: PanelLeftOpen,
   lower: Minus,
   marker: MapPin,
+  move: Move3D,
   navigation: Navigation,
   new: FilePlus2,
   object: Box,
@@ -837,6 +1013,7 @@ const EDITOR_ICONS: Record<EditorIconKey, LucideIcon> = {
   preview: Eye,
   raise: Plus,
   redo: Redo2,
+  rotate: Rotate3D,
   removePath: Trash2,
   removeZone: Trash2,
   "collapse-bottom": PanelBottomClose,
@@ -868,17 +1045,30 @@ function toolIcon(tool: EditorTool): EditorIconKey {
 }
 
 function bottomTabIcon(tab: BottomDockTab): EditorIconKey {
-  if (tab === "library") return "open";
+  if (tab === "overview") return "layout";
   if (tab === "validation") return "validate";
   if (tab === "performance") return "performance";
   return "undo";
 }
 
+function bottomTabsForWorkspace(workspace: EditorWorkspace): BottomDockTab[] {
+  if (workspace === "review") return ["validation", "performance", "history"];
+  if (workspace === "terrain") return ["overview", "history", "performance"];
+  if (workspace === "map") return ["overview", "validation", "history"];
+  if (workspace === "navigation") return ["overview", "validation"];
+  if (workspace === "zones") return ["overview", "validation"];
+  return ["overview", "validation", "history"];
+}
+
 function workspaceDefaultTab(workspace: EditorWorkspace): BottomDockTab {
-  if (workspace === "map") return "library";
   if (workspace === "review") return "validation";
-  if (workspace === "navigation") return "validation";
-  return "history";
+  return "overview";
+}
+
+function layerStateLabel(props: MapEditorToolbarProps, id: EditorLayerId) {
+  const layer = props.layerStates.find((item) => item.id === id);
+  if (!layer) return "-";
+  return `${layer.visible ? "shown" : "hidden"} / ${layer.locked ? "locked" : "editable"}`;
 }
 
 function getViewport() {
