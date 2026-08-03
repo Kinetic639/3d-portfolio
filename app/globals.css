@@ -153,6 +153,24 @@ body {
   pointer-events: none;
 }
 
+.loading-progress-text {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 12;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: rgba(22, 34, 30, 0.58);
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
 .experience-fallback p,
 .webgl-error p {
   max-width: 30rem;

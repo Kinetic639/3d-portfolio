@@ -459,7 +459,7 @@ export default function PortfolioExperience({
         </>
       ) : (
         <div className="experience-fallback">
-          <p>Preparing the interactive map.</p>
+          <LoadingProgressPanel phase="boot" />
         </div>
       )}
     </section>
@@ -507,6 +507,7 @@ function ExperienceOverlay({ phase, showEditorCompass }: { phase: ExperiencePhas
   const resetView = useExperienceStore((state) => state.resetView);
   const isAngleLocked = useExperienceStore((state) => state.isAngleLocked);
   const toggleAngleLock = useExperienceStore((state) => state.toggleAngleLock);
+  const showLoadingProgress = phase === "boot" || phase === "loading";
 
   return (
     <div className="experience-overlay">
@@ -538,8 +539,30 @@ function ExperienceOverlay({ phase, showEditorCompass }: { phase: ExperiencePhas
         </div>
       </header>
 
+      {showLoadingProgress ? <LoadingProgressPanel phase={phase} /> : null}
       {phase === "ready" ? <WelcomePanel /> : null}
     </div>
+  );
+}
+
+function LoadingProgressPanel({ phase }: { phase: ExperiencePhase }) {
+  const [elapsedMs, setElapsedMs] = useState(0);
+
+  useEffect(() => {
+    const startedAt = performance.now();
+    const timer = window.setInterval(() => {
+      setElapsedMs(performance.now() - startedAt);
+    }, 80);
+
+    return () => window.clearInterval(timer);
+  }, [phase]);
+
+  const status = getLoadingProgressStatus(phase, elapsedMs);
+
+  return (
+    <p className="loading-progress-text" aria-live="polite" aria-label="Map loading progress">
+      {status.label} {status.percent}%
+    </p>
   );
 }
 
@@ -784,6 +807,27 @@ function getMarkerDescription(marker: MapMarkerDefinition) {
   return marker.contentReference
     ? `${marker.contentReference.contentType}: ${marker.contentReference.contentId}`
     : "Map point of interest.";
+}
+
+function getLoadingProgressStatus(phase: ExperiencePhase, elapsedMs: number) {
+  if (phase === "boot") {
+    return { label: "Starting renderer", percent: 4 };
+  }
+
+  if (phase === "loading") {
+    const progress = THREE.MathUtils.clamp(elapsedMs / 900, 0, 1);
+    const percent = Math.round(8 + progress * 84);
+    const label = percent < 28
+      ? "Creating terrain chunks"
+      : percent < 52
+        ? "Preparing block buffers"
+        : percent < 76
+          ? "Building visible surfaces"
+          : "Warming shaders";
+    return { label, percent };
+  }
+
+  return { label: "Ready", percent: 100 };
 }
 
 function renderPortfolioContent(content: NonNullable<ReturnType<typeof resolveContentReference>>) {
