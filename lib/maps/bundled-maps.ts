@@ -394,18 +394,35 @@ function getExperienceBaseHeight(x: number, z: number) {
 }
 
 function getSkillsBaseHeight(x: number, z: number) {
-  if (!isInsideAuthoredMask(x, z, 45, 40, 17, 14)) return 0;
+  const gardenFootprint = (
+    isInsideAuthoredMask(x, z, 17, 46, 18, 14) ||
+    isInsideAuthoredMask(x, z, 25, 42, 10, 9) ||
+    (x >= 8 && x <= 30 && z >= 40 && z <= 54)
+  );
+  if (!gardenFootprint) return 0;
+
   let height = 2;
-  if (falloff(x, z, 47, 38, 11, 8) > 0.55) height = 3;
+  const orchardMound = falloff(x, z, 13, 45, 8, 7);
+  const upperGarden = falloff(x, z, 25, 38, 8, 6);
+  if (orchardMound > 0.78 || upperGarden > 0.74) height = 3;
   return height;
 }
 
 function getProjectsBaseHeight(x: number, z: number) {
-  if (x < 43 || x > 62 || z < 21 || z > 36) return 0;
+  const projectFootprint = (
+    isInsideAuthoredMask(x, z, 17, 20, 18, 14) ||
+    isInsideAuthoredMask(x, z, 25, 13, 10, 8) ||
+    isInsideAuthoredMask(x, z, 12, 28, 9, 8) ||
+    (x >= 8 && x <= 29 && z >= 12 && z <= 30)
+  );
+  if (!projectFootprint) return 0;
+
   let height = 3;
-  if (x >= 47 && x <= 54 && z >= 24 && z <= 29) height = 4;
-  if (x >= 55 && x <= 61 && z >= 23 && z <= 31) height = 4;
-  if (x >= 51 && x <= 58 && z >= 31 && z <= 35) height = 3;
+  if (x >= 8 && x <= 17 && z >= 11 && z <= 18) height = 4;
+  if (x >= 19 && x <= 29 && z >= 12 && z <= 21) height = 4;
+  if (x >= 9 && x <= 16 && z >= 22 && z <= 30) height = 4;
+  if (x >= 22 && x <= 30 && z >= 7 && z <= 13) height = 5;
+  if (falloff(x, z, 25, 12, 8, 5) > 0.68) height = Math.max(height, 5);
   return height;
 }
 
@@ -453,24 +470,28 @@ function carvePrimaryTerrainRoutes(x: number, z: number, height: number) {
   ], 1.35, 2.4);
 
   height = carveSteppedRoute(x, z, height, [
-    [34, 35, 1],
-    [40, 38, 2],
-    [47, 39, 2],
-    [54, 37, 2],
-  ], 1.25, 2.25);
+    [30, 35, 1],
+    [25, 38, 2],
+    [19, 42, 2],
+    [13, 46, 2],
+    [9, 50, 2],
+  ], 1.8, 3);
 
   height = carveSteppedRoute(x, z, height, [
-    [45, 39, 2],
-    [43, 43, 2],
-    [49, 45, 2],
-  ], 1.05, 1.85);
+    [21, 43, 2],
+    [15, 40, 2],
+    [21, 37, 2],
+    [28, 40, 2],
+  ], 1.55, 2.4);
 
   height = carveSteppedRoute(x, z, height, [
-    [43, 35, 2],
-    [48, 32, 3],
-    [54, 29, 3],
-    [60, 28, 3],
-  ], 1.3, 2.1);
+    [24, 36, 2],
+    [22, 31, 3],
+    [15, 28, 3],
+    [10, 24, 4],
+    [17, 19, 4],
+    [26, 14, 5],
+  ], 1.65, 2.7);
 
   height = carveSteppedRoute(x, z, height, [
     [31, 36, 1],
@@ -496,7 +517,7 @@ function applyArrivalClearing(x: number, z: number, height: number) {
 }
 
 function carveMainWaterSystem(x: number, z: number, height: number) {
-  const stream = nearestPrimaryRoutePoint(x, z, [[48, 38], [41, 40], [34, 40], [26, 42], [31, 49], [40, 52]]);
+  const stream = nearestPrimaryRoutePoint(x, z, [[13, 43], [19, 45], [25, 45], [31, 49], [40, 52]]);
   if (stream && stream.distance < 1.25) return 0;
   if (stream && stream.distance < 2.35) height = Math.min(height, 1);
 

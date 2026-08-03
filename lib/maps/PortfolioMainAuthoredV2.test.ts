@@ -60,6 +60,10 @@ describe("portfolio main authored v2 map", () => {
     expect(state.world.getHighestNonAirY(38, 29)).toBeGreaterThanOrEqual(1);
     expect(state.world.getHighestNonAirY(47, 20)).toBeGreaterThanOrEqual(3);
     expect(state.world.getHighestNonAirY(61, 8)).toBe(8);
+    expect(state.world.getHighestNonAirY(14, 48)).toBe(2);
+    expect(state.world.getHighestNonAirY(25, 38)).toBe(3);
+    expect(state.world.getHighestNonAirY(24, 13)).toBe(5);
+    expect(state.world.getHighestNonAirY(16, 27)).toBeLessThanOrEqual(4);
     expect(state.world.getHighestNonAirY(12, 49)).toBe(0);
     expect(state.world.getHighestNonAirY(24, 39)).toBeLessThanOrEqual(1);
     expect(state.world.getHighestNonAirY(30, 59)).toBe(2);
@@ -67,7 +71,6 @@ describe("portfolio main authored v2 map", () => {
     expect(state.world.getHighestNonAirY(41, 51)).toBe(1);
     expect(state.world.getHighestNonAirY(55, 52)).toBe(2);
     expect(state.world.getHighestNonAirY(47, 53)).toBe(0);
-    expect(state.world.getHighestNonAirY(44, 40)).toBe(2);
     expect(state.world.getHighestNonAirY(52, 19)).toBeLessThanOrEqual(5);
   });
 
