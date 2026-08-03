@@ -1,5 +1,5 @@
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
-import { createFlatVoxelWorld, VoxelWorld } from "@/lib/world/voxel-world";
+import { VoxelWorld } from "@/lib/world/voxel-world";
 import { WORLD_CONFIG } from "@/lib/world/world-config";
 import {
   createBlankMapDefinition,
@@ -295,12 +295,12 @@ export function createPortfolioMainAuthoredV2MapDefinition(): MapDefinition {
 }
 
 export function createPortfolioPrimaryFlatMapDefinition(): MapDefinition {
-  const world = createFlatVoxelWorld();
+  const world = createPortfolioPrimaryTerrainWorld();
 
   return createMapDefinitionFromWorld({
     id: "portfolio-primary-flat",
-    name: "Portfolio Primary Flat",
-    description: "Primary portfolio map foundation: a full 64 by 64 flat one-level terrain ready for authored zones, models and content.",
+    name: "Portfolio Primary Terrain",
+    description: "Primary portfolio map foundation: one continuous cube-only 64 by 64 by 12 landscape with a solid bottom layer, rough terrain zones and reserved water beds.",
     kind: "portfolio",
     runtimeMode: "dynamic-voxel",
     world,
@@ -322,9 +322,154 @@ export function createPortfolioPrimaryFlatMapDefinition(): MapDefinition {
     metadata: {
       createdAt: PRIMARY_FLAT_CREATED_AT,
       updatedAt: PRIMARY_FLAT_CREATED_AT,
-      authoringVersion: "primary-flat-v1",
+      authoringVersion: "primary-terrain-v1",
     },
   });
+}
+
+function createPortfolioPrimaryTerrainWorld() {
+  const world = new VoxelWorld();
+
+  for (let z = 0; z < WORLD_CONFIG.depth; z += 1) {
+    for (let x = 0; x < WORLD_CONFIG.width; x += 1) {
+      const height = getPrimaryTerrainHeight(x, z);
+      for (let y = 0; y <= height; y += 1) {
+        world.setBlock(x, y, z, BLOCK_IDS.Ground);
+      }
+    }
+  }
+
+  world.clearDirtyChunks();
+  return world;
+}
+
+function getPrimaryTerrainHeight(x: number, z: number) {
+  let height = isPrimaryUpperTerrainCut(x, z) ? 0 : 1;
+
+  height = Math.max(height, getExperienceBaseHeight(x, z));
+  height = Math.max(height, getSkillsBaseHeight(x, z));
+  height = Math.max(height, getProjectsBaseHeight(x, z));
+  height = Math.max(height, getAboutBaseHeight(x, z));
+  height = Math.max(height, getContactBaseHeight(x, z));
+  height = carveMainWaterSystem(x, z, height);
+  height = applyArrivalClearing(x, z, height);
+
+  return Math.max(0, Math.min(8, height));
+}
+
+function isPrimaryUpperTerrainCut(x: number, z: number) {
+  return (
+    (x < 5 && z < 12) ||
+    (x < 3 && z > 44) ||
+    (z < 4 && x > 46) ||
+    (x > 60 && z > 42 && z < 56) ||
+    (z > 60 && x > 51) ||
+    (z > 61 && x > 21 && x < 34) ||
+    (x < 2 && z > 22 && z < 35)
+  );
+}
+
+function getExperienceBaseHeight(x: number, z: number) {
+  if (x < 30 || z > 31) return 0;
+  if (x < 36 && z < 13) return 0;
+  if (x < 37 && z > 26) return 0;
+  if (x > 61 && z > 20) return 0;
+
+  const summit = falloff(x, z, 58, 8, 21, 17);
+  const shoulder = falloff(x, z, 43, 21, 19, 13);
+  const lowerBank = falloff(x, z, 34, 28, 10, 7);
+  let height = 2;
+
+  if (summit > 0.28 || shoulder > 0.5 || lowerBank > 0.55) height = 3;
+  if (summit > 0.42 || shoulder > 0.68) height = 4;
+  if (summit > 0.56) height = 5;
+  if (summit > 0.68) height = 6;
+  if (summit > 0.78) height = 7;
+
+  if (x >= 56 && x <= 61 && z >= 6 && z <= 10) height = Math.max(height, 8);
+  if (x >= 30 && x <= 38 && z >= 25 && z <= 31) height = Math.min(height, 2);
+
+  return height;
+}
+
+function getSkillsBaseHeight(x: number, z: number) {
+  if (!isInsideAuthoredMask(x, z, 45, 40, 17, 14)) return 0;
+  let height = 2;
+  if (falloff(x, z, 47, 38, 11, 8) > 0.55) height = 3;
+  return height;
+}
+
+function getProjectsBaseHeight(x: number, z: number) {
+  if (x < 43 || x > 62 || z < 21 || z > 36) return 0;
+  let height = 3;
+  if (x >= 47 && x <= 54 && z >= 24 && z <= 29) height = 4;
+  if (x >= 55 && x <= 61 && z >= 23 && z <= 31) height = 4;
+  if (x >= 51 && x <= 58 && z >= 31 && z <= 35) height = 3;
+  return height;
+}
+
+function getAboutBaseHeight(x: number, z: number) {
+  if (!isInsideAuthoredMask(x, z, 43, 54, 20, 10)) return 0;
+  if (x >= 36 && x <= 48 && z >= 48 && z <= 56) return 1;
+  return falloff(x, z, 52, 51, 9, 6) > 0.5 ? 2 : 1;
+}
+
+function getContactBaseHeight(x: number, z: number) {
+  if (!isInsideAuthoredMask(x, z, 16, 47, 11, 9)) return 0;
+  return 1;
+}
+
+function applyArrivalClearing(x: number, z: number, height: number) {
+  if (x >= 31 && x <= 32 && z >= 31 && z <= 32) return 0;
+  if (x >= 27 && x <= 36 && z >= 28 && z <= 37) return Math.min(height, 1);
+  if (falloff(x, z, 32, 33, 9, 8) > 0) return Math.min(height, 1);
+  return height;
+}
+
+function carveMainWaterSystem(x: number, z: number, height: number) {
+  const stream = nearestPrimaryRoutePoint(x, z, [[48, 38], [41, 40], [34, 40], [26, 42], [31, 49], [40, 52]]);
+  if (stream && stream.distance < 1.25) return 0;
+  if (stream && stream.distance < 2.35) height = Math.min(height, 1);
+
+  const pond = falloff(x, z, 43, 54, 6, 4);
+  if (pond > 0.22) return 0;
+  if (pond > 0) height = Math.min(height, 1);
+
+  const outlet = nearestPrimaryRoutePoint(x, z, [[48, 56], [54, 59], [59, 63]]);
+  if (outlet && outlet.distance < 1.15) return 0;
+
+  return height;
+}
+
+function isInsideAuthoredMask(x: number, z: number, centerX: number, centerZ: number, radiusX: number, radiusZ: number) {
+  return falloff(x, z, centerX, centerZ, radiusX, radiusZ) > 0;
+}
+
+function falloff(x: number, z: number, centerX: number, centerZ: number, radiusX: number, radiusZ: number) {
+  return Math.max(0, 1 - Math.hypot((x - centerX) / radiusX, (z - centerZ) / radiusZ));
+}
+
+function nearestPrimaryRoutePoint(x: number, z: number, points: Array<[number, number]>) {
+  let nearest: { distance: number; segmentIndex: number; t: number } | null = null;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    if (!start || !end) continue;
+    const candidate = distanceToPrimaryRouteSegment(x, z, start, end);
+    if (!nearest || candidate.distance < nearest.distance) {
+      nearest = { ...candidate, segmentIndex: index };
+    }
+  }
+  return nearest;
+}
+
+function distanceToPrimaryRouteSegment(x: number, z: number, start: [number, number], end: [number, number]) {
+  const dx = end[0] - start[0];
+  const dz = end[1] - start[1];
+  const lengthSquared = dx * dx + dz * dz;
+  if (lengthSquared === 0) return { distance: Math.hypot(x - start[0], z - start[1]), t: 0 };
+  const t = Math.max(0, Math.min(1, ((x - start[0]) * dx + (z - start[1]) * dz) / lengthSquared));
+  return { distance: Math.hypot(x - (start[0] + dx * t), z - (start[1] + dz * t)), t };
 }
 
 export function createTinyExampleMapDefinition(): MapDefinition {

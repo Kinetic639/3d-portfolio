@@ -4,6 +4,8 @@ import { resolvePrefabVisualBounds } from "@/lib/prefabs/prefab-resolver";
 import { getTerrainSurfaceAtWorld } from "@/lib/world/surface-query";
 import { parseMapDocument } from "@/lib/world/map-document";
 import { BLOCK_IDS } from "@/lib/world/block-registry";
+import { WORLD_CONFIG } from "@/lib/world/world-config";
+import { SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 import { cloneMapDefinition, createLoadedMapState, mapDefinitionToDocument, validateMapDefinition } from "./map-definition";
 import { DEFAULT_AUTHORED_MAP_ID, listMapRegistryEntries, loadMapStateSync } from "./map-registry";
 
@@ -23,20 +25,44 @@ describe("portfolio main authored v2 map", () => {
     expect(entries.find((entry) => entry.id === "portfolio-v2-prefab-showcase")?.developmentOnly).toBe(true);
   });
 
-  it("provides the new primary flat map as a full one-level foundation", () => {
+  it("provides the primary terrain map as a cube-only foundation with the northeast Experience zone", () => {
     const state = loadMapStateSync(PRIMARY_FLAT_MAP_ID, { includeDevelopment: true });
     expect(validateMapDefinition(state.definition).ok).toBe(true);
-    expect(state.world.getStats().nonAirBlocks).toBe(64 * 64);
+    expect(state.definition.name).toBe("Portfolio Primary Terrain");
+    expect(state.world.config).toEqual(WORLD_CONFIG);
+    expect(state.world.getStats().nonAirBlocks).toBeGreaterThan(64 * 64);
     expect(state.definition.entities).toHaveLength(0);
     expect(state.definition.markers).toHaveLength(0);
     expect(state.definition.zones).toHaveLength(0);
 
+    let maxTopY = 0;
     for (let z = 0; z < 64; z += 1) {
       for (let x = 0; x < 64; x += 1) {
         expect(state.world.getBlock(x, 0, z)).toBe(BLOCK_IDS.Ground);
-        expect(state.world.getHighestNonAirY(x, z)).toBe(0);
+        const topY = state.world.getHighestNonAirY(x, z);
+        expect(topY).not.toBeNull();
+        if (topY == null) throw new Error(`Missing bottom terrain at ${x},${z}`);
+        maxTopY = Math.max(maxTopY, topY);
+        expect(topY).toBeGreaterThanOrEqual(0);
+        expect(topY).toBeLessThanOrEqual(8);
+        for (let y = 0; y <= topY; y += 1) {
+          expect(state.world.getBlock(x, y, z)).toBe(BLOCK_IDS.Ground);
+          expect(state.world.getShape(x, y, z)).toBe(SHAPE_IDS.CUBE);
+        }
       }
     }
+
+    expect(state.world.getHighestNonAirY(31, 31)).toBe(0);
+    expect(state.world.getHighestNonAirY(32, 31)).toBe(0);
+    expect(state.world.getHighestNonAirY(31, 32)).toBe(0);
+    expect(state.world.getHighestNonAirY(32, 32)).toBe(0);
+    expect(maxTopY).toBe(8);
+    expect(state.world.getHighestNonAirY(38, 29)).toBeGreaterThanOrEqual(1);
+    expect(state.world.getHighestNonAirY(47, 20)).toBeGreaterThanOrEqual(3);
+    expect(state.world.getHighestNonAirY(61, 8)).toBe(8);
+    expect(state.world.getHighestNonAirY(12, 49)).toBe(1);
+    expect(state.world.getHighestNonAirY(47, 53)).toBe(0);
+    expect(state.world.getHighestNonAirY(44, 40)).toBe(0);
   });
 
   it("uses the portfolio-v2 namespace for every placed prefab", () => {
