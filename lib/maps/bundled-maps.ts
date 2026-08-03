@@ -5,6 +5,7 @@ import {
   createBlankMapDefinition,
   createDefaultOverviewCameraPreset,
   createMapDefinitionFromWorld,
+  validateMapDefinition,
   type MapCameraPreset,
   type MapDefinition,
   type MapMarkerDefinition,
@@ -16,6 +17,7 @@ import { BUILT_IN_PREFABS } from "@/lib/prefabs/prefab-library";
 import { groundEntityOnTerrain } from "@/lib/prefabs/prefab-placement";
 import type { PrefabDefinition, PrefabVariantDefinition } from "@/lib/prefabs/prefab-types";
 import { ROTATIONS, SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
+import portfolioPrimaryFlatMap from "./portfolio-primary-flat.map.json";
 
 const PHASE4_CREATED_AT = "2026-08-01T00:00:00.000Z";
 const PHASE5_CREATED_AT = "2026-08-02T00:00:00.000Z";
@@ -295,36 +297,15 @@ export function createPortfolioMainAuthoredV2MapDefinition(): MapDefinition {
 }
 
 export function createPortfolioPrimaryFlatMapDefinition(): MapDefinition {
-  const world = createPortfolioPrimaryTerrainWorld();
+  return loadBundledMapDefinition(portfolioPrimaryFlatMap, "portfolio-primary-flat.map.json");
+}
 
-  return createMapDefinitionFromWorld({
-    id: "portfolio-primary-flat",
-    name: "Portfolio Primary Terrain",
-    description: "Primary portfolio map foundation: one continuous cube-only 64 by 64 by 12 landscape with a solid bottom layer, rough terrain zones and reserved water beds.",
-    kind: "portfolio",
-    runtimeMode: "dynamic-voxel",
-    world,
-    zones: [],
-    markers: [],
-    entities: [],
-    navigation: { nodes: [], edges: [], routes: [] },
-    spawnPoints: [{
-      id: "arrival",
-      label: "Arrival",
-      position: { x: 31, y: 1, z: 31 },
-      rotationY: 0,
-      cameraTarget: { x: 31, y: 0, z: 31 },
-    }],
-    cameraPresets: [createDefaultOverviewCameraPreset()],
-    defaultSpawnId: "arrival",
-    defaultCameraPresetId: "overview",
-    presentation: { legendVisible: true, backgroundId: "neutral-day", environmentId: "graybox" },
-    metadata: {
-      createdAt: PRIMARY_FLAT_CREATED_AT,
-      updatedAt: PRIMARY_FLAT_CREATED_AT,
-      authoringVersion: "primary-terrain-v2",
-    },
-  });
+function loadBundledMapDefinition(input: unknown, source: string): MapDefinition {
+  const validation = validateMapDefinition(input);
+  if (!validation.ok) {
+    throw new Error(`Bundled map ${source} is invalid:\n${validation.errors.join("\n")}`);
+  }
+  return validation.map;
 }
 
 function createPortfolioPrimaryTerrainWorld() {

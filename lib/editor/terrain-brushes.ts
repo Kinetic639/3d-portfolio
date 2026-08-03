@@ -160,7 +160,7 @@ function createCellMutation(
       afterShape = shapeId;
       afterRotation = rotation;
       afterState = state;
-      afterZone = zoneId;
+      afterZone = world.getColumnZone(cell.x, cell.z);
       break;
     case "erase":
     case "clear":

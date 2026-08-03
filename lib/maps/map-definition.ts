@@ -53,7 +53,10 @@ export type MapZoneDefinition = {
   overlayVisible: boolean;
   locked: boolean;
   defaultFocusMarkerId?: string;
+  focusDirection?: MapZoneFocusDirection;
 };
+
+export type MapZoneFocusDirection = "north" | "south" | "east" | "west" | "northeast" | "northwest" | "southeast" | "southwest";
 
 export type MapContentReference = {
   contentType: MapContentType;
@@ -355,6 +358,9 @@ export function validateMapDefinition(input: unknown): MapDefinitionValidationRe
     if (typeof zone.color !== "string" || !/^#[0-9a-f]{6}$/i.test(zone.color)) {
       errors.push(`Zone ${zone.id} must include a hex colour.`);
     }
+    if (zone.focusDirection && !isZoneFocusDirection(zone.focusDirection)) {
+      errors.push(`Zone ${zone.id} has invalid focus direction: ${String(zone.focusDirection)}.`);
+    }
     zoneIds.add(zone.id);
     zoneNumericIds.add(zone.numericId);
   }
@@ -646,6 +652,10 @@ function isFootprint(value: unknown) {
   return typeof value.width === "number" && Number.isFinite(value.width) && value.width > 0 &&
     typeof value.depth === "number" && Number.isFinite(value.depth) && value.depth > 0 &&
     typeof value.height === "number" && Number.isFinite(value.height) && value.height > 0;
+}
+
+function isZoneFocusDirection(value: unknown): value is MapZoneFocusDirection {
+  return typeof value === "string" && ["north", "south", "east", "west", "northeast", "northwest", "southeast", "southwest"].includes(value);
 }
 
 function hasExpectedDimensions(map: MapDefinition) {

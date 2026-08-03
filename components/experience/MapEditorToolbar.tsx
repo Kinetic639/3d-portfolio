@@ -58,7 +58,7 @@ import { MAP_PRESETS, type MapPresetId } from "@/lib/editor/map-presets";
 import type { BrushShape, TerrainBrushSettings } from "@/lib/editor/terrain-brushes";
 import type { ZoneEditMode, ZoneSelectionMode } from "@/lib/editor/zone-tools";
 import type { MapRegistryEntry } from "@/lib/maps/map-registry";
-import type { MapZoneDefinition } from "@/lib/maps/map-definition";
+import type { MapZoneDefinition, MapZoneFocusDirection } from "@/lib/maps/map-definition";
 import type { CollisionMode, PlacedMapEntity, PrimitiveType } from "@/lib/maps/map-entities";
 import type { NavigationNodeType } from "@/lib/maps/map-navigation";
 import { BUILT_IN_PREFABS, listPrefabCategories } from "@/lib/prefabs/prefab-library";
@@ -70,6 +70,7 @@ import { SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/s
 
 export type TerrainRenderMode = "instanced" | "surface";
 export type EntityTransformMode = "translate" | "rotate";
+export type ZoneFocusDirection = MapZoneFocusDirection;
 
 type EditorIconKey =
   | EditorIconName
@@ -120,6 +121,7 @@ export type EditorInspectorState = {
   zoneId: number;
   zoneEditMode: ZoneEditMode;
   zoneSelectionMode: ZoneSelectionMode;
+  zoneFocusDirection: ZoneFocusDirection;
   zoneDefinitions: MapZoneDefinition[];
   zoneNeutralTerrain: boolean;
   zoneNeutralTerrainColor: string;
@@ -194,7 +196,8 @@ export type MapEditorToolbarProps = EditorInspectorState & {
   onZoneChange: (zoneId: number) => void;
   onZoneEditModeChange: (mode: ZoneEditMode) => void;
   onZoneSelectionModeChange: (mode: ZoneSelectionMode) => void;
-  onZoneDefinitionChange: (numericId: number, patch: Partial<Pick<MapZoneDefinition, "label" | "shortLabel" | "description" | "color" | "visibleInLegend" | "overlayVisible" | "locked">>) => void;
+  onZoneFocusDirectionChange: (direction: ZoneFocusDirection) => void;
+  onZoneDefinitionChange: (numericId: number, patch: Partial<Pick<MapZoneDefinition, "label" | "shortLabel" | "description" | "color" | "visibleInLegend" | "overlayVisible" | "locked" | "focusDirection">>) => void;
   onCreateZone: () => void;
   onZoneNeutralTerrainChange: (enabled: boolean) => void;
   onZoneNeutralTerrainColorChange: (color: string) => void;
@@ -347,9 +350,7 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
   const patchLayout = (patch: Partial<typeof layout>) => setLayout((current) => ({ ...current, ...patch }));
   const setWorkspace = (workspace: string) => {
     const nextWorkspace = workspace as EditorWorkspace;
-    if (nextWorkspace === "zones") {
-      props.onToolChange("zone");
-    }
+    props.onToolChange("select");
     setLayout((current) => ({
       ...current,
       activeWorkspace: nextWorkspace,
@@ -615,6 +616,7 @@ function ToolRail({ workspace, activeTool, props, onToolChange }: { workspace: E
 }
 
 function ZoneRailTools({ props }: { props: MapEditorToolbarProps }) {
+  const zoneToolActive = props.tool === "zone";
   return (
     <>
       <div className="editor-tool-rail-divider" aria-hidden="true" />
@@ -624,7 +626,7 @@ function ZoneRailTools({ props }: { props: MapEditorToolbarProps }) {
           <span>New Zone</span>
         </button>
         {(["paint", "replace", "erase"] as ZoneEditMode[]).map((mode) => (
-          <button key={mode} type="button" className={props.zoneEditMode === mode && props.zoneSelectionMode === "brush" ? "active" : ""} title={zoneEditLabel(mode)} aria-label={`Zone ${zoneEditLabel(mode)}`} onClick={() => { props.onToolChange("zone"); props.onZoneEditModeChange(mode); props.onZoneSelectionModeChange("brush"); }}>
+          <button key={mode} type="button" className={zoneToolActive && props.zoneEditMode === mode && props.zoneSelectionMode === "brush" ? "active" : ""} title={zoneEditLabel(mode)} aria-label={`Zone ${zoneEditLabel(mode)}`} onClick={() => { props.onToolChange("zone"); props.onZoneEditModeChange(mode); props.onZoneSelectionModeChange("brush"); }}>
             <EditorIcon name={zoneEditIcon(mode)} />
             <span>{zoneEditLabel(mode)}</span>
           </button>
@@ -632,7 +634,7 @@ function ZoneRailTools({ props }: { props: MapEditorToolbarProps }) {
       </div>
       <div className="editor-tool-rail-divider" aria-hidden="true" />
       <div className="editor-tool-rail-group" aria-label="Zone area mode">
-        <button type="button" className={props.zoneSelectionMode === "rectangle" ? "active" : ""} title="Area Fill" aria-label="Zone Area Fill" onClick={() => { props.onToolChange("zone"); props.onZoneSelectionModeChange("rectangle"); }}>
+        <button type="button" className={zoneToolActive && props.zoneSelectionMode === "rectangle" ? "active" : ""} title="Area Fill" aria-label="Zone Area Fill" onClick={() => { props.onToolChange("zone"); props.onZoneSelectionModeChange("rectangle"); }}>
           <EditorIcon name="zone-area-fill" />
           <span>Area Fill</span>
         </button>
@@ -700,8 +702,8 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
         <label>Collision<select value={props.collisionMode} onChange={(event) => props.onCollisionModeChange(event.target.value as CollisionMode)}>{COLLISION_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></label>
         <ActionButton icon="object" className={props.tool === "entity" ? "active" : ""} onClick={() => props.onToolChange("entity")}>Place Entity</ActionButton>
         <div className="editor-segmented" role="group" aria-label="Object transform mode">
-          <button type="button" className={props.entityTransformMode === "translate" ? "active" : ""} onClick={() => props.onEntityTransformModeChange("translate")}><EditorIcon name="move" /><span>Move</span></button>
-          <button type="button" className={props.entityTransformMode === "rotate" ? "active" : ""} onClick={() => props.onEntityTransformModeChange("rotate")}><EditorIcon name="rotate" /><span>Rotate</span></button>
+          <button type="button" className={props.tool === "entity" && props.entityTransformMode === "translate" ? "active" : ""} onClick={() => props.onEntityTransformModeChange("translate")}><EditorIcon name="move" /><span>Move</span></button>
+          <button type="button" className={props.tool === "entity" && props.entityTransformMode === "rotate" ? "active" : ""} onClick={() => props.onEntityTransformModeChange("rotate")}><EditorIcon name="rotate" /><span>Rotate</span></button>
         </div>
       </Panel>
     );
@@ -733,12 +735,12 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
   }
 
   if (workspace === "zones") {
-    const activeZone = props.zoneDefinitions.find((zone) => zone.numericId === props.zoneId) ?? props.zoneDefinitions[0];
+    const activeZone = props.zoneDefinitions.find((zone) => zone.numericId === props.zoneId) ?? null;
     return (
       <Panel title="Zones">
         <span className="editor-muted">{props.zoneSelectionMode === "rectangle" ? `${zoneEditLabel(props.zoneEditMode)} · Area Fill` : zoneEditLabel(props.zoneEditMode)}</span>
         <ActionButton icon="add" onClick={props.onCreateZone}>New Zone</ActionButton>
-        <label>Current zone<select value={props.zoneId} disabled={props.zoneDefinitions.length === 0} onChange={(event) => props.onZoneChange(Number(event.target.value))}>{props.zoneDefinitions.slice(0, 10).map((zone) => <option key={zone.numericId} value={zone.numericId}>{zone.label}</option>)}</select></label>
+        <label>Current zone<select value={props.zoneId} onChange={(event) => props.onZoneChange(Number(event.target.value))}><option value={0}>None</option>{props.zoneDefinitions.slice(0, 10).map((zone) => <option key={zone.numericId} value={zone.numericId}>{zone.label}</option>)}</select></label>
         {activeZone ? (
           <Section title="Zone Metadata">
             <label>Name<input value={activeZone.label} onChange={(event) => props.onZoneDefinitionChange(activeZone.numericId, { label: event.target.value })} /></label>
@@ -756,6 +758,7 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
             <label>Size<input type="number" min={1} max={9} value={props.brushSettings.size} onChange={(event) => props.onBrushSizeChange(Number(event.target.value))} /></label>
           </>
         ) : null}
+        <label>Focus direction<select value={activeZone?.focusDirection ?? props.zoneFocusDirection} disabled={!activeZone} onChange={(event) => activeZone ? props.onZoneDefinitionChange(activeZone.numericId, { focusDirection: event.target.value as ZoneFocusDirection }) : props.onZoneFocusDirectionChange(event.target.value as ZoneFocusDirection)}>{ZONE_FOCUS_DIRECTIONS.map((direction) => <option key={direction.id} value={direction.id}>{direction.label}</option>)}</select></label>
         <span className="editor-muted">{props.brushAffectedCellCount} zone columns · {props.zoneAssignmentCount} assigned</span>
         <LayerList props={props} ids={["zones"]} />
       </Panel>
@@ -1232,6 +1235,17 @@ function toolIcon(tool: EditorTool): EditorIconKey {
   if (tool === "erase" || tool === "clear" || tool === "removePath") return tool;
   return tool;
 }
+
+const ZONE_FOCUS_DIRECTIONS: Array<{ id: ZoneFocusDirection; label: string }> = [
+  { id: "north", label: "North" },
+  { id: "northeast", label: "Northeast" },
+  { id: "east", label: "East" },
+  { id: "southeast", label: "Southeast" },
+  { id: "south", label: "South" },
+  { id: "southwest", label: "Southwest" },
+  { id: "west", label: "West" },
+  { id: "northwest", label: "Northwest" },
+];
 
 function bottomTabIcon(tab: BottomDockTab): EditorIconKey {
   if (tab === "overview") return "layout";

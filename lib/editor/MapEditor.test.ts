@@ -173,7 +173,7 @@ describe("map editor session", () => {
       shapeId: SHAPE_IDS.STAIR,
       rotation: ROTATIONS.EAST,
       state: 3,
-      zoneId: 2,
+      zoneId: 0,
     });
 
     editor.applyTerrainMutations("Shape fill", mutations);
@@ -182,7 +182,7 @@ describe("map editor session", () => {
       shapeId: SHAPE_IDS.STAIR,
       rotation: ROTATIONS.EAST,
       state: 3,
-      zoneId: 2,
+      zoneId: 0,
     });
 
     editor.undo();

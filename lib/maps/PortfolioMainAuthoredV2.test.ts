@@ -3,7 +3,7 @@ import { getPrefabDefinition } from "@/lib/prefabs/prefab-library";
 import { resolvePrefabVisualBounds } from "@/lib/prefabs/prefab-resolver";
 import { getTerrainSurfaceAtWorld } from "@/lib/world/surface-query";
 import { parseMapDocument } from "@/lib/world/map-document";
-import { BLOCK_IDS } from "@/lib/world/block-registry";
+import { BLOCK_IDS, getBlockDefinition } from "@/lib/world/block-registry";
 import { WORLD_CONFIG } from "@/lib/world/world-config";
 import { SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 import { cloneMapDefinition, createLoadedMapState, mapDefinitionToDocument, validateMapDefinition } from "./map-definition";
@@ -33,45 +33,32 @@ describe("portfolio main authored v2 map", () => {
     expect(state.world.getStats().nonAirBlocks).toBeGreaterThan(64 * 64);
     expect(state.definition.entities).toHaveLength(0);
     expect(state.definition.markers).toHaveLength(0);
-    expect(state.definition.zones).toHaveLength(0);
+    expect(state.definition.zones.map((zone) => zone.numericId)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
     let maxTopY = 0;
     for (let z = 0; z < 64; z += 1) {
       for (let x = 0; x < 64; x += 1) {
-        expect(state.world.getBlock(x, 0, z)).toBe(BLOCK_IDS.Ground);
+        expect(getBlockDefinition(state.world.getBlock(x, 0, z)).solid).toBe(true);
         const topY = state.world.getHighestNonAirY(x, z);
         expect(topY).not.toBeNull();
         if (topY == null) throw new Error(`Missing bottom terrain at ${x},${z}`);
         maxTopY = Math.max(maxTopY, topY);
         expect(topY).toBeGreaterThanOrEqual(0);
         expect(topY).toBeLessThanOrEqual(8);
-        for (let y = 0; y <= topY; y += 1) {
-          expect(state.world.getBlock(x, y, z)).toBe(BLOCK_IDS.Ground);
-          expect(state.world.getShape(x, y, z)).toBe(SHAPE_IDS.CUBE);
+        for (let y = 0; y < WORLD_CONFIG.height; y += 1) {
+          if (state.world.getBlock(x, y, z) !== BLOCK_IDS.Air) {
+            expect(state.world.getShape(x, y, z)).toBe(SHAPE_IDS.CUBE);
+          }
         }
       }
     }
 
-    expect(state.world.getHighestNonAirY(31, 31)).toBe(0);
-    expect(state.world.getHighestNonAirY(32, 31)).toBe(0);
-    expect(state.world.getHighestNonAirY(31, 32)).toBe(0);
-    expect(state.world.getHighestNonAirY(32, 32)).toBe(0);
+    expect(state.world.getHighestNonAirY(31, 31)).toBe(1);
+    expect(state.world.getHighestNonAirY(32, 31)).toBe(1);
+    expect(state.world.getHighestNonAirY(31, 32)).toBe(1);
+    expect(state.world.getHighestNonAirY(32, 32)).toBe(1);
     expect(maxTopY).toBe(8);
-    expect(state.world.getHighestNonAirY(38, 29)).toBeGreaterThanOrEqual(1);
-    expect(state.world.getHighestNonAirY(47, 20)).toBeGreaterThanOrEqual(3);
-    expect(state.world.getHighestNonAirY(61, 8)).toBe(8);
-    expect(state.world.getHighestNonAirY(14, 48)).toBe(2);
-    expect(state.world.getHighestNonAirY(25, 38)).toBe(3);
-    expect(state.world.getHighestNonAirY(24, 13)).toBe(5);
-    expect(state.world.getHighestNonAirY(16, 27)).toBeLessThanOrEqual(4);
-    expect(state.world.getHighestNonAirY(12, 49)).toBe(0);
-    expect(state.world.getHighestNonAirY(24, 39)).toBeLessThanOrEqual(1);
-    expect(state.world.getHighestNonAirY(30, 59)).toBe(2);
-    expect(state.world.getHighestNonAirY(30, 52)).toBe(1);
-    expect(state.world.getHighestNonAirY(41, 51)).toBe(1);
-    expect(state.world.getHighestNonAirY(55, 52)).toBe(2);
-    expect(state.world.getHighestNonAirY(47, 53)).toBe(0);
-    expect(state.world.getHighestNonAirY(52, 19)).toBeLessThanOrEqual(5);
+    expect(state.world.getStats().nonAirBlocks).toBe(13240);
   });
 
   it("uses the portfolio-v2 namespace for every placed prefab", () => {

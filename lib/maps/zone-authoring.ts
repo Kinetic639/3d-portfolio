@@ -38,7 +38,7 @@ export function ensureEditableZones(map: MapDefinition, count = EDITOR_ZONE_COUN
 export function updateEditableZone(
   map: MapDefinition,
   numericId: number,
-  patch: Partial<Pick<MapZoneDefinition, "label" | "shortLabel" | "description" | "color" | "visibleInLegend" | "overlayVisible" | "locked">>,
+  patch: Partial<Pick<MapZoneDefinition, "label" | "shortLabel" | "description" | "color" | "visibleInLegend" | "overlayVisible" | "locked" | "focusDirection">>,
 ): MapDefinition {
   return ensureEditableZones({
     ...map,
@@ -73,5 +73,6 @@ export function createDefaultZone(numericId: number): MapZoneDefinition {
     visibleInLegend: true,
     overlayVisible: true,
     locked: false,
+    focusDirection: "south",
   };
 }
