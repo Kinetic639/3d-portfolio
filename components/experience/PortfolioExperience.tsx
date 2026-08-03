@@ -1124,6 +1124,14 @@ function ExperienceScene({
     [browsing, currentMap, editorSession.world, zoneFocusDirection],
   );
   const normalizeEditableMap = useCallback((map: MapDefinition) => editorEnabled ? ensureEditableZones(map) : map, [editorEnabled]);
+  const loadEditableMapState = useCallback((nextMapId: string) => {
+    const registryState = loadMapStateSync(nextMapId, { includeDevelopment: true });
+    const draft = loadMapDraft(localStorage, nextMapId);
+    if (draft && draft.metadata.authoringVersion === registryState.definition.metadata.authoringVersion) {
+      return createLoadedMapState(normalizeEditableMap(draft));
+    }
+    return registryState;
+  }, [normalizeEditableMap]);
 
   const commitMapDefinitionChange = (nextMap: MapDefinition, message: string) => {
     mapHistoryRef.current.undo.push(currentMap);
@@ -1489,8 +1497,7 @@ function ExperienceScene({
     }
 
     try {
-      const draft = loadMapDraft(localStorage, nextMapId);
-      const loaded = draft ? createLoadedMapState(normalizeEditableMap(draft)) : loadMapStateSync(nextMapId, { includeDevelopment: true });
+      const loaded = loadEditableMapState(nextMapId);
       const editableDefinition = normalizeEditableMap(loaded.definition);
 
       const nextSession = new MapEditorSession(loaded.world, loaded.entities);
@@ -1517,8 +1524,7 @@ function ExperienceScene({
 
   const loadBenchmarkMap = useCallback((nextMapId: string) => {
     try {
-      const draft = loadMapDraft(localStorage, nextMapId);
-      const loaded = draft ? createLoadedMapState(normalizeEditableMap(draft)) : loadMapStateSync(nextMapId, { includeDevelopment: true });
+      const loaded = loadEditableMapState(nextMapId);
       const editableDefinition = normalizeEditableMap(loaded.definition);
       const nextSession = new MapEditorSession(loaded.world, loaded.entities);
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
@@ -1543,7 +1549,7 @@ function ExperienceScene({
       setEditorMessage({ type: "error", text: error instanceof Error ? error.message : "Map load failed." });
       return false;
     }
-  }, [normalizeEditableMap]);
+  }, [loadEditableMapState, normalizeEditableMap]);
 
   const handleNewMap = () => {
     if (snapshot.hasUnsavedChanges && !window.confirm("Discard unsaved edits and create a blank development map?")) {
@@ -2224,6 +2230,10 @@ function ExperienceScene({
       try {
         const savedDraft = loadMapDraft(localStorage, currentMap.id);
         if (!savedDraft) {
+          return;
+        }
+        if (savedDraft.metadata.authoringVersion !== currentMap.metadata.authoringVersion) {
+          setAutosaveStatus("stale draft ignored");
           return;
         }
 

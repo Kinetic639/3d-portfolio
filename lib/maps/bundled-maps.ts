@@ -322,7 +322,7 @@ export function createPortfolioPrimaryFlatMapDefinition(): MapDefinition {
     metadata: {
       createdAt: PRIMARY_FLAT_CREATED_AT,
       updatedAt: PRIMARY_FLAT_CREATED_AT,
-      authoringVersion: "primary-terrain-v1",
+      authoringVersion: "primary-terrain-v2",
     },
   });
 }
@@ -351,6 +351,7 @@ function getPrimaryTerrainHeight(x: number, z: number) {
   height = Math.max(height, getProjectsBaseHeight(x, z));
   height = Math.max(height, getAboutBaseHeight(x, z));
   height = Math.max(height, getContactBaseHeight(x, z));
+  height = carvePrimaryTerrainRoutes(x, z, height);
   height = carveMainWaterSystem(x, z, height);
   height = applyArrivalClearing(x, z, height);
 
@@ -426,8 +427,65 @@ function getAboutBaseHeight(x: number, z: number) {
 }
 
 function getContactBaseHeight(x: number, z: number) {
-  if (!isInsideAuthoredMask(x, z, 16, 47, 11, 9)) return 0;
+  const contactFootprint = isInsideAuthoredMask(x, z, 30, 59, 10, 5);
+  const approachShoulder = nearestPrimaryRoutePoint(x, z, [[31, 36], [29, 44], [30, 52], [30, 59]]);
+  if (!contactFootprint && (!approachShoulder || approachShoulder.distance > 2.7)) return 0;
+
+  const postOfficePad = x >= 27 && x <= 34 && z >= 57 && z <= 61;
+  const rearHill = falloff(x, z, 30, 59, 7, 4);
+  const mailboxShoulder = falloff(x, z, 35, 57, 4, 3);
+  if (postOfficePad || rearHill > 0.64 || mailboxShoulder > 0.74) return 2;
+
   return 1;
+}
+
+function carvePrimaryTerrainRoutes(x: number, z: number, height: number) {
+  height = carveSteppedRoute(x, z, height, [
+    [33, 31, 1],
+    [38, 28, 2],
+    [43, 27, 3],
+    [50, 24, 4],
+    [52, 19, 5],
+    [44, 17, 4],
+    [48, 12, 5],
+    [56, 13, 6],
+    [59, 8, 7],
+  ], 1.35, 2.4);
+
+  height = carveSteppedRoute(x, z, height, [
+    [34, 35, 1],
+    [40, 38, 2],
+    [47, 39, 2],
+    [54, 37, 2],
+  ], 1.25, 2.25);
+
+  height = carveSteppedRoute(x, z, height, [
+    [45, 39, 2],
+    [43, 43, 2],
+    [49, 45, 2],
+  ], 1.05, 1.85);
+
+  height = carveSteppedRoute(x, z, height, [
+    [43, 35, 2],
+    [48, 32, 3],
+    [54, 29, 3],
+    [60, 28, 3],
+  ], 1.3, 2.1);
+
+  height = carveSteppedRoute(x, z, height, [
+    [31, 36, 1],
+    [29, 44, 1],
+    [30, 52, 1],
+    [30, 59, 2],
+  ], 1.45, 2.25);
+
+  height = carveSteppedRoute(x, z, height, [
+    [34, 38, 1],
+    [38, 45, 1],
+    [42, 50, 1],
+  ], 1.35, 2.2);
+
+  return height;
 }
 
 function applyArrivalClearing(x: number, z: number, height: number) {
@@ -454,6 +512,20 @@ function carveMainWaterSystem(x: number, z: number, height: number) {
 
 function isInsideAuthoredMask(x: number, z: number, centerX: number, centerZ: number, radiusX: number, radiusZ: number) {
   return falloff(x, z, centerX, centerZ, radiusX, radiusZ) > 0;
+}
+
+function carveSteppedRoute(x: number, z: number, height: number, points: Array<[number, number, number]>, pathWidth: number, shoulderWidth: number) {
+  const nearest = nearestPrimaryRoutePoint(x, z, points.map((point) => [point[0], point[1]]));
+  if (!nearest) return height;
+
+  const start = points[nearest.segmentIndex];
+  const end = points[nearest.segmentIndex + 1];
+  if (!start || !end) return height;
+
+  const targetHeight = Math.round(start[2] + (end[2] - start[2]) * nearest.t);
+  if (nearest.distance < pathWidth) return Math.min(height, targetHeight);
+  if (nearest.distance < shoulderWidth) return Math.min(height, targetHeight + 1);
+  return height;
 }
 
 function falloff(x: number, z: number, centerX: number, centerZ: number, radiusX: number, radiusZ: number) {

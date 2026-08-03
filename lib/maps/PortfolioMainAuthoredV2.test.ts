@@ -25,7 +25,7 @@ describe("portfolio main authored v2 map", () => {
     expect(entries.find((entry) => entry.id === "portfolio-v2-prefab-showcase")?.developmentOnly).toBe(true);
   });
 
-  it("provides the primary terrain map as a cube-only foundation with the northeast Experience zone", () => {
+  it("provides the primary terrain map as a cube-only foundation with authored zone landforms", () => {
     const state = loadMapStateSync(PRIMARY_FLAT_MAP_ID, { includeDevelopment: true });
     expect(validateMapDefinition(state.definition).ok).toBe(true);
     expect(state.definition.name).toBe("Portfolio Primary Terrain");
@@ -60,11 +60,15 @@ describe("portfolio main authored v2 map", () => {
     expect(state.world.getHighestNonAirY(38, 29)).toBeGreaterThanOrEqual(1);
     expect(state.world.getHighestNonAirY(47, 20)).toBeGreaterThanOrEqual(3);
     expect(state.world.getHighestNonAirY(61, 8)).toBe(8);
-    expect(state.world.getHighestNonAirY(12, 49)).toBe(1);
+    expect(state.world.getHighestNonAirY(12, 49)).toBe(0);
+    expect(state.world.getHighestNonAirY(24, 39)).toBeLessThanOrEqual(1);
+    expect(state.world.getHighestNonAirY(30, 59)).toBe(2);
+    expect(state.world.getHighestNonAirY(30, 52)).toBe(1);
     expect(state.world.getHighestNonAirY(41, 51)).toBe(1);
     expect(state.world.getHighestNonAirY(55, 52)).toBe(2);
     expect(state.world.getHighestNonAirY(47, 53)).toBe(0);
-    expect(state.world.getHighestNonAirY(44, 40)).toBe(0);
+    expect(state.world.getHighestNonAirY(44, 40)).toBe(2);
+    expect(state.world.getHighestNonAirY(52, 19)).toBeLessThanOrEqual(5);
   });
 
   it("uses the portfolio-v2 namespace for every placed prefab", () => {
