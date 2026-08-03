@@ -3,7 +3,7 @@
 import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import { MapControls, Text, TransformControls } from "@react-three/drei";
 import gsap from "gsap";
-import { LockKeyhole, RotateCcw, UnlockKeyhole } from "lucide-react";
+import { Compass, LockKeyhole, RotateCcw, UnlockKeyhole } from "lucide-react";
 import dynamic from "next/dynamic";
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import * as THREE from "three";
@@ -18,6 +18,7 @@ import { buildZoneOverlayChunkMeshes, buildZoneOverlayMeshes, type ZoneOverlayCh
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import { parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
 import type { GridCoordinate } from "@/lib/world/world-config";
+import type { VoxelWorld } from "@/lib/world/voxel-world";
 import { getTerrainSurfaceAt } from "@/lib/world/surface-query";
 import { MapEditorSession, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
 import { createMapPresetWorld, type MapPresetId } from "@/lib/editor/map-presets";
@@ -82,6 +83,7 @@ import { getShapeDefinition, type ShapeCategory } from "@/lib/voxel-shapes/shape
 import { DEFAULT_ROTATION, DEFAULT_STATE, SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import { PORTFOLIO_CONTENT, resolveContentReference } from "@/lib/portfolio/content";
 import {
+  type CompassDirection,
   type ExperiencePhase,
   isInteractivePhase,
   useExperienceStore,
@@ -490,6 +492,17 @@ const ZONE_FOCUS_DIRECTIONS: Array<{ id: ZoneFocusDirection; label: string }> = 
   { id: "southwest", label: "South West" },
 ];
 
+const COMPASS_DIRECTIONS: Array<{ id: CompassDirection; label: string; shortLabel: string }> = [
+  { id: "north", label: "North", shortLabel: "N" },
+  { id: "northeast", label: "North East", shortLabel: "NE" },
+  { id: "east", label: "East", shortLabel: "E" },
+  { id: "southeast", label: "South East", shortLabel: "SE" },
+  { id: "south", label: "South", shortLabel: "S" },
+  { id: "southwest", label: "South West", shortLabel: "SW" },
+  { id: "west", label: "West", shortLabel: "W" },
+  { id: "northwest", label: "North West", shortLabel: "NW" },
+];
+
 function ExperienceOverlay({ phase }: { phase: ExperiencePhase }) {
   const resetView = useExperienceStore((state) => state.resetView);
   const isAngleLocked = useExperienceStore((state) => state.isAngleLocked);
@@ -501,6 +514,7 @@ function ExperienceOverlay({ phase }: { phase: ExperiencePhase }) {
         <div className="overlay-actions">
           {phase === "explore" ? (
             <>
+              <ViewportCompass />
               <button
                 className="overlay-icon-button"
                 type="button"
@@ -525,6 +539,35 @@ function ExperienceOverlay({ phase }: { phase: ExperiencePhase }) {
       </header>
 
       {phase === "ready" ? <WelcomePanel /> : null}
+    </div>
+  );
+}
+
+function ViewportCompass() {
+  const heading = useExperienceStore((state) => state.cameraHeadingRadians);
+  const snapCompassDirection = useExperienceStore((state) => state.snapCompassDirection);
+  const direction = getCompassDirectionLabel(heading);
+
+  return (
+    <div className="viewport-compass" aria-label={`Camera facing ${direction}`}>
+      <div className="viewport-compass__dial">
+        <Compass aria-hidden="true" size={14} />
+        <span style={{ transform: `rotate(${heading}rad)` }} aria-hidden="true" />
+        <strong>{direction}</strong>
+      </div>
+      <div className="viewport-compass__buttons" aria-label="Snap camera direction">
+        {COMPASS_DIRECTIONS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => snapCompassDirection(item.id)}
+            title={`Face ${item.label}`}
+            aria-label={`Face ${item.label}`}
+          >
+            {item.shortLabel}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1329,6 +1372,40 @@ function ExperienceScene({
     commitMapDefinitionChange(updateEditableZone(currentMap, numericId, patch), "Zone updated.");
   };
 
+  const handleCreateZone = () => {
+    const editableMap = ensureEditableZones(currentMap);
+    const zoneCounts = countZoneAssignments(editorSession.world);
+    const editableZones = editableMap.zones.filter((zone) => zone.numericId >= 1 && zone.numericId <= 10);
+    const zoneAfterCurrent = (offset: number) => ((zoneId + offset - 1) % 10) + 1;
+    const newZone = Array.from({ length: 10 }, (_, index) => zoneAfterCurrent(index + 1))
+      .map((numericId) => editableZones.find((zone) => zone.numericId === numericId))
+      .find((zone) => zone && (zoneCounts.get(zone.numericId) ?? 0) === 0)
+      ?? editableZones.find((zone) => zone.numericId === zoneAfterCurrent(1))
+      ?? editableZones[0]
+      ?? null;
+
+    if (!newZone) {
+      setEditorMessage({ type: "error", text: "No editable zone slots are available." });
+      return;
+    }
+
+    if (editableMap.zones.length !== currentMap.zones.length) {
+      mapHistoryRef.current.undo.push(currentMap);
+      if (mapHistoryRef.current.undo.length > 80) {
+        mapHistoryRef.current.undo.shift();
+      }
+      mapHistoryRef.current.redo = [];
+      setCurrentMap(editableMap);
+      setEditorRevision((revision) => revision + 1);
+    }
+
+    setZoneId(newZone.numericId);
+    setZoneEditMode("paint");
+    setZoneSelectionMode("brush");
+    setTool("zone");
+    setEditorMessage({ type: "info", text: `${newZone.label} ready. Paint or area-fill columns to assign it.` });
+  };
+
   const handleUndo = () => {
     const previousMap = mapHistoryRef.current.undo.pop();
     if (previousMap) {
@@ -1967,6 +2044,7 @@ function ExperienceScene({
         setTool("zone");
       },
       onZoneDefinitionChange: handleZoneDefinitionChange,
+      onCreateZone: handleCreateZone,
       onZoneNeutralTerrainChange: setZoneNeutralTerrain,
       onZoneNeutralTerrainColorChange: setZoneNeutralTerrainColor,
       onZoneGridLinesVisibleChange: setZoneGridLinesVisible,
@@ -4840,6 +4918,10 @@ function ConstrainedMapControls({
   const rotateSpeed = useExperienceStore((state) => state.rotateSpeed);
   const dampingFactor = useExperienceStore((state) => state.dampingFactor);
   const isAngleLocked = useExperienceStore((state) => state.isAngleLocked);
+  const cameraHeadingRadians = useExperienceStore((state) => state.cameraHeadingRadians);
+  const setCameraHeading = useExperienceStore((state) => state.setCameraHeading);
+  const compassSnapDirection = useExperienceStore((state) => state.compassSnapDirection);
+  const compassSnapCount = useExperienceStore((state) => state.compassSnapCount);
   const bounds = 36;
   const lockedAngle = useRef<number | null>(null);
   const previousResetCount = useRef(resetViewCount);
@@ -4855,6 +4937,8 @@ function ConstrainedMapControls({
   const focusStartTarget = useRef(new THREE.Vector3());
   const activeFocusPresetId = useRef<string | null>(null);
   const focusTween = useRef<gsap.core.Tween | null>(null);
+  const compassSnapTween = useRef<gsap.core.Tween | null>(null);
+  const previousCompassSnapCount = useRef(compassSnapCount);
   const loaderCameraPosition = useMemo(() => new THREE.Vector3(0, 20, 54), []);
   const loaderTargetPosition = useMemo(() => new THREE.Vector3(0, 13.5, 0), []);
   const startCameraPosition = useMemo(() => new THREE.Vector3(12, 15, 18), []);
@@ -5025,6 +5109,50 @@ function ConstrainedMapControls({
     };
   }, [camera, enabled, focusPreset, reducedMotion]);
 
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls || !enabled || !compassSnapDirection || previousCompassSnapCount.current === compassSnapCount) {
+      return;
+    }
+
+    previousCompassSnapCount.current = compassSnapCount;
+    compassSnapTween.current?.kill();
+
+    const startCamera = camera.position.clone();
+    const target = controls.target.clone();
+    const offset = startCamera.clone().sub(target);
+    const horizontalDistance = Math.max(1, Math.hypot(offset.x, offset.z));
+    const heading = compassDirectionToHeading(compassSnapDirection);
+    const targetCamera = new THREE.Vector3(
+      target.x - Math.sin(heading) * horizontalDistance,
+      target.y + offset.y,
+      target.z + Math.cos(heading) * horizontalDistance,
+    );
+    const tweenState = { progress: 0 };
+
+    compassSnapTween.current = gsap.to(tweenState, {
+      progress: 1,
+      duration: reducedMotion ? 0.01 : 0.55,
+      ease: "power3.inOut",
+      onUpdate: () => {
+        camera.position.lerpVectors(startCamera, targetCamera, tweenState.progress);
+        controls.target.copy(target);
+        controls.update();
+      },
+      onComplete: () => {
+        camera.position.copy(targetCamera);
+        controls.target.copy(target);
+        controls.update();
+        compassSnapTween.current = null;
+      },
+    });
+
+    return () => {
+      compassSnapTween.current?.kill();
+      compassSnapTween.current = null;
+    };
+  }, [camera, compassSnapCount, compassSnapDirection, enabled, reducedMotion]);
+
   useFrame((_, delta) => {
     const controls = controlsRef.current;
 
@@ -5064,6 +5192,11 @@ function ConstrainedMapControls({
       controls.target.x = THREE.MathUtils.clamp(controls.target.x, -bounds, bounds);
       controls.target.y = 0;
       controls.target.z = THREE.MathUtils.clamp(controls.target.z, -bounds, bounds);
+      const lookDirection = controls.target.clone().sub(camera.position);
+      const nextHeading = normalizeHeadingRadians(Math.atan2(lookDirection.x, -lookDirection.z));
+      if (Math.abs(normalizeAngleRadians(nextHeading - cameraHeadingRadians)) > 0.01) {
+        setCameraHeading(nextHeading);
+      }
     }
 
     if (resetting.current) {
@@ -5116,6 +5249,43 @@ function normalizeAngleRadians(angle: number) {
   while (normalized > Math.PI) normalized -= Math.PI * 2;
   while (normalized < -Math.PI) normalized += Math.PI * 2;
   return normalized;
+}
+
+function normalizeHeadingRadians(angle: number) {
+  const fullTurn = Math.PI * 2;
+  return ((angle % fullTurn) + fullTurn) % fullTurn;
+}
+
+function compassDirectionToHeading(direction: CompassDirection) {
+  switch (direction) {
+    case "north": return 0;
+    case "northeast": return Math.PI * 0.25;
+    case "east": return Math.PI * 0.5;
+    case "southeast": return Math.PI * 0.75;
+    case "south": return Math.PI;
+    case "southwest": return Math.PI * 1.25;
+    case "west": return Math.PI * 1.5;
+    case "northwest": return Math.PI * 1.75;
+  }
+}
+
+function getCompassDirectionLabel(heading: number) {
+  const normalized = normalizeHeadingRadians(heading);
+  const index = Math.round(normalized / (Math.PI * 0.25)) % COMPASS_DIRECTIONS.length;
+  return COMPASS_DIRECTIONS[index]?.shortLabel ?? "N";
+}
+
+function countZoneAssignments(world: VoxelWorld) {
+  const counts = new Map<number, number>();
+  for (let z = 0; z < world.config.depth; z += 1) {
+    for (let x = 0; x < world.config.width; x += 1) {
+      const zone = world.getColumnZone(x, z);
+      if (zone > 0) {
+        counts.set(zone, (counts.get(zone) ?? 0) + 1);
+      }
+    }
+  }
+  return counts;
 }
 
 function easeInOutCinematic(progress: number) {

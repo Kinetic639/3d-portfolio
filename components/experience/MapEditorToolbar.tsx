@@ -195,6 +195,7 @@ export type MapEditorToolbarProps = EditorInspectorState & {
   onZoneEditModeChange: (mode: ZoneEditMode) => void;
   onZoneSelectionModeChange: (mode: ZoneSelectionMode) => void;
   onZoneDefinitionChange: (numericId: number, patch: Partial<Pick<MapZoneDefinition, "label" | "shortLabel" | "description" | "color" | "visibleInLegend" | "overlayVisible" | "locked">>) => void;
+  onCreateZone: () => void;
   onZoneNeutralTerrainChange: (enabled: boolean) => void;
   onZoneNeutralTerrainColorChange: (color: string) => void;
   onZoneGridLinesVisibleChange: (visible: boolean) => void;
@@ -618,6 +619,10 @@ function ZoneRailTools({ props }: { props: MapEditorToolbarProps }) {
     <>
       <div className="editor-tool-rail-divider" aria-hidden="true" />
       <div className="editor-tool-rail-group" aria-label="Zone operation">
+        <button type="button" title="New Zone" aria-label="New Zone" onClick={props.onCreateZone}>
+          <EditorIcon name="add" />
+          <span>New Zone</span>
+        </button>
         {(["paint", "replace", "erase"] as ZoneEditMode[]).map((mode) => (
           <button key={mode} type="button" className={props.zoneEditMode === mode && props.zoneSelectionMode === "brush" ? "active" : ""} title={zoneEditLabel(mode)} aria-label={`Zone ${zoneEditLabel(mode)}`} onClick={() => { props.onToolChange("zone"); props.onZoneEditModeChange(mode); props.onZoneSelectionModeChange("brush"); }}>
             <EditorIcon name={zoneEditIcon(mode)} />
@@ -732,7 +737,8 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
     return (
       <Panel title="Zones">
         <span className="editor-muted">{props.zoneSelectionMode === "rectangle" ? `${zoneEditLabel(props.zoneEditMode)} · Area Fill` : zoneEditLabel(props.zoneEditMode)}</span>
-        <label>Current zone<select value={props.zoneId} onChange={(event) => props.onZoneChange(Number(event.target.value))}>{props.zoneDefinitions.slice(0, 10).map((zone) => <option key={zone.numericId} value={zone.numericId}>{zone.label}</option>)}</select></label>
+        <ActionButton icon="add" onClick={props.onCreateZone}>New Zone</ActionButton>
+        <label>Current zone<select value={props.zoneId} disabled={props.zoneDefinitions.length === 0} onChange={(event) => props.onZoneChange(Number(event.target.value))}>{props.zoneDefinitions.slice(0, 10).map((zone) => <option key={zone.numericId} value={zone.numericId}>{zone.label}</option>)}</select></label>
         {activeZone ? (
           <Section title="Zone Metadata">
             <label>Name<input value={activeZone.label} onChange={(event) => props.onZoneDefinitionChange(activeZone.numericId, { label: event.target.value })} /></label>
