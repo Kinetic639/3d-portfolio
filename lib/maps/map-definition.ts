@@ -9,6 +9,7 @@ import {
 } from "@/lib/world/map-document";
 import { VoxelWorld } from "@/lib/world/voxel-world";
 import { WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
+import { isKnownShapeId } from "@/lib/voxel-shapes/shape-ids";
 import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
 import {
   cloneEntityGroup,
@@ -35,7 +36,7 @@ export type MapContentType = "project" | "about" | "experience" | "skillGroup" |
 export type MapEntityType = "point-of-interest" | "spawn-point" | "portal" | "trigger" | "decoration-anchor";
 
 export type SerializedBlockData = {
-  encoding: "flat-edits-v1";
+  encoding: "flat-edits-v1" | "cell-edits-v2";
   generator: "flat-v1";
   edits: MapBlockEdit[];
 };
@@ -178,7 +179,7 @@ export function createMapDefinitionFromWorld(input: {
     },
     blockSize: WORLD_CONFIG.blockSize,
     blocks: {
-      encoding: "flat-edits-v1",
+      encoding: document.cellEncoding ?? "cell-edits-v2",
       generator: "flat-v1",
       edits: document.edits,
     },
@@ -274,7 +275,8 @@ export function duplicateMapDefinition(map: MapDefinition, id: string, name: str
 
 export function mapDefinitionToDocument(map: MapDefinition): MapDocument {
   return {
-    version: 1,
+    version: map.blocks.encoding === "cell-edits-v2" ? 2 : 1,
+    cellEncoding: map.blocks.encoding,
     world: {
       width: WORLD_CONFIG.width,
       depth: WORLD_CONFIG.depth,
@@ -330,8 +332,12 @@ export function validateMapDefinition(input: unknown): MapDefinitionValidationRe
   if (!hasExpectedDimensions(map)) {
     errors.push("Map dimensions must match 64 x 64 x 12 with block size 1.");
   }
-  if (!isRecord(map.blocks) || map.blocks.encoding !== "flat-edits-v1" || map.blocks.generator !== "flat-v1") {
-    errors.push("Map blocks must use flat-edits-v1 storage.");
+  if (
+    !isRecord(map.blocks) ||
+    (map.blocks.encoding !== "flat-edits-v1" && map.blocks.encoding !== "cell-edits-v2") ||
+    map.blocks.generator !== "flat-v1"
+  ) {
+    errors.push("Map blocks must use flat-edits-v1 or cell-edits-v2 storage.");
   } else {
     validateBlockEdits(map.blocks.edits, errors);
   }
@@ -453,9 +459,15 @@ function validateBlockEdits(edits: unknown, errors: string[]) {
       continue;
     }
     const blockId = (edit as Record<string, unknown>).blockId;
+    const shapeId = (edit as Record<string, unknown>).shapeId;
+    const rotation = (edit as Record<string, unknown>).rotation;
+    const state = (edit as Record<string, unknown>).state;
     const key = `${edit.x},${edit.y},${edit.z}`;
     if (seen.has(key)) errors.push(`Duplicate block edit coordinate: ${key}.`);
     if (typeof blockId !== "number" || !isKnownBlockId(blockId)) errors.push(`Unknown block id: ${String(blockId)}.`);
+    if (shapeId !== undefined && (typeof shapeId !== "number" || !isKnownShapeId(shapeId))) errors.push(`Unknown shape id: ${String(shapeId)}.`);
+    if (rotation !== undefined && (typeof rotation !== "number" || !Number.isInteger(rotation) || rotation < 0 || rotation > 3)) errors.push(`Invalid rotation: ${String(rotation)}.`);
+    if (state !== undefined && (typeof state !== "number" || !Number.isInteger(state) || state < 0 || state > 255)) errors.push(`Invalid shape state: ${String(state)}.`);
     seen.add(key);
   }
 }

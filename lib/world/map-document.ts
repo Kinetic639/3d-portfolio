@@ -2,8 +2,19 @@ import { type BlockId, isKnownBlockId } from "./block-registry";
 import { createFlatVoxelWorld, type VoxelWorld } from "./voxel-world";
 import { WORLD_CONFIG, type GridCoordinate } from "./world-config";
 import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
+import {
+  DEFAULT_ROTATION,
+  DEFAULT_SHAPE_ID,
+  DEFAULT_STATE,
+  normalizeRotation,
+  normalizeShapeId,
+  normalizeState,
+  type CellRotation,
+  type ShapeId,
+} from "@/lib/voxel-shapes/shape-ids";
 
 export const MAP_DOCUMENT_VERSION = 1;
+export const MAP_DOCUMENT_CELL_VERSION = 2;
 export const MAP_DOCUMENT_FILENAME = "portfolio-map.v1.json";
 
 export type MapEntityAnchor = {
@@ -17,6 +28,9 @@ export type MapEntityAnchor = {
 
 export type MapBlockEdit = GridCoordinate & {
   blockId: BlockId;
+  shapeId?: ShapeId;
+  rotation?: CellRotation;
+  state?: number;
 };
 
 export type MapZoneAssignment = GridCoordinate & {
@@ -24,7 +38,7 @@ export type MapZoneAssignment = GridCoordinate & {
 };
 
 export type MapDocument = {
-  version: 1;
+  version: 1 | 2;
   world: {
     width: 64;
     depth: 64;
@@ -33,6 +47,7 @@ export type MapDocument = {
     chunkSize: 16;
     generator: "flat-v1";
   };
+  cellEncoding?: "flat-edits-v1" | "cell-edits-v2";
   edits: MapBlockEdit[];
   zones: MapZoneAssignment[];
   entities: MapEntityAnchor[];
@@ -61,8 +76,19 @@ export function serializeMapDocument(world: VoxelWorld, entities: MapEntityAncho
       continue;
     }
 
-    if (blockId !== baseWorld.blocks[index]) {
-      edits.push({ ...coordinates, blockId });
+    const shapeId = normalizeShapeId(world.shapes[index]);
+    const rotation = normalizeRotation(world.rotations[index]);
+    const state = normalizeState(world.states[index]);
+    const hasShapeData = shapeId !== DEFAULT_SHAPE_ID || rotation !== DEFAULT_ROTATION || state !== DEFAULT_STATE;
+
+    if (blockId !== baseWorld.blocks[index] || hasShapeData) {
+      edits.push({
+        ...coordinates,
+        blockId,
+        ...(shapeId !== DEFAULT_SHAPE_ID ? { shapeId } : {}),
+        ...(rotation !== DEFAULT_ROTATION ? { rotation } : {}),
+        ...(state !== DEFAULT_STATE ? { state } : {}),
+      });
     }
 
     const zoneId = world.zones[index];
@@ -75,7 +101,8 @@ export function serializeMapDocument(world: VoxelWorld, entities: MapEntityAncho
   zones.sort(compareCoordinates);
 
   return {
-    version: MAP_DOCUMENT_VERSION,
+    version: MAP_DOCUMENT_CELL_VERSION,
+    cellEncoding: "cell-edits-v2",
     world: {
       width: WORLD_CONFIG.width,
       depth: WORLD_CONFIG.depth,
@@ -95,7 +122,7 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
     return { ok: false, error: "Map document must be a JSON object." };
   }
 
-  if (input.version !== MAP_DOCUMENT_VERSION) {
+  if (input.version !== MAP_DOCUMENT_VERSION && input.version !== MAP_DOCUMENT_CELL_VERSION) {
     return { ok: false, error: `Unsupported map document version: ${String(input.version)}.` };
   }
 
@@ -132,7 +159,8 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
   return {
     ok: true,
     document: {
-      version: MAP_DOCUMENT_VERSION,
+      version: input.version === MAP_DOCUMENT_VERSION ? MAP_DOCUMENT_VERSION : MAP_DOCUMENT_CELL_VERSION,
+      cellEncoding: input.version === MAP_DOCUMENT_VERSION ? "flat-edits-v1" : "cell-edits-v2",
       world: {
         width: WORLD_CONFIG.width,
         depth: WORLD_CONFIG.depth,
@@ -152,7 +180,16 @@ export function createMapStateFromDocument(document: MapDocument): ImportedMapSt
   const world = createFlatVoxelWorld();
 
   for (const edit of document.edits) {
-    world.setBlock(edit.x, edit.y, edit.z, edit.blockId);
+    world.setCell({
+      x: edit.x,
+      y: edit.y,
+      z: edit.z,
+      blockId: edit.blockId,
+      shapeId: edit.shapeId ?? DEFAULT_SHAPE_ID,
+      rotation: edit.rotation ?? DEFAULT_ROTATION,
+      state: edit.state ?? DEFAULT_STATE,
+      zoneId: 0,
+    });
   }
 
   for (const zone of document.zones) {
@@ -187,6 +224,18 @@ function parseBlockEdits(input: unknown): { ok: true; value: MapBlockEdit[] } | 
     if (!isKnownBlockId(value.blockId as number)) {
       return { ok: false, error: `Unknown block id: ${String(value.blockId)}.` };
     }
+    const shapeId = value.shapeId === undefined ? DEFAULT_SHAPE_ID : normalizeShapeId(value.shapeId as number);
+    if (value.shapeId !== undefined && shapeId !== value.shapeId) {
+      return { ok: false, error: `Unknown shape id: ${String(value.shapeId)}.` };
+    }
+    const rotation = value.rotation === undefined ? DEFAULT_ROTATION : normalizeRotation(value.rotation as number);
+    if (value.rotation !== undefined && rotation !== value.rotation) {
+      return { ok: false, error: `Invalid rotation: ${String(value.rotation)}.` };
+    }
+    const state = value.state === undefined ? DEFAULT_STATE : normalizeState(value.state as number);
+    if (value.state !== undefined && state !== value.state) {
+      return { ok: false, error: `Invalid shape state: ${String(value.state)}.` };
+    }
 
     const index = validationWorld.getIndex(value.x, value.y, value.z);
     if (index === null) {
@@ -197,7 +246,15 @@ function parseBlockEdits(input: unknown): { ok: true; value: MapBlockEdit[] } | 
     }
 
     seen.add(index);
-    edits.push({ x: value.x, y: value.y, z: value.z, blockId: value.blockId as BlockId });
+    edits.push({
+      x: value.x,
+      y: value.y,
+      z: value.z,
+      blockId: value.blockId as BlockId,
+      ...(shapeId !== DEFAULT_SHAPE_ID ? { shapeId } : {}),
+      ...(rotation !== DEFAULT_ROTATION ? { rotation } : {}),
+      ...(state !== DEFAULT_STATE ? { state } : {}),
+    });
   }
 
   return { ok: true, value: edits };

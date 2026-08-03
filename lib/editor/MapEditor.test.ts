@@ -3,6 +3,8 @@ import { BLOCK_IDS } from "@/lib/world/block-registry";
 import { serializeMapDocument } from "@/lib/world/map-document";
 import { createFlatVoxelWorld } from "@/lib/world/voxel-world";
 import { MapEditorSession } from "./map-editor";
+import { createTerrainMutations } from "./terrain-brushes";
+import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 
 describe("map editor session", () => {
   it("paints only the intended logical cell", () => {
@@ -158,5 +160,42 @@ describe("map editor session", () => {
     imported.replaceWithDocument(document, true);
 
     expect(serializeMapDocument(imported.world, imported.entities)).toEqual(document);
+  });
+
+  it("undoes and redoes complete shape-aware cell data", () => {
+    const editor = new MapEditorSession();
+    const coordinate = { x: 4, y: 1, z: 5 };
+    const mutations = createTerrainMutations({
+      world: editor.world,
+      operation: "fill",
+      center: coordinate,
+      blockId: BLOCK_IDS.Special,
+      shapeId: SHAPE_IDS.STAIR,
+      rotation: ROTATIONS.EAST,
+      state: 3,
+      zoneId: 2,
+    });
+
+    editor.applyTerrainMutations("Shape fill", mutations);
+    expect(editor.world.getCell(coordinate.x, coordinate.y, coordinate.z)).toMatchObject({
+      blockId: BLOCK_IDS.Special,
+      shapeId: SHAPE_IDS.STAIR,
+      rotation: ROTATIONS.EAST,
+      state: 3,
+      zoneId: 2,
+    });
+
+    editor.undo();
+    expect(editor.world.getBlock(coordinate.x, coordinate.y, coordinate.z)).toBe(BLOCK_IDS.Air);
+    expect(editor.world.getShape(coordinate.x, coordinate.y, coordinate.z)).toBe(SHAPE_IDS.CUBE);
+
+    editor.redo();
+    expect(editor.world.getCell(coordinate.x, coordinate.y, coordinate.z)).toMatchObject({
+      blockId: BLOCK_IDS.Special,
+      shapeId: SHAPE_IDS.STAIR,
+      rotation: ROTATIONS.EAST,
+      state: 3,
+      zoneId: 2,
+    });
   });
 });

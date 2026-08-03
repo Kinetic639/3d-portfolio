@@ -1,6 +1,7 @@
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
 import { WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
+import { DEFAULT_ROTATION, DEFAULT_SHAPE_ID, DEFAULT_STATE, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 
 export type BrushShape = "single" | "square" | "circle";
 export type TerrainBrushOperation =
@@ -28,6 +29,12 @@ export type TerrainCellMutation = {
   coordinate: GridCoordinate;
   beforeBlock: BlockId;
   afterBlock: BlockId;
+  beforeShape: ShapeId;
+  afterShape: ShapeId;
+  beforeRotation: CellRotation;
+  afterRotation: CellRotation;
+  beforeState: number;
+  afterState: number;
   beforeZone: number;
   afterZone: number;
 };
@@ -82,6 +89,9 @@ export function createTerrainMutations(input: {
   center: GridCoordinate;
   settings?: Partial<TerrainBrushSettings>;
   blockId: BlockId;
+  shapeId?: ShapeId;
+  rotation?: CellRotation;
+  state?: number;
   zoneId: number;
 }): TerrainCellMutation[] {
   const settings = { ...DEFAULT_TERRAIN_BRUSH, ...input.settings };
@@ -90,7 +100,7 @@ export function createTerrainMutations(input: {
   const mutations: TerrainCellMutation[] = [];
 
   for (const cell of footprint) {
-    const mutation = createCellMutation(input.world, input.operation, cell, settings, input.blockId, input.zoneId);
+    const mutation = createCellMutation(input.world, input.operation, cell, settings, input.blockId, input.shapeId ?? DEFAULT_SHAPE_ID, input.rotation ?? DEFAULT_ROTATION, input.state ?? DEFAULT_STATE, input.zoneId);
     if (!mutation) continue;
     const key = `${mutation.coordinate.x},${mutation.coordinate.y},${mutation.coordinate.z}`;
     if (seen.has(key)) continue;
@@ -125,6 +135,9 @@ function createCellMutation(
   cell: GridCoordinate,
   settings: TerrainBrushSettings,
   blockId: BlockId,
+  shapeId: ShapeId,
+  rotation: CellRotation,
+  state: number,
   zoneId: number,
 ): TerrainCellMutation | null {
   if (!world.isInsideWorld(cell.x, cell.y, cell.z)) return null;
@@ -132,17 +145,29 @@ function createCellMutation(
   const topY = world.getHighestNonAirY(cell.x, cell.z);
   let target: GridCoordinate = { ...cell };
   let afterBlock = world.getBlock(cell.x, cell.y, cell.z);
+  let afterShape = world.getShape(cell.x, cell.y, cell.z);
+  let afterRotation = world.getRotation(cell.x, cell.y, cell.z);
+  let afterState = world.getState(cell.x, cell.y, cell.z);
   let afterZone = world.getZone(cell.x, cell.y, cell.z);
 
   switch (operation) {
     case "paint":
-    case "fill":
       if (afterBlock === BLOCK_IDS.Air && operation === "paint") return null;
       afterBlock = blockId;
+      break;
+    case "fill":
+      afterBlock = blockId;
+      afterShape = shapeId;
+      afterRotation = rotation;
+      afterState = state;
+      afterZone = zoneId;
       break;
     case "erase":
     case "clear":
       afterBlock = BLOCK_IDS.Air;
+      afterShape = DEFAULT_SHAPE_ID;
+      afterRotation = DEFAULT_ROTATION;
+      afterState = DEFAULT_STATE;
       afterZone = 0;
       break;
     case "raise": {
@@ -150,6 +175,9 @@ function createCellMutation(
       if (y >= WORLD_CONFIG.height) return null;
       target = { x: cell.x, y, z: cell.z };
       afterBlock = blockId === BLOCK_IDS.Air ? BLOCK_IDS.Ground : blockId;
+      afterShape = shapeId;
+      afterRotation = rotation;
+      afterState = state;
       afterZone = world.getZone(target.x, target.y, target.z);
       break;
     }
@@ -157,6 +185,9 @@ function createCellMutation(
       if (topY === null || topY <= 0) return null;
       target = { x: cell.x, y: topY, z: cell.z };
       afterBlock = BLOCK_IDS.Air;
+      afterShape = DEFAULT_SHAPE_ID;
+      afterRotation = DEFAULT_ROTATION;
+      afterState = DEFAULT_STATE;
       afterZone = 0;
       break;
     }
@@ -164,9 +195,15 @@ function createCellMutation(
       const desiredY = Math.max(0, Math.min(WORLD_CONFIG.height - 1, Math.floor(settings.flattenHeight)));
       if (cell.y > desiredY) {
         afterBlock = BLOCK_IDS.Air;
+        afterShape = DEFAULT_SHAPE_ID;
+        afterRotation = DEFAULT_ROTATION;
+        afterState = DEFAULT_STATE;
         afterZone = 0;
       } else if (cell.y === desiredY) {
         afterBlock = blockId === BLOCK_IDS.Air ? BLOCK_IDS.Ground : blockId;
+        afterShape = shapeId;
+        afterRotation = rotation;
+        afterState = state;
       }
       break;
     }
@@ -190,13 +227,28 @@ function createCellMutation(
 
   if (!world.isInsideWorld(target.x, target.y, target.z)) return null;
   const beforeBlock = world.getBlock(target.x, target.y, target.z);
+  const beforeShape = world.getShape(target.x, target.y, target.z);
+  const beforeRotation = world.getRotation(target.x, target.y, target.z);
+  const beforeState = world.getState(target.x, target.y, target.z);
   const beforeZone = world.getZone(target.x, target.y, target.z);
-  if (beforeBlock === afterBlock && beforeZone === afterZone) return null;
+  if (
+    beforeBlock === afterBlock &&
+    beforeShape === afterShape &&
+    beforeRotation === afterRotation &&
+    beforeState === afterState &&
+    beforeZone === afterZone
+  ) return null;
 
   return {
     coordinate: target,
     beforeBlock,
     afterBlock,
+    beforeShape,
+    afterShape: afterBlock === BLOCK_IDS.Air ? DEFAULT_SHAPE_ID : afterShape,
+    beforeRotation,
+    afterRotation: afterBlock === BLOCK_IDS.Air ? DEFAULT_ROTATION : afterRotation,
+    beforeState,
+    afterState: afterBlock === BLOCK_IDS.Air ? DEFAULT_STATE : afterState,
     beforeZone,
     afterZone,
   };

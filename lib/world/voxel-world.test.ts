@@ -2,14 +2,60 @@ import { describe, expect, it } from "vitest";
 import { BLOCK_IDS } from "./block-registry";
 import { EXPECTED_WORLD_STATS, VoxelWorld, createFlatVoxelWorld } from "./voxel-world";
 import { WORLD_CELL_COUNT, WORLD_CONFIG, WORLD_SURFACE_CELL_COUNT, WORLD_AIR_CELL_COUNT } from "./world-config";
+import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 
 describe("voxel world foundation", () => {
   it("allocates the complete logical volume in a compact typed array", () => {
     const world = createFlatVoxelWorld();
 
     expect(world.blocks).toBeInstanceOf(Uint16Array);
+    expect(world.shapes).toBeInstanceOf(Uint8Array);
+    expect(world.rotations).toBeInstanceOf(Uint8Array);
+    expect(world.states).toBeInstanceOf(Uint8Array);
     expect(world.blocks).toHaveLength(WORLD_CELL_COUNT);
+    expect(world.shapes).toHaveLength(WORLD_CELL_COUNT);
+    expect(world.rotations).toHaveLength(WORLD_CELL_COUNT);
+    expect(world.states).toHaveLength(WORLD_CELL_COUNT);
     expect(world.getStats().logicalCells).toBe(49_152);
+  });
+
+  it("stores shape, rotation and state independently from block id", () => {
+    const world = createFlatVoxelWorld();
+
+    expect(world.setCell({
+      x: 4,
+      y: 0,
+      z: 5,
+      blockId: BLOCK_IDS.Path,
+      shapeId: SHAPE_IDS.STAIR,
+      rotation: ROTATIONS.EAST,
+      state: 7,
+      zoneId: 2,
+    })).toBe(true);
+
+    expect(world.getCell(4, 0, 5)).toMatchObject({
+      blockId: BLOCK_IDS.Path,
+      shapeId: SHAPE_IDS.STAIR,
+      rotation: ROTATIONS.EAST,
+      state: 7,
+      zoneId: 2,
+    });
+    expect([...world.dirtyChunks]).toEqual(["chunk-0-0"]);
+  });
+
+  it("resets shape metadata when a cell is erased to Air", () => {
+    const world = createFlatVoxelWorld();
+    world.setCell({ x: 4, y: 0, z: 5, blockId: BLOCK_IDS.Special, shapeId: SHAPE_IDS.SLAB, rotation: ROTATIONS.WEST, state: 1, zoneId: 3 });
+
+    world.setBlock(4, 0, 5, BLOCK_IDS.Air);
+
+    expect(world.getCell(4, 0, 5)).toMatchObject({
+      blockId: BLOCK_IDS.Air,
+      shapeId: SHAPE_IDS.CUBE,
+      rotation: ROTATIONS.NORTH,
+      state: 0,
+      zoneId: 3,
+    });
   });
 
   it("generates a deterministic flat ground layer and leaves upper cells as air", () => {

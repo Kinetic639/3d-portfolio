@@ -1,10 +1,12 @@
 import { getBlockDefinition, isRenderableBlock } from "@/lib/world/block-registry";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
+import { FACE_NEIGHBOUR_OFFSETS, getShapeDefinition, type FaceDirection, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
+import { SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 
-export type SurfaceMaterialFamily = "opaque";
+export type SurfaceMaterialFamily = "opaque" | "water";
 
-export type SurfaceFaceDirection = "px" | "nx" | "py" | "ny" | "pz" | "nz";
+export type SurfaceFaceDirection = FaceDirection;
 
 export type SurfaceFaceMapping = {
   cellIndex: number;
@@ -36,52 +38,6 @@ export type SurfaceChunkMeshData = {
   buildMs: number;
 };
 
-type FaceDefinition = {
-  direction: SurfaceFaceDirection;
-  normal: [number, number, number];
-  neighbourOffset: [number, number, number];
-  corners: Array<[number, number, number]>;
-};
-
-const FACE_DEFINITIONS: FaceDefinition[] = [
-  {
-    direction: "px",
-    normal: [1, 0, 0],
-    neighbourOffset: [1, 0, 0],
-    corners: [[0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [0.5, 0.5, 0.5], [0.5, -0.5, 0.5]],
-  },
-  {
-    direction: "nx",
-    normal: [-1, 0, 0],
-    neighbourOffset: [-1, 0, 0],
-    corners: [[-0.5, -0.5, 0.5], [-0.5, 0.5, 0.5], [-0.5, 0.5, -0.5], [-0.5, -0.5, -0.5]],
-  },
-  {
-    direction: "py",
-    normal: [0, 1, 0],
-    neighbourOffset: [0, 1, 0],
-    corners: [[-0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5]],
-  },
-  {
-    direction: "ny",
-    normal: [0, -1, 0],
-    neighbourOffset: [0, -1, 0],
-    corners: [[-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [-0.5, -0.5, 0.5]],
-  },
-  {
-    direction: "pz",
-    normal: [0, 0, 1],
-    neighbourOffset: [0, 0, 1],
-    corners: [[-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5]],
-  },
-  {
-    direction: "nz",
-    normal: [0, 0, -1],
-    neighbourOffset: [0, 0, -1],
-    corners: [[0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, 0.5, -0.5], [0.5, 0.5, -0.5]],
-  },
-];
-
 const SURFACE_BLOCK_SIZE = 1.01;
 
 export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ: number): SurfaceChunkMeshData {
@@ -112,9 +68,15 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
           continue;
         }
 
-        for (const face of FACE_DEFINITIONS) {
-          const [dx, dy, dz] = face.neighbourOffset;
-          if (occludesFace(world, x + dx, y + dy, z + dz)) {
+        const shapeId = world.getShape(x, y, z);
+        const rotation = world.getRotation(x, y, z);
+        const state = world.getState(x, y, z);
+        const shape = getShapeDefinition(shapeId);
+        const shapeFaces = shape.faces(rotation, state);
+
+        for (const face of shapeFaces) {
+          const [dx, dy, dz] = FACE_NEIGHBOUR_OFFSETS[face.direction];
+          if (occludesFace(world, x + dx, y + dy, z + dz, face)) {
             continue;
           }
 
@@ -151,7 +113,10 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
     id: world.getChunkId(chunkX, chunkZ),
     chunkX,
     chunkZ,
-    materialFamily: "opaque",
+    materialFamily: positions.length > 0 && faceMappings.every((face) => {
+      const coordinate = world.getCoordinates(face.cellIndex);
+      return coordinate ? world.getShape(coordinate.x, coordinate.y, coordinate.z) === SHAPE_IDS.WATER : false;
+    }) ? "water" : "opaque",
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
     colors: new Float32Array(colors),
@@ -187,13 +152,36 @@ export function buildSurfaceChunkMeshes(world: VoxelWorld) {
   };
 }
 
-function occludesFace(world: VoxelWorld, x: number, y: number, z: number) {
+function occludesFace(world: VoxelWorld, x: number, y: number, z: number, face: ShapeFace) {
   if (!world.isInsideWorld(x, y, z)) {
     return false;
   }
 
   const definition = getBlockDefinition(world.getBlock(x, y, z));
-  return definition.renderable && definition.solid;
+  if (!definition.renderable || !definition.solid || face.occlusion !== "full") {
+    return false;
+  }
+
+  const neighbourShape = getShapeDefinition(world.getShape(x, y, z));
+  if (neighbourShape.fluid || !neighbourShape.solid) {
+    return false;
+  }
+
+  return neighbourShape.faces(world.getRotation(x, y, z), world.getState(x, y, z)).some((neighbourFace) => (
+    neighbourFace.occlusion === "full" &&
+    neighbourFace.direction === oppositeDirection(face.direction)
+  ));
+}
+
+function oppositeDirection(direction: SurfaceFaceDirection): SurfaceFaceDirection {
+  switch (direction) {
+    case "px": return "nx";
+    case "nx": return "px";
+    case "py": return "ny";
+    case "ny": return "py";
+    case "pz": return "nz";
+    case "nz": return "pz";
+  }
 }
 
 function hexToRgb(hex: string): [number, number, number] {

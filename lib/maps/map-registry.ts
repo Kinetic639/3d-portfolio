@@ -10,6 +10,7 @@ import {
   createPrefabDiversityStressMapDefinition,
   createPrefabMaximumEntityStressMapDefinition,
   createPrefabRepetitionStressMapDefinition,
+  createTerrainShapeShowcaseMapDefinition,
   createTinyExampleMapDefinition,
 } from "./bundled-maps";
 import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
@@ -51,6 +52,7 @@ const BUNDLED_MAPS: BundledMapSource[] = [
   createBundledEntry(createTinyExampleMapDefinition, "bundled:tiny-example", true),
   createBundledEntry(createPhase45AuthoringTestMapDefinition, "bundled:phase45-authoring-test", true),
   createBundledEntry(createPortfolioV2PrefabShowcaseMapDefinition, "bundled:portfolio-v2-prefab-showcase", true),
+  createBundledEntry(createTerrainShapeShowcaseMapDefinition, "bundled:terrain-shape-showcase", true),
   createBundledEntry(createPrefabCatalogMapDefinition, "bundled:phase49-prefab-catalog", true),
   createBundledEntry(createPrefabDensityTestMapDefinition, "bundled:phase49-prefab-density-test", true),
   createBundledEntry(createPrefabRepetitionStressMapDefinition, "bundled:phase49-prefab-repetition-stress", true),

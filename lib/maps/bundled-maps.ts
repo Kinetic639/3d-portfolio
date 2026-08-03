@@ -15,6 +15,7 @@ import type { MapNavigationDefinition } from "./map-navigation";
 import { BUILT_IN_PREFABS } from "@/lib/prefabs/prefab-library";
 import { groundEntityOnTerrain } from "@/lib/prefabs/prefab-placement";
 import type { PrefabDefinition, PrefabVariantDefinition } from "@/lib/prefabs/prefab-types";
+import { ROTATIONS, SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 
 const PHASE4_CREATED_AT = "2026-08-01T00:00:00.000Z";
 const PHASE5_CREATED_AT = "2026-08-02T00:00:00.000Z";
@@ -150,6 +151,77 @@ export function createPortfolioMainGreyboxBasicBackupMapDefinition(): MapDefinit
       updatedAt: PHASE5_CREATED_AT,
       authoringVersion: "phase-5-basic-backup",
     },
+  });
+}
+
+export function createTerrainShapeShowcaseMapDefinition(): MapDefinition {
+  const world = new VoxelWorld();
+
+  for (let z = 0; z < WORLD_CONFIG.depth; z += 1) {
+    for (let x = 0; x < WORLD_CONFIG.width; x += 1) {
+      world.setBlock(x, 0, z, BLOCK_IDS.Ground);
+    }
+  }
+
+  const place = (x: number, y: number, z: number, blockId: BlockId, shapeId: ShapeId, rotation: CellRotation = ROTATIONS.NORTH, state = 0) => {
+    world.setCell({ x, y, z, blockId, shapeId, rotation, state, zoneId: 0 });
+  };
+
+  const rotations = [ROTATIONS.NORTH, ROTATIONS.EAST, ROTATIONS.SOUTH, ROTATIONS.WEST];
+  rotations.forEach((rotation, index) => {
+    place(8 + index * 2, 1, 10, BLOCK_IDS.Special, SHAPE_IDS.STAIR, rotation);
+    place(8 + index * 2, 1, 14, BLOCK_IDS.ZoneGround, SHAPE_IDS.SLOPE_SHALLOW, rotation);
+    place(8 + index * 2, 1, 18, BLOCK_IDS.Boundary, SHAPE_IDS.SLOPE_STEEP, rotation);
+    place(8 + index * 2, 1, 22, BLOCK_IDS.Special, SHAPE_IDS.SLOPE_OUTER_CORNER, rotation);
+    place(8 + index * 2, 1, 26, BLOCK_IDS.Special, SHAPE_IDS.SLOPE_INNER_CORNER, rotation);
+    place(8 + index * 2, 1, 30, BLOCK_IDS.Special, SHAPE_IDS.CUT_CORNER, rotation);
+  });
+
+  place(20, 1, 10, BLOCK_IDS.ZoneGround, SHAPE_IDS.SLAB, ROTATIONS.NORTH, 0);
+  place(22, 1, 10, BLOCK_IDS.ZoneGround, SHAPE_IDS.SLAB, ROTATIONS.NORTH, 1);
+  place(24, 1, 10, BLOCK_IDS.ZoneGround, SHAPE_IDS.SLAB, ROTATIONS.NORTH, 2);
+  place(30, 1, 10, BLOCK_IDS.Boundary, SHAPE_IDS.WALL);
+  place(32, 1, 10, BLOCK_IDS.Boundary, SHAPE_IDS.BEAM, ROTATIONS.NORTH, 0);
+  place(34, 1, 10, BLOCK_IDS.Boundary, SHAPE_IDS.BEAM, ROTATIONS.NORTH, 1);
+  place(36, 1, 10, BLOCK_IDS.Boundary, SHAPE_IDS.BEAM, ROTATIONS.NORTH, 2);
+  place(40, 1, 10, BLOCK_IDS.Special, SHAPE_IDS.PILLAR_BASE);
+  place(40, 2, 10, BLOCK_IDS.Special, SHAPE_IDS.PILLAR_MIDDLE);
+  place(40, 3, 10, BLOCK_IDS.Special, SHAPE_IDS.PILLAR_CAP);
+
+  [SHAPE_IDS.ROOF_FLAT, SHAPE_IDS.ROOF_SHALLOW, SHAPE_IDS.ROOF_STEEP, SHAPE_IDS.ROOF_OUTER_CORNER, SHAPE_IDS.ROOF_INNER_CORNER].forEach((shapeId, index) => {
+    place(8 + index * 3, 1, 42, BLOCK_IDS.Boundary, shapeId);
+  });
+
+  place(28, 1, 42, BLOCK_IDS.Special, SHAPE_IDS.FENCE);
+  place(31, 1, 42, BLOCK_IDS.Special, SHAPE_IDS.PIPE_SHORT);
+  place(34, 1, 42, BLOCK_IDS.Special, SHAPE_IDS.PIPE_LONG, ROTATIONS.NORTH, 0);
+  place(37, 1, 42, BLOCK_IDS.Special, SHAPE_IDS.PIPE_LONG, ROTATIONS.NORTH, 2);
+  place(40, 1, 42, BLOCK_IDS.Special, SHAPE_IDS.PIPE_CORNER);
+
+  for (let z = 50; z <= 54; z += 1) {
+    for (let x = 8; x <= 14; x += 1) {
+      place(x, 1, z, BLOCK_IDS.Water, SHAPE_IDS.WATER, ROTATIONS.NORTH, (x + z) % 16);
+    }
+  }
+  place(15, 1, 31, BLOCK_IDS.Special, SHAPE_IDS.SLAB);
+  place(16, 1, 31, BLOCK_IDS.Special, SHAPE_IDS.SLAB, ROTATIONS.NORTH, 1);
+  world.clearDirtyChunks();
+
+  return createMapDefinitionFromWorld({
+    id: "terrain-shape-showcase",
+    name: "Terrain Shape Showcase",
+    description: "Development-only diagnostics for registry-driven voxel shapes, chunk boundaries, water and placement supports.",
+    kind: "test",
+    runtimeMode: "dynamic-voxel",
+    world,
+    zones: [],
+    markers: [],
+    spawnPoints: [{ id: "overview", label: "Overview", position: { x: 31, y: 2, z: 31 }, rotationY: 0, cameraTarget: { x: 31, y: 0, z: 31 } }],
+    cameraPresets: [createDefaultOverviewCameraPreset()],
+    defaultSpawnId: "overview",
+    defaultCameraPresetId: "overview",
+    presentation: { legendVisible: false, backgroundId: "neutral-day", environmentId: "graybox" },
+    metadata: { createdAt: PHASE5_CREATED_AT, updatedAt: PHASE5_CREATED_AT, authoringVersion: "shape-registry-v1" },
   });
 }
 

@@ -61,6 +61,8 @@ import { BUILT_IN_PREFABS, listPrefabCategories } from "@/lib/prefabs/prefab-lib
 import type { PrefabCategory } from "@/lib/prefabs/prefab-types";
 import { RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
+import { getShapeDefinition, SHAPE_DEFINITIONS, type ShapeCategory } from "@/lib/voxel-shapes/shape-registry";
+import { SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 
 export type TerrainRenderMode = "instanced" | "surface";
 export type EntityTransformMode = "translate" | "rotate";
@@ -112,6 +114,9 @@ export type EditorInspectorState = {
   hovered: GridCoordinate | null;
   selected: GridCoordinate | null;
   selectedBlockId: BlockId | null;
+  selectedShapeId: ShapeId | null;
+  selectedRotation: CellRotation | null;
+  selectedState: number | null;
   selectedZoneId: number;
   selectedWorldPosition: WorldPosition | null;
   selectedChunk: { chunkX: number; chunkZ: number } | null;
@@ -139,6 +144,10 @@ export type EditorInspectorState = {
   entityColor: string;
   entityName: string;
   brushSettings: TerrainBrushSettings;
+  activeShapeId: ShapeId;
+  activeShapeCategory: ShapeCategory;
+  activeRotation: CellRotation;
+  activeShapeState: number;
   brushAffectedCellCount: number;
   layerStates: EditorLayerState[];
   cleanPreview: boolean;
@@ -155,6 +164,11 @@ export type MapEditorToolbarProps = EditorInspectorState & {
   onLayoutChange?: (layout: EditorViewportLayoutState) => void;
   onToolChange: (tool: EditorTool) => void;
   onPaintBlockChange: (blockId: BlockId) => void;
+  onShapeCategoryChange: (category: ShapeCategory) => void;
+  onShapeChange: (shapeId: ShapeId) => void;
+  onCellRotationChange: (rotation: CellRotation) => void;
+  onShapeStateChange: (state: number) => void;
+  onEyedropperCell: () => void;
   onPresetChange: (presetId: MapPresetId) => void;
   onMapChange: (mapId: string) => void;
   onNewMap: () => void;
@@ -252,6 +266,7 @@ const TOOL_LABELS: Record<EditorTool, string> = {
 const PRIMITIVES: PrimitiveType[] = ["box", "cylinder", "sphere", "plane", "platform", "sign"];
 const COLLISION_MODES: CollisionMode[] = ["none", "blocking", "walkable", "trigger"];
 const NODE_TYPES: NavigationNodeType[] = ["walk", "route-junction", "wait-point", "look-at", "character-spawn", "bird-perch"];
+const SHAPE_CATEGORIES: ShapeCategory[] = ["terrain", "transition", "structure", "roof", "utility", "fluid"];
 const MENU_GROUPS = ["file", "edit", "view", "map", "help"] as const;
 const MAP_PRESET_OPTIONS = MAP_PRESETS;
 const COLLAPSED_SIDE_DOCK_WIDTH = 32;
@@ -376,6 +391,14 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
       if (event.key.toLowerCase() === "g") {
         const layer = props.layerStates.find((item) => item.id === "developmentHelpers");
         if (layer) props.onLayerVisibilityChange("developmentHelpers", !layer.visible);
+      }
+      if (event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        props.onCellRotationChange((((props.activeRotation + (event.shiftKey ? 3 : 1)) % 4) as CellRotation));
+      }
+      if (event.key.toLowerCase() === "f" && props.activeShapeId === SHAPE_IDS.SLAB) {
+        event.preventDefault();
+        props.onShapeStateChange(props.activeShapeState === 1 ? 0 : 1);
       }
       if (event.key === "Escape") {
         if (layout.commandSearchOpen) patchLayout({ commandSearchOpen: false });
@@ -625,6 +648,7 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
   }
 
   const showsBlockPicker = ["paint", "add", "raise", "fill"].includes(props.tool);
+  const showsShapePicker = ["add", "raise", "fill"].includes(props.tool);
   const showsBrushShape = ["paint", "erase", "raise", "lower", "flatten", "fill", "clear", "zone", "removeZone"].includes(props.tool);
   const showsBrushSize = showsBrushShape;
   const showsPathWidth = props.tool === "path" || props.tool === "removePath";
@@ -635,6 +659,7 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
       <label>Preset<select value={props.presetId} onChange={(event) => props.onPresetChange(event.target.value as MapPresetId)}>{MAP_PRESET_OPTIONS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>
       {props.tool === "select" ? <SelectionSummary props={props} /> : null}
       {showsBlockPicker ? <label>Block<select value={props.paintBlockId} onChange={(event) => props.onPaintBlockChange(Number(event.target.value) as BlockId)}>{RENDERABLE_BLOCK_DEFINITIONS.map((block) => <option key={block.id} value={block.id}>{block.displayName}</option>)}</select></label> : null}
+      {showsShapePicker ? <ShapeControls props={props} /> : null}
       {showsBrushShape ? <label>Brush<select value={props.brushSettings.shape} onChange={(event) => props.onBrushShapeChange(event.target.value as BrushShape)}><option value="single">Single</option><option value="square">Square</option><option value="circle">Circle</option></select></label> : null}
       {(showsBrushSize || showsPathWidth) ? (
         <div className="editor-field-row">
@@ -667,6 +692,37 @@ function Outliner({ props, query, onQueryChange }: { props: MapEditorToolbarProp
       <TreeRow label="Spawn Points" value="configured" selected={false} />
       <TreeRow label="Camera Presets" value="configured" selected={false} />
     </Panel>
+  );
+}
+
+function ShapeControls({ props }: { props: MapEditorToolbarProps }) {
+  const shapes = SHAPE_DEFINITIONS.filter((shape) => shape.category === props.activeShapeCategory);
+  const activeShape = getShapeDefinition(props.activeShapeId);
+  const visibleShape = shapes.some((shape) => shape.id === props.activeShapeId) ? props.activeShapeId : shapes[0]?.id ?? SHAPE_IDS.CUBE;
+  const shapeForState = getShapeDefinition(visibleShape);
+
+  return (
+    <Section title="Shape">
+      <label>Category<select value={props.activeShapeCategory} onChange={(event) => props.onShapeCategoryChange(event.target.value as ShapeCategory)}>{SHAPE_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+      <label>Shape<select value={visibleShape} onChange={(event) => props.onShapeChange(Number(event.target.value) as ShapeId)}>{shapes.map((shape) => <option key={shape.id} value={shape.id}>{shape.name}</option>)}</select></label>
+      <label>Rotation<select value={props.activeRotation} onChange={(event) => props.onCellRotationChange(Number(event.target.value) as CellRotation)}><option value={0}>North</option><option value={1}>East</option><option value={2}>South</option><option value={3}>West</option></select></label>
+      {visibleShape === SHAPE_IDS.SLAB ? (
+        <label>Slab<select value={props.activeShapeState} onChange={(event) => props.onShapeStateChange(Number(event.target.value))}><option value={0}>Lower</option><option value={1}>Upper</option><option value={2}>Middle</option></select></label>
+      ) : null}
+      {visibleShape === SHAPE_IDS.WATER ? (
+        <label>Water level<input type="range" min={0} max={15} value={props.activeShapeState} onChange={(event) => props.onShapeStateChange(Number(event.target.value))} /></label>
+      ) : null}
+      {(visibleShape !== SHAPE_IDS.SLAB && visibleShape !== SHAPE_IDS.WATER) ? (
+        <label>State<input type="number" min={0} max={255} value={props.activeShapeState} onChange={(event) => props.onShapeStateChange(Number(event.target.value))} /></label>
+      ) : null}
+      <dl className="editor-mini-summary">
+        <KeyValue label="Active" value={activeShape.name} />
+        <KeyValue label="Layer" value={shapeForState.renderLayer} />
+        <KeyValue label="Walkable" value={shapeForState.walkable ? "yes" : "no"} />
+        <KeyValue label="Support" value={shapeForState.supportsPrefabs ? "yes" : "no"} />
+      </dl>
+      <ActionButton icon="select" disabled={!props.selected} onClick={props.onEyedropperCell}>Eyedropper</ActionButton>
+    </Section>
   );
 }
 
@@ -754,6 +810,7 @@ function WorkspaceOverviewTab({ props, workspace }: { props: MapEditorToolbarPro
       <dl className="editor-metrics-grid">
         <KeyValue label="Tool" value={TOOL_LABELS[props.tool]} />
         <KeyValue label="Block" value={getBlockDefinition(props.paintBlockId).displayName} />
+        <KeyValue label="Shape" value={getShapeDefinition(props.activeShapeId).name} />
         <KeyValue label="Brush cells" value={String(props.brushAffectedCellCount)} mono />
         <KeyValue label="Selected" value={formatCoordinate(props.selected)} mono />
         <KeyValue label="Dirty chunks" value={String(props.dirtyChunks)} mono />
@@ -941,6 +998,9 @@ function SelectionSummary({ props }: { props: MapEditorToolbarProps }) {
       <KeyValue label="Selected" value={formatCoordinate(props.selected)} mono />
       <KeyValue label="Hovered" value={formatCoordinate(props.hovered)} mono />
       <KeyValue label="Block" value={props.selectedBlockId === null ? "-" : getBlockDefinition(props.selectedBlockId).displayName} />
+      <KeyValue label="Shape" value={props.selectedShapeId === null ? "-" : getShapeDefinition(props.selectedShapeId).name} />
+      <KeyValue label="Rotation" value={props.selectedRotation === null ? "-" : String(props.selectedRotation)} mono />
+      <KeyValue label="State" value={props.selectedState === null ? "-" : String(props.selectedState)} mono />
       <KeyValue label="Zone" value={String(props.selectedZoneId)} mono />
     </dl>
   );

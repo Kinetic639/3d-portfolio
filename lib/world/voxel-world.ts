@@ -1,5 +1,16 @@
 import { BLOCK_IDS, type BlockId, isRenderableBlock } from "./block-registry";
 import {
+  DEFAULT_ROTATION,
+  DEFAULT_SHAPE_ID,
+  DEFAULT_STATE,
+  normalizeRotation,
+  normalizeShapeId,
+  normalizeState,
+  SHAPE_IDS,
+  type CellRotation,
+  type ShapeId,
+} from "@/lib/voxel-shapes/shape-ids";
+import {
   CHUNKS_PER_AXIS,
   CHUNK_SURFACE_CELL_COUNT,
   WORLD_AIR_CELL_COUNT,
@@ -25,12 +36,23 @@ export type LocalChunkCoordinate = {
 export type RenderableCell = GridCoordinate & {
   cellIndex: number;
   blockId: BlockId;
+  shapeId: ShapeId;
+  rotation: CellRotation;
+  state: number;
   worldX: number;
   worldY: number;
   worldZ: number;
   expansionDelay: number;
   variation: number;
   isCenterLoaderBlock: boolean;
+};
+
+export type VoxelCell = GridCoordinate & {
+  blockId: BlockId;
+  shapeId: ShapeId;
+  rotation: CellRotation;
+  state: number;
+  zoneId: number;
 };
 
 export type RenderChunk = ChunkCoordinate & {
@@ -65,12 +87,26 @@ export class VoxelWorld {
   readonly config: WorldConfig;
   readonly blocks: Uint16Array;
   readonly zones: Uint8Array;
+  readonly shapes: Uint8Array;
+  readonly rotations: Uint8Array;
+  readonly states: Uint8Array;
   readonly dirtyChunks = new Set<string>();
 
-  constructor(config: WorldConfig = WORLD_CONFIG, blocks?: Uint16Array, zones?: Uint8Array) {
+  constructor(
+    config: WorldConfig = WORLD_CONFIG,
+    blocks?: Uint16Array,
+    zones?: Uint8Array,
+    shapes?: Uint8Array,
+    rotations?: Uint8Array,
+    states?: Uint8Array,
+  ) {
     this.config = config;
-    this.blocks = blocks ?? new Uint16Array(config.width * config.depth * config.height);
-    this.zones = zones ?? new Uint8Array(config.width * config.depth * config.height);
+    const cellCount = config.width * config.depth * config.height;
+    this.blocks = blocks ?? new Uint16Array(cellCount);
+    this.zones = zones ?? new Uint8Array(cellCount);
+    this.shapes = shapes ?? new Uint8Array(cellCount);
+    this.rotations = rotations ?? new Uint8Array(cellCount);
+    this.states = states ?? new Uint8Array(cellCount);
   }
 
   isInsideWorld(x: number, y: number, z: number) {
@@ -119,6 +155,39 @@ export class VoxelWorld {
     return this.blocks[index] as BlockId;
   }
 
+  getShape(x: number, y: number, z: number): ShapeId {
+    const index = this.getIndex(x, y, z);
+    if (index === null) return DEFAULT_SHAPE_ID;
+    return normalizeShapeId(this.shapes[index]);
+  }
+
+  getRotation(x: number, y: number, z: number): CellRotation {
+    const index = this.getIndex(x, y, z);
+    if (index === null) return DEFAULT_ROTATION;
+    return normalizeRotation(this.rotations[index]);
+  }
+
+  getState(x: number, y: number, z: number) {
+    const index = this.getIndex(x, y, z);
+    if (index === null) return DEFAULT_STATE;
+    return normalizeState(this.states[index]);
+  }
+
+  getCell(x: number, y: number, z: number): VoxelCell | null {
+    const index = this.getIndex(x, y, z);
+    if (index === null) return null;
+    return {
+      x,
+      y,
+      z,
+      blockId: this.blocks[index] as BlockId,
+      shapeId: normalizeShapeId(this.shapes[index]),
+      rotation: normalizeRotation(this.rotations[index]),
+      state: normalizeState(this.states[index]),
+      zoneId: this.zones[index],
+    };
+  }
+
   setBlock(x: number, y: number, z: number, blockId: BlockId) {
     const index = this.getIndex(x, y, z);
 
@@ -131,8 +200,75 @@ export class VoxelWorld {
     }
 
     this.blocks[index] = blockId;
+    if (blockId === BLOCK_IDS.Air) {
+      this.shapes[index] = DEFAULT_SHAPE_ID;
+      this.rotations[index] = DEFAULT_ROTATION;
+      this.states[index] = DEFAULT_STATE;
+    } else if (this.shapes[index] === SHAPE_IDS.WATER && blockId !== BLOCK_IDS.Water) {
+      this.shapes[index] = DEFAULT_SHAPE_ID;
+      this.states[index] = DEFAULT_STATE;
+    }
     this.markChunkDirtyForCell(x, z);
 
+    return true;
+  }
+
+  setShape(x: number, y: number, z: number, shapeId: ShapeId) {
+    const index = this.getIndex(x, y, z);
+    if (index === null) return false;
+    const normalizedShape = normalizeShapeId(shapeId);
+    if (this.blocks[index] === BLOCK_IDS.Air && normalizedShape !== DEFAULT_SHAPE_ID) return false;
+    if (this.shapes[index] === normalizedShape) return true;
+    this.shapes[index] = normalizedShape;
+    this.markChunkDirtyForCell(x, z);
+    return true;
+  }
+
+  setRotation(x: number, y: number, z: number, rotation: CellRotation) {
+    const index = this.getIndex(x, y, z);
+    if (index === null) return false;
+    const normalizedRotation = normalizeRotation(rotation);
+    if (this.rotations[index] === normalizedRotation) return true;
+    this.rotations[index] = normalizedRotation;
+    this.markChunkDirtyForCell(x, z);
+    return true;
+  }
+
+  setState(x: number, y: number, z: number, state: number) {
+    const index = this.getIndex(x, y, z);
+    if (index === null) return false;
+    const normalizedState = normalizeState(state);
+    if (this.states[index] === normalizedState) return true;
+    this.states[index] = normalizedState;
+    this.markChunkDirtyForCell(x, z);
+    return true;
+  }
+
+  setCell(cell: VoxelCell) {
+    const index = this.getIndex(cell.x, cell.y, cell.z);
+    if (index === null) return false;
+
+    const blockId = cell.blockId;
+    const shapeId = blockId === BLOCK_IDS.Air ? DEFAULT_SHAPE_ID : normalizeShapeId(cell.shapeId);
+    const rotation = blockId === BLOCK_IDS.Air ? DEFAULT_ROTATION : normalizeRotation(cell.rotation);
+    const state = blockId === BLOCK_IDS.Air ? DEFAULT_STATE : normalizeState(cell.state);
+    const zoneId = Math.max(0, Math.min(255, Math.floor(cell.zoneId)));
+
+    const changed = (
+      this.blocks[index] !== blockId ||
+      this.shapes[index] !== shapeId ||
+      this.rotations[index] !== rotation ||
+      this.states[index] !== state ||
+      this.zones[index] !== zoneId
+    );
+    if (!changed) return true;
+
+    this.blocks[index] = blockId;
+    this.shapes[index] = shapeId;
+    this.rotations[index] = rotation;
+    this.states[index] = state;
+    this.zones[index] = zoneId;
+    this.markChunkDirtyForCell(cell.x, cell.z);
     return true;
   }
 
@@ -346,6 +482,9 @@ export class VoxelWorld {
             z,
             cellIndex,
             blockId,
+            shapeId: this.getShape(x, y, z),
+            rotation: this.getRotation(x, y, z),
+            state: this.getState(x, y, z),
             worldX: worldPosition.x,
             worldY: worldPosition.y,
             worldZ: worldPosition.z,

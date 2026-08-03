@@ -8,6 +8,7 @@ import {
 import { createFlatVoxelWorld, type RenderChunk, type VoxelWorld } from "@/lib/world/voxel-world";
 import type { GridCoordinate } from "@/lib/world/world-config";
 import type { TerrainCellMutation } from "./terrain-brushes";
+import { DEFAULT_ROTATION, DEFAULT_SHAPE_ID, DEFAULT_STATE, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 
 export type EditorTool =
   | "select"
@@ -46,8 +47,16 @@ export type EditorSnapshot = {
 
 type CellChange = {
   coordinate: GridCoordinate;
-  before: BlockId;
-  after: BlockId;
+  before: CellData;
+  after: CellData;
+};
+
+type CellData = {
+  blockId: BlockId;
+  shapeId: ShapeId;
+  rotation: CellRotation;
+  state: number;
+  zoneId: number;
 };
 
 type ZoneChange = {
@@ -169,8 +178,8 @@ export class MapEditorSession {
       label: "Paint",
       cells: [{
         coordinate,
-        before,
-        after: blockId,
+        before: this.captureCell(coordinate),
+        after: { ...this.captureCell(coordinate), blockId },
       }],
     });
   }
@@ -193,8 +202,8 @@ export class MapEditorSession {
       label: "Add Block",
       cells: [{
         coordinate,
-        before,
-        after: blockId,
+        before: this.captureCell(coordinate),
+        after: { blockId, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getZone(coordinate.x, coordinate.y, coordinate.z) },
       }],
     });
   }
@@ -204,8 +213,8 @@ export class MapEditorSession {
       label: "Erase",
       cells: [{
         coordinate,
-        before: this.world.getBlock(coordinate.x, coordinate.y, coordinate.z),
-        after: BLOCK_IDS.Air,
+        before: this.captureCell(coordinate),
+        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: 0 },
       }],
     });
   }
@@ -231,8 +240,8 @@ export class MapEditorSession {
       label: "Raise",
       cells: [{
         coordinate: target,
-        before: this.world.getBlock(target.x, target.y, target.z),
-        after: blockId,
+        before: this.captureCell(target),
+        after: { blockId, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getZone(target.x, target.y, target.z) },
       }],
     });
   }
@@ -259,8 +268,8 @@ export class MapEditorSession {
       label: "Lower",
       cells: [{
         coordinate: target,
-        before: this.world.getBlock(target.x, target.y, target.z),
-        after: BLOCK_IDS.Air,
+        before: this.captureCell(target),
+        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: 0 },
       }],
     });
   }
@@ -270,9 +279,13 @@ export class MapEditorSession {
     const targetBlock = paintBlockId === BLOCK_IDS.Air ? BLOCK_IDS.Ground : paintBlockId;
 
     for (let y = 0; y < this.world.config.height; y += 1) {
-      const before = this.world.getBlock(coordinate.x, y, coordinate.z);
-      const after = y <= coordinate.y ? targetBlock : BLOCK_IDS.Air;
-      cells.push({ coordinate: { x: coordinate.x, y, z: coordinate.z }, before, after });
+      const cellCoordinate = { x: coordinate.x, y, z: coordinate.z };
+      const before = this.captureCell(cellCoordinate);
+      const afterBlock = y <= coordinate.y ? targetBlock : BLOCK_IDS.Air;
+      const after = afterBlock === BLOCK_IDS.Air
+        ? { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: 0 }
+        : { ...before, blockId: afterBlock };
+      cells.push({ coordinate: cellCoordinate, before, after });
     }
 
     return this.applyCommand({ label: "Flatten", cells });
@@ -283,18 +296,43 @@ export class MapEditorSession {
     for (const mutation of mutations) {
       const key = coordinateKey(mutation.coordinate);
       const existing = merged.get(key);
-      merged.set(key, existing ? { ...mutation, beforeBlock: existing.beforeBlock, beforeZone: existing.beforeZone } : mutation);
+      merged.set(key, existing ? {
+          ...mutation,
+          beforeBlock: existing.beforeBlock,
+          beforeShape: existing.beforeShape,
+          beforeRotation: existing.beforeRotation,
+          beforeState: existing.beforeState,
+          beforeZone: existing.beforeZone,
+        } : mutation);
     }
     const uniqueMutations = [...merged.values()];
 
     return this.applyCommand({
       label,
       cells: uniqueMutations
-        .filter((mutation) => mutation.beforeBlock !== mutation.afterBlock)
+        .filter((mutation) => (
+          mutation.beforeBlock !== mutation.afterBlock ||
+          mutation.beforeShape !== mutation.afterShape ||
+          mutation.beforeRotation !== mutation.afterRotation ||
+          mutation.beforeState !== mutation.afterState ||
+          mutation.beforeZone !== mutation.afterZone
+        ))
         .map((mutation) => ({
           coordinate: mutation.coordinate,
-          before: mutation.beforeBlock,
-          after: mutation.afterBlock,
+          before: {
+            blockId: mutation.beforeBlock,
+            shapeId: mutation.beforeShape,
+            rotation: mutation.beforeRotation,
+            state: mutation.beforeState,
+            zoneId: mutation.beforeZone,
+          },
+          after: {
+            blockId: mutation.afterBlock,
+            shapeId: mutation.afterShape,
+            rotation: mutation.afterRotation,
+            state: mutation.afterState,
+            zoneId: mutation.afterZone,
+          },
         })),
       zones: uniqueMutations
         .filter((mutation) => mutation.beforeZone !== mutation.afterZone)
@@ -444,7 +482,7 @@ export class MapEditorSession {
   }
 
   private applyCommand(command: EditorCommand): EditorActionResult {
-    const hasCellChange = command.cells?.some((change) => change.before !== change.after) ?? false;
+    const hasCellChange = command.cells?.some((change) => !sameCellData(change.before, change.after)) ?? false;
     const hasZoneChange = command.zones?.some((change) => change.before !== change.after) ?? false;
     const hasEntityChange = command.entities
       ? JSON.stringify(command.entities.before) !== JSON.stringify(command.entities.after)
@@ -465,7 +503,10 @@ export class MapEditorSession {
 
   private applyCommandState(command: EditorCommand, side: "before" | "after") {
     for (const change of command.cells ?? []) {
-      this.world.setBlock(change.coordinate.x, change.coordinate.y, change.coordinate.z, change[side]);
+      this.world.setCell({
+        ...change.coordinate,
+        ...change[side],
+      });
     }
 
     for (const change of command.zones ?? []) {
@@ -499,6 +540,16 @@ export class MapEditorSession {
     return { changed: rebuiltChunkIds.length > 0, rebuiltChunkIds, rebuiltChunks };
   }
 
+  private captureCell(coordinate: GridCoordinate): CellData {
+    return {
+      blockId: this.world.getBlock(coordinate.x, coordinate.y, coordinate.z),
+      shapeId: this.world.getShape(coordinate.x, coordinate.y, coordinate.z),
+      rotation: this.world.getRotation(coordinate.x, coordinate.y, coordinate.z),
+      state: this.world.getState(coordinate.x, coordinate.y, coordinate.z),
+      zoneId: this.world.getZone(coordinate.x, coordinate.y, coordinate.z),
+    };
+  }
+
   private trimHistory() {
     if (this.undoStack.length > HISTORY_LIMIT) {
       this.undoStack.splice(0, this.undoStack.length - HISTORY_LIMIT);
@@ -508,22 +559,50 @@ export class MapEditorSession {
 
 function collectDocumentCellChanges(before: MapDocument, after: MapDocument): CellChange[] {
   const baseWorld = createFlatVoxelWorld();
-  const beforeMap = new Map(before.edits.map((edit) => [coordinateKey(edit), edit.blockId]));
-  const afterMap = new Map(after.edits.map((edit) => [coordinateKey(edit), edit.blockId]));
+  const beforeMap = new Map(before.edits.map((edit) => [coordinateKey(edit), edit]));
+  const afterMap = new Map(after.edits.map((edit) => [coordinateKey(edit), edit]));
   const keys = new Set([...beforeMap.keys(), ...afterMap.keys()]);
   const changes: CellChange[] = [];
 
   for (const key of keys) {
     const coordinate = parseCoordinateKey(key);
-    const baseBlock = baseWorld.getBlock(coordinate.x, coordinate.y, coordinate.z);
+    const baseCell = {
+      blockId: baseWorld.getBlock(coordinate.x, coordinate.y, coordinate.z),
+      shapeId: baseWorld.getShape(coordinate.x, coordinate.y, coordinate.z),
+      rotation: baseWorld.getRotation(coordinate.x, coordinate.y, coordinate.z),
+      state: baseWorld.getState(coordinate.x, coordinate.y, coordinate.z),
+      zoneId: 0,
+    };
+    const beforeEdit = beforeMap.get(key);
+    const afterEdit = afterMap.get(key);
     changes.push({
       coordinate,
-      before: beforeMap.get(key) ?? baseBlock,
-      after: afterMap.get(key) ?? baseBlock,
+      before: beforeEdit ? editToCellData(beforeEdit, baseCell) : baseCell,
+      after: afterEdit ? editToCellData(afterEdit, baseCell) : baseCell,
     });
   }
 
   return changes;
+}
+
+function editToCellData(edit: MapDocument["edits"][number], fallback: CellData): CellData {
+  return {
+    blockId: edit.blockId,
+    shapeId: edit.shapeId ?? fallback.shapeId,
+    rotation: edit.rotation ?? fallback.rotation,
+    state: edit.state ?? fallback.state,
+    zoneId: fallback.zoneId,
+  };
+}
+
+function sameCellData(left: CellData, right: CellData) {
+  return (
+    left.blockId === right.blockId &&
+    left.shapeId === right.shapeId &&
+    left.rotation === right.rotation &&
+    left.state === right.state &&
+    left.zoneId === right.zoneId
+  );
 }
 
 function collectDocumentZoneChanges(before: MapDocument, after: MapDocument): ZoneChange[] {

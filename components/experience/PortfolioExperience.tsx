@@ -68,6 +68,8 @@ import {
 } from "@/lib/maps/map-registry";
 import type { EditorLayerId, EditorLayerState, EditorViewportLayoutState, EntityTransformMode, MapEditorToolbarProps } from "@/components/experience/MapEditorToolbar";
 import { createBrowsingState, reduceBrowsingState, type BrowsingState } from "@/lib/portfolio/browsing-state";
+import { getShapeDefinition, type ShapeCategory } from "@/lib/voxel-shapes/shape-registry";
+import { DEFAULT_ROTATION, DEFAULT_STATE, SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import { PORTFOLIO_CONTENT, resolveContentReference } from "@/lib/portfolio/content";
 import {
   type ExperiencePhase,
@@ -800,6 +802,10 @@ function ExperienceScene({
   const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities));
   const [tool, setTool] = useState<EditorTool>("select");
   const [paintBlockId, setPaintBlockId] = useState<BlockId>(BLOCK_IDS.Path);
+  const [activeShapeCategory, setActiveShapeCategory] = useState<ShapeCategory>("terrain");
+  const [activeShapeId, setActiveShapeId] = useState<ShapeId>(SHAPE_IDS.CUBE);
+  const [activeRotation, setActiveRotation] = useState<CellRotation>(DEFAULT_ROTATION);
+  const [activeShapeState, setActiveShapeState] = useState(DEFAULT_STATE);
   const [presetId, setPresetId] = useState<MapPresetId>("portfolioCampus");
   const [renderMode, setRenderMode] = useState<TerrainRenderMode>("surface");
   const [zoneId, setZoneId] = useState(1);
@@ -864,6 +870,15 @@ function ExperienceScene({
   const selectedBlockId = selectedCell
     ? editorSession.world.getBlock(selectedCell.x, selectedCell.y, selectedCell.z)
     : null;
+  const selectedShapeId = selectedCell
+    ? editorSession.world.getShape(selectedCell.x, selectedCell.y, selectedCell.z)
+    : null;
+  const selectedRotation = selectedCell
+    ? editorSession.world.getRotation(selectedCell.x, selectedCell.y, selectedCell.z)
+    : null;
+  const selectedState = selectedCell
+    ? editorSession.world.getState(selectedCell.x, selectedCell.y, selectedCell.z)
+    : null;
   const selectedZoneId = selectedCell ? editorSession.world.getZone(selectedCell.x, selectedCell.y, selectedCell.z) : 0;
   const selectedEntity = currentMap.entities.find((entity) => selectedEntityIds.includes(entity.id)) ?? null;
   const brushSettings = useMemo(() => getBrushSettingsForTool(tool, brushSettingsByTool), [brushSettingsByTool, tool]);
@@ -874,9 +889,9 @@ function ExperienceScene({
         return 0;
       }
       void previewRevision;
-      return hoveredCell ? getToolPreviewFootprint(hoveredCell, tool, effectiveBrushSettings, editorSession.world, paintBlockId, zoneId).length : 0;
+      return hoveredCell ? getToolPreviewFootprint(hoveredCell, tool, effectiveBrushSettings, editorSession.world, getActiveTerrainBlockId(paintBlockId, activeShapeId), zoneId).length : 0;
     },
-    [editorSession.world, effectiveBrushSettings, hoveredCell, paintBlockId, previewRevision, tool, zoneId],
+    [activeShapeId, editorSession.world, effectiveBrushSettings, hoveredCell, paintBlockId, previewRevision, tool, zoneId],
   );
   const editorPanelSignature = useMemo(() => JSON.stringify({
     available: editorAvailable,
@@ -885,12 +900,19 @@ function ExperienceScene({
     mapDescription: currentMap.description ?? "",
     tool,
     paintBlockId,
+    activeShapeCategory,
+    activeShapeId,
+    activeRotation,
+    activeShapeState,
     presetId,
     renderMode,
     zoneId,
     hovered: coordinateKeyOrEmpty(hoveredCell),
     selected: coordinateKeyOrEmpty(selectedCell),
     selectedBlockId,
+    selectedShapeId,
+    selectedRotation,
+    selectedState,
     selectedZoneId,
     selectedMarkerId,
     selectedEntityId: selectedEntity?.id ?? "",
@@ -948,6 +970,10 @@ function ExperienceScene({
     lastRebuiltChunks,
     layerStates,
     navigationNodeType,
+    activeRotation,
+    activeShapeCategory,
+    activeShapeId,
+    activeShapeState,
     paintBlockId,
     presetId,
     primitiveType,
@@ -957,6 +983,9 @@ function ExperienceScene({
     renderMode,
     selectedBlockId,
     selectedCell,
+    selectedRotation,
+    selectedShapeId,
+    selectedState,
     selectedEntity?.id,
     selectedEntityIds,
     selectedMarkerId,
@@ -1088,7 +1117,10 @@ function ExperienceScene({
           operation: brushOperation,
           center: editCoordinate,
           settings: effectiveBrushSettings,
-          blockId: brushOperation === "paint-path" ? BLOCK_IDS.Path : paintBlockId,
+          blockId: brushOperation === "paint-path" ? BLOCK_IDS.Path : getActiveTerrainBlockId(paintBlockId, activeShapeId),
+          shapeId: brushOperation === "paint" || brushOperation === "paint-path" || brushOperation === "remove-path" ? undefined : activeShapeId,
+          rotation: activeRotation,
+          state: activeShapeState,
           zoneId,
         }),
       )
@@ -1125,7 +1157,10 @@ function ExperienceScene({
         operation: brushOperation,
         center: editCoordinate,
         settings: effectiveBrushSettings,
-        blockId: brushOperation === "paint-path" ? BLOCK_IDS.Path : paintBlockId,
+        blockId: brushOperation === "paint-path" ? BLOCK_IDS.Path : getActiveTerrainBlockId(paintBlockId, activeShapeId),
+        shapeId: brushOperation === "paint" || brushOperation === "paint-path" || brushOperation === "remove-path" ? undefined : activeShapeId,
+        rotation: activeRotation,
+        state: activeShapeState,
         zoneId,
       });
     });
@@ -1649,12 +1684,19 @@ function ExperienceScene({
       availableMaps,
       tool,
       paintBlockId,
+      activeShapeCategory,
+      activeShapeId,
+      activeRotation,
+      activeShapeState,
       presetId,
       renderMode,
       zoneId,
       hovered: hoveredCell,
       selected: selectedCell,
       selectedBlockId,
+      selectedShapeId,
+      selectedRotation,
+      selectedState,
       selectedZoneId,
       selectedWorldPosition,
       selectedChunk,
@@ -1692,6 +1734,43 @@ function ExperienceScene({
       validationSummary,
       onToolChange: setTool,
       onPaintBlockChange: setPaintBlockId,
+      onShapeCategoryChange: (category) => {
+        setActiveShapeCategory(category);
+        const nextShape = getShapeDefinition(activeShapeId).category === category
+          ? activeShapeId
+          : category === "fluid"
+            ? SHAPE_IDS.WATER
+            : category === "transition"
+              ? SHAPE_IDS.STAIR
+              : category === "structure"
+                ? SHAPE_IDS.WALL
+                : category === "roof"
+                  ? SHAPE_IDS.ROOF_FLAT
+                  : SHAPE_IDS.CUBE;
+        setActiveShapeId(nextShape);
+        setActiveShapeState(DEFAULT_STATE);
+        if (nextShape === SHAPE_IDS.WATER) setPaintBlockId(BLOCK_IDS.Water);
+      },
+      onShapeChange: (shapeId) => {
+        const shape = getShapeDefinition(shapeId);
+        setActiveShapeId(shape.id);
+        setActiveShapeCategory(shape.category);
+        setActiveShapeState(DEFAULT_STATE);
+        if (shape.id === SHAPE_IDS.WATER) setPaintBlockId(BLOCK_IDS.Water);
+      },
+      onCellRotationChange: setActiveRotation,
+      onShapeStateChange: (state) => setActiveShapeState(Math.max(0, Math.min(255, Math.floor(state) || 0))),
+      onEyedropperCell: () => {
+        if (!selectedCell) return;
+        const cell = editorSession.world.getCell(selectedCell.x, selectedCell.y, selectedCell.z);
+        if (!cell) return;
+        setPaintBlockId(cell.blockId);
+        setActiveShapeId(cell.shapeId);
+        setActiveShapeCategory(getShapeDefinition(cell.shapeId).category);
+        setActiveRotation(cell.rotation);
+        setActiveShapeState(cell.state);
+        setEditorMessage({ type: "info", text: "Cell copied to terrain brush." });
+      },
       onPresetChange: handlePresetChange,
       onMapChange: handleMapChange,
       onNewMap: handleNewMap,
@@ -2281,6 +2360,16 @@ function SurfaceTerrainChunks({
       }),
     [],
   );
+  const waterMaterial = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        vertexColors: true,
+        side: THREE.FrontSide,
+        transparent: true,
+        opacity: 0.78,
+      }),
+    [],
+  );
   const warmupMaterial = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -2296,14 +2385,15 @@ function SurfaceTerrainChunks({
   useEffect(() => {
     return () => {
       material.dispose();
+      waterMaterial.dispose();
       warmupMaterial.dispose();
     };
-  }, [material, warmupMaterial]);
+  }, [material, warmupMaterial, waterMaterial]);
 
   return (
     <group visible={visible}>
       {chunks.map((chunk) => (
-        <SurfaceTerrainChunkMesh key={chunk.id} chunk={chunk} material={warmup ? warmupMaterial : material} />
+        <SurfaceTerrainChunkMesh key={chunk.id} chunk={chunk} material={warmup ? warmupMaterial : chunk.materialFamily === "water" ? waterMaterial : material} />
       ))}
     </group>
   );
@@ -3995,6 +4085,8 @@ function getBrushPreviewStyle(tool: EditorTool): "surface" | "cube" {
 
 function getTerrainBrushOperation(tool: EditorTool): TerrainBrushOperation | null {
   switch (tool) {
+    case "add":
+      return "fill";
     case "paint":
       return "paint";
     case "erase":
@@ -4020,6 +4112,10 @@ function getTerrainBrushOperation(tool: EditorTool): TerrainBrushOperation | nul
     default:
       return null;
   }
+}
+
+function getActiveTerrainBlockId(blockId: BlockId, shapeId: ShapeId): BlockId {
+  return shapeId === SHAPE_IDS.WATER ? BLOCK_IDS.Water : blockId === BLOCK_IDS.Water ? BLOCK_IDS.Ground : blockId;
 }
 
 function isStrokeBrushTool(tool: EditorTool) {

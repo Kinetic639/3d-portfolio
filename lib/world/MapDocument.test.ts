@@ -7,6 +7,7 @@ import {
   type MapDocument,
 } from "./map-document";
 import { createFlatVoxelWorld } from "./voxel-world";
+import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 
 describe("map document format", () => {
   it("exports and imports deterministic world differences, zones and entities", () => {
@@ -45,6 +46,71 @@ describe("map document format", () => {
       { x: 1, y: 0, z: 3, blockId: BLOCK_IDS.Path },
       { x: 9, y: 2, z: 9, blockId: BLOCK_IDS.Special },
     ]);
+  });
+
+  it("migrates v1 flat edits to cube/default metadata", () => {
+    const document: MapDocument = {
+      version: 1,
+      world: {
+        width: 64,
+        depth: 64,
+        height: 12,
+        blockSize: 1,
+        chunkSize: 16,
+        generator: "flat-v1",
+      },
+      edits: [{ x: 8, y: 1, z: 9, blockId: BLOCK_IDS.Special }],
+      zones: [],
+      entities: [],
+    };
+
+    const parsed = parseMapDocument(document);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const imported = createMapStateFromDocument(parsed.document);
+    expect(imported.world.getCell(8, 1, 9)).toMatchObject({
+      blockId: BLOCK_IDS.Special,
+      shapeId: SHAPE_IDS.CUBE,
+      rotation: ROTATIONS.NORTH,
+      state: 0,
+    });
+  });
+
+  it("round trips cell-edits-v2 shape metadata compactly", () => {
+    const world = createFlatVoxelWorld();
+    world.setCell({
+      x: 10,
+      y: 1,
+      z: 11,
+      blockId: BLOCK_IDS.Special,
+      shapeId: SHAPE_IDS.SLAB,
+      rotation: ROTATIONS.SOUTH,
+      state: 1,
+      zoneId: 0,
+    });
+
+    const document = serializeMapDocument(world, []);
+    const imported = createMapStateFromDocument(document);
+
+    expect(document.version).toBe(2);
+    expect(document.cellEncoding).toBe("cell-edits-v2");
+    expect(document.edits).toContainEqual({
+      x: 10,
+      y: 1,
+      z: 11,
+      blockId: BLOCK_IDS.Special,
+      shapeId: SHAPE_IDS.SLAB,
+      rotation: ROTATIONS.SOUTH,
+      state: 1,
+    });
+    expect(imported.world.getCell(10, 1, 11)).toMatchObject({
+      blockId: BLOCK_IDS.Special,
+      shapeId: SHAPE_IDS.SLAB,
+      rotation: ROTATIONS.SOUTH,
+      state: 1,
+    });
+    expect(serializeMapDocument(imported.world, imported.entities)).toEqual(document);
   });
 
   it("rejects invalid document versions and coordinates without mutating current worlds", () => {

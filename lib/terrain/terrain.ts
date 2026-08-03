@@ -1,5 +1,6 @@
 import { createFlatVoxelWorld, type RenderChunk, type RenderableCell, type VoxelWorld } from "@/lib/world/voxel-world";
 import { getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
+import type { CellRotation, ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import { buildSurfaceChunkMeshes, type SurfaceChunkMeshData } from "./surface-mesher";
 import {
   CHUNK_SURFACE_CELL_COUNT,
@@ -23,6 +24,9 @@ export type TerrainCell = {
   index: number;
   cellIndex: number;
   blockId: BlockId;
+  shapeId: ShapeId;
+  rotation: CellRotation;
+  state: number;
   x: number;
   y: number;
   z: number;
@@ -104,6 +108,9 @@ function toTerrainCell(cell: RenderableCell, index: number): TerrainCell {
     index,
     cellIndex: cell.cellIndex,
     blockId: cell.blockId,
+    shapeId: cell.shapeId,
+    rotation: cell.rotation,
+    state: cell.state,
     x: cell.x,
     y: cell.y,
     z: cell.z,
