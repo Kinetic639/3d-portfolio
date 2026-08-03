@@ -409,9 +409,20 @@ function getProjectsBaseHeight(x: number, z: number) {
 }
 
 function getAboutBaseHeight(x: number, z: number) {
-  if (!isInsideAuthoredMask(x, z, 43, 54, 20, 10)) return 0;
-  if (x >= 36 && x <= 48 && z >= 48 && z <= 56) return 1;
-  return falloff(x, z, 52, 51, 9, 6) > 0.5 ? 2 : 1;
+  const broadYard = isInsideAuthoredMask(x, z, 45, 55, 22, 11);
+  const southeastCorner = x >= 38 && x <= 62 && z >= 48 && z <= 62;
+  if (!broadYard && !southeastCorner) return 0;
+
+  const housePad = x >= 37 && x <= 49 && z >= 49 && z <= 56;
+  if (housePad) return 1;
+
+  let height = 1;
+  const gardenRise = falloff(x, z, 56, 52, 8, 6);
+  const southBank = falloff(x, z, 47, 61, 12, 4);
+
+  if (gardenRise > 0.72 || southBank > 0.82) height = 2;
+
+  return height;
 }
 
 function getContactBaseHeight(x: number, z: number) {
@@ -431,11 +442,11 @@ function carveMainWaterSystem(x: number, z: number, height: number) {
   if (stream && stream.distance < 1.25) return 0;
   if (stream && stream.distance < 2.35) height = Math.min(height, 1);
 
-  const pond = falloff(x, z, 43, 54, 6, 4);
+  const pond = falloff(x, z, 44, 55, 7, 5);
   if (pond > 0.22) return 0;
   if (pond > 0) height = Math.min(height, 1);
 
-  const outlet = nearestPrimaryRoutePoint(x, z, [[48, 56], [54, 59], [59, 63]]);
+  const outlet = nearestPrimaryRoutePoint(x, z, [[49, 57], [55, 60], [60, 63]]);
   if (outlet && outlet.distance < 1.15) return 0;
 
   return height;
