@@ -436,7 +436,7 @@ export default function PortfolioExperience({
               />
             </Canvas>
           </div>
-          {benchmarkMode ? null : <ExperienceOverlay phase={phase} />}
+          {benchmarkMode ? null : <ExperienceOverlay phase={phase} showEditorCompass={editorActive} />}
           {metrics && !editorActive ? (
             process.env.NODE_ENV === "production" ? (
               <ProductionFpsBadge metrics={metrics} />
@@ -503,7 +503,7 @@ const COMPASS_DIRECTIONS: Array<{ id: CompassDirection; label: string; shortLabe
   { id: "northwest", label: "North West", shortLabel: "NW" },
 ];
 
-function ExperienceOverlay({ phase }: { phase: ExperiencePhase }) {
+function ExperienceOverlay({ phase, showEditorCompass }: { phase: ExperiencePhase; showEditorCompass: boolean }) {
   const resetView = useExperienceStore((state) => state.resetView);
   const isAngleLocked = useExperienceStore((state) => state.isAngleLocked);
   const toggleAngleLock = useExperienceStore((state) => state.toggleAngleLock);
@@ -514,7 +514,7 @@ function ExperienceOverlay({ phase }: { phase: ExperiencePhase }) {
         <div className="overlay-actions">
           {phase === "explore" ? (
             <>
-              <ViewportCompass />
+              {showEditorCompass ? <ViewportCompass /> : null}
               <button
                 className="overlay-icon-button"
                 type="button"
@@ -550,15 +550,16 @@ function ViewportCompass() {
 
   return (
     <div className="viewport-compass" aria-label={`Camera facing ${direction}`}>
-      <div className="viewport-compass__dial">
-        <Compass aria-hidden="true" size={14} />
-        <span style={{ transform: `rotate(${heading}rad)` }} aria-hidden="true" />
+      <div className="viewport-compass__face" aria-hidden="true">
+        <Compass size={14} />
+        <span className="viewport-compass__needle" style={{ transform: `rotate(${heading}rad)` }} />
         <strong>{direction}</strong>
       </div>
       <div className="viewport-compass__buttons" aria-label="Snap camera direction">
         {COMPASS_DIRECTIONS.map((item) => (
           <button
             key={item.id}
+            data-direction={item.id}
             type="button"
             onClick={() => snapCompassDirection(item.id)}
             title={`Face ${item.label}`}
