@@ -1,6 +1,7 @@
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import { VoxelWorld } from "@/lib/world/voxel-world";
 import { WORLD_CONFIG } from "@/lib/world/world-config";
+import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 
 export type MapPresetId =
   | "flat"
@@ -11,6 +12,7 @@ export type MapPresetId =
   | "diagnosticRowZ"
   | "diagnosticBoundaries"
   | "diagnosticChunkBoundary"
+  | "zoneTerrainManual"
   | "portfolioCampus"
   | "terracedIslands"
   | "denseCity"
@@ -64,6 +66,11 @@ export const MAP_PRESETS: MapPresetDefinition[] = [
     description: "Blocks spanning a chunk boundary.",
   },
   {
+    id: "zoneTerrainManual",
+    name: "Zone terrain manual",
+    description: "Flat, steps, slab, slope, hill and hole for zone overlay inspection.",
+  },
+  {
     id: "portfolioCampus",
     name: "Portfolio campus",
     description: "Low buildings, paths, plazas and sparse detail.",
@@ -101,6 +108,8 @@ export function createMapPresetWorld(presetId: MapPresetId) {
       return createDiagnosticBoundariesPreset();
     case "diagnosticChunkBoundary":
       return createDiagnosticChunkBoundaryPreset();
+    case "zoneTerrainManual":
+      return createZoneTerrainManualPreset();
     case "portfolioCampus":
       return createPortfolioCampusPreset();
     case "terracedIslands":
@@ -181,6 +190,39 @@ function createDiagnosticChunkBoundaryPreset() {
   world.setBlock(31, 1, 16, BLOCK_IDS.ZoneGround);
   preserveCenterPlaza(world);
   world.clearDirtyChunks();
+  return world;
+}
+
+function createZoneTerrainManualPreset() {
+  const world = createBaseWorld();
+
+  forRect(world, 8, 8, 21, 18, 0, BLOCK_IDS.ZoneGround);
+  addColumn(world, 11, 12, 2, BLOCK_IDS.ZoneGround);
+  addColumn(world, 12, 12, 3, BLOCK_IDS.ZoneGround);
+  addColumn(world, 13, 12, 4, BLOCK_IDS.ZoneGround);
+  world.setCell({ x: 15, y: 1, z: 12, blockId: BLOCK_IDS.Special, shapeId: SHAPE_IDS.SLAB, rotation: ROTATIONS.NORTH, state: 0, zoneId: 1 });
+  world.setCell({ x: 16, y: 1, z: 12, blockId: BLOCK_IDS.Special, shapeId: SHAPE_IDS.STAIR, rotation: ROTATIONS.EAST, state: 0, zoneId: 1 });
+  world.setCell({ x: 17, y: 1, z: 12, blockId: BLOCK_IDS.Special, shapeId: SHAPE_IDS.SLOPE_STEEP, rotation: ROTATIONS.SOUTH, state: 0, zoneId: 1 });
+  for (let z = 22; z <= 32; z += 1) {
+    for (let x = 8; x <= 18; x += 1) {
+      const distance = Math.hypot(x - 13, z - 27);
+      const height = Math.max(1, 4 - Math.floor(distance));
+      addColumn(world, x, z, height, BLOCK_IDS.Ground);
+      world.setColumnZone(x, z, 2);
+    }
+  }
+  carveColumn(world, 19, 12, WORLD_CONFIG.height);
+  world.setColumnZone(19, 12, 1);
+  for (let x = 8; x <= 21; x += 1) {
+    for (let z = 8; z <= 18; z += 1) {
+      if (x === 19 && z === 12) continue;
+      world.setColumnZone(x, z, 1);
+    }
+  }
+
+  preserveCenterPlaza(world);
+  world.clearDirtyChunks();
+  world.clearDirtyZoneChunks();
   return world;
 }
 

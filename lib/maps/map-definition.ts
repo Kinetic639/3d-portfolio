@@ -103,7 +103,7 @@ export type MapPresentationConfig = {
 };
 
 export type MapDefinition = {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   id: string;
   name: string;
   description?: string;
@@ -275,8 +275,9 @@ export function duplicateMapDefinition(map: MapDefinition, id: string, name: str
 
 export function mapDefinitionToDocument(map: MapDefinition): MapDocument {
   return {
-    version: map.blocks.encoding === "cell-edits-v2" ? 2 : 1,
+    version: map.blocks.encoding === "cell-edits-v2" ? 3 : 1,
     cellEncoding: map.blocks.encoding,
+    zoneEncoding: "column-zones-v2",
     world: {
       width: WORLD_CONFIG.width,
       depth: WORLD_CONFIG.depth,
@@ -480,12 +481,12 @@ function validateZoneAssignments(assignments: unknown, validZoneNumbers: Set<num
 
   const seen = new Set<string>();
   for (const assignment of assignments) {
-    if (!isRecord(assignment) || !isGridCoordinate(assignment)) {
-      errors.push("Every zone assignment must include integer x, y and z.");
+    if (!isRecord(assignment) || !isZoneCoordinate(assignment)) {
+      errors.push("Every zone assignment must include integer x and z.");
       continue;
     }
     const zoneId = (assignment as Record<string, unknown>).zoneId;
-    const key = `${assignment.x},${assignment.y},${assignment.z}`;
+    const key = `${assignment.x},${assignment.z}`;
     if (seen.has(key)) errors.push(`Duplicate zone assignment coordinate: ${key}.`);
     if (typeof zoneId !== "number" || !validZoneNumbers.has(zoneId)) {
       errors.push(`Zone assignment ${key} references unknown numeric zone ${String(zoneId)}.`);
@@ -705,6 +706,24 @@ function isGridCoordinate(value: unknown): value is GridCoordinate {
     x < WORLD_CONFIG.width &&
     y >= 0 &&
     y < WORLD_CONFIG.height &&
+    z >= 0 &&
+    z < WORLD_CONFIG.depth
+  );
+}
+
+function isZoneCoordinate(value: unknown): value is MapZoneAssignment {
+  if (!isRecord(value)) return false;
+  const x = value.x;
+  const y = value.y;
+  const z = value.z;
+  return (
+    typeof x === "number" &&
+    typeof z === "number" &&
+    (y === undefined || (typeof y === "number" && Number.isInteger(y) && y >= 0 && y < WORLD_CONFIG.height)) &&
+    Number.isInteger(x) &&
+    Number.isInteger(z) &&
+    x >= 0 &&
+    x < WORLD_CONFIG.width &&
     z >= 0 &&
     z < WORLD_CONFIG.depth
   );

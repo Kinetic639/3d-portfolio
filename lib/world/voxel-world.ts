@@ -91,6 +91,7 @@ export class VoxelWorld {
   readonly rotations: Uint8Array;
   readonly states: Uint8Array;
   readonly dirtyChunks = new Set<string>();
+  readonly dirtyZoneChunks = new Set<string>();
 
   constructor(
     config: WorldConfig = WORLD_CONFIG,
@@ -102,11 +103,15 @@ export class VoxelWorld {
   ) {
     this.config = config;
     const cellCount = config.width * config.depth * config.height;
+    const zoneCount = config.width * config.depth;
     this.blocks = blocks ?? new Uint16Array(cellCount);
-    this.zones = zones ?? new Uint8Array(cellCount);
+    this.zones = normalizeZoneLayer(config, zones);
     this.shapes = shapes ?? new Uint8Array(cellCount);
     this.rotations = rotations ?? new Uint8Array(cellCount);
     this.states = states ?? new Uint8Array(cellCount);
+    if (this.zones.length !== zoneCount) {
+      throw new RangeError(`Zone layer must contain ${zoneCount} columns.`);
+    }
   }
 
   isInsideWorld(x: number, y: number, z: number) {
@@ -184,7 +189,7 @@ export class VoxelWorld {
       shapeId: normalizeShapeId(this.shapes[index]),
       rotation: normalizeRotation(this.rotations[index]),
       state: normalizeState(this.states[index]),
-      zoneId: this.zones[index],
+      zoneId: this.getZone(x, y, z),
     };
   }
 
@@ -259,7 +264,7 @@ export class VoxelWorld {
       this.shapes[index] !== shapeId ||
       this.rotations[index] !== rotation ||
       this.states[index] !== state ||
-      this.zones[index] !== zoneId
+      this.getZone(cell.x, cell.y, cell.z) !== zoneId
     );
     if (!changed) return true;
 
@@ -267,13 +272,14 @@ export class VoxelWorld {
     this.shapes[index] = shapeId;
     this.rotations[index] = rotation;
     this.states[index] = state;
-    this.zones[index] = zoneId;
+    this.setZone(cell.x, cell.y, cell.z, zoneId);
     this.markChunkDirtyForCell(cell.x, cell.z);
     return true;
   }
 
   getZone(x: number, y: number, z: number) {
-    const index = this.getIndex(x, y, z);
+    void y;
+    const index = this.getZoneIndex(x, z);
 
     if (index === null) {
       return 0;
@@ -283,15 +289,47 @@ export class VoxelWorld {
   }
 
   setZone(x: number, y: number, z: number, zoneId: number) {
-    const index = this.getIndex(x, y, z);
+    void y;
+    const index = this.getZoneIndex(x, z);
 
     if (index === null || !Number.isInteger(zoneId) || zoneId < 0 || zoneId > 255) {
       return false;
     }
 
+    if (this.zones[index] === zoneId) {
+      return true;
+    }
+
     this.zones[index] = zoneId;
+    this.markZoneChunkDirtyForColumn(x, z);
 
     return true;
+  }
+
+  getZoneIndex(x: number, z: number) {
+    if (!Number.isInteger(x) || !Number.isInteger(z) || x < 0 || x >= this.config.width || z < 0 || z >= this.config.depth) {
+      return null;
+    }
+
+    return x + this.config.width * z;
+  }
+
+  getZoneCoordinates(index: number): Pick<GridCoordinate, "x" | "z"> | null {
+    if (!Number.isInteger(index) || index < 0 || index >= this.zones.length) {
+      return null;
+    }
+
+    const z = Math.floor(index / this.config.width);
+    const x = index - z * this.config.width;
+    return { x, z };
+  }
+
+  getColumnZone(x: number, z: number) {
+    return this.getZone(x, 0, z);
+  }
+
+  setColumnZone(x: number, z: number, zoneId: number) {
+    return this.setZone(x, 0, z, zoneId);
   }
 
   getHighestNonAirY(x: number, z: number) {
@@ -384,6 +422,16 @@ export class VoxelWorld {
     this.dirtyChunks.clear();
   }
 
+  markZoneChunkDirtyForColumn(x: number, z: number) {
+    const chunk = this.getChunkCoordinates(x, z);
+    if (!chunk) return;
+    this.dirtyZoneChunks.add(this.getChunkId(chunk.chunkX, chunk.chunkZ));
+  }
+
+  clearDirtyZoneChunks() {
+    this.dirtyZoneChunks.clear();
+  }
+
   getStats(): WorldStats {
     let nonAirBlocks = 0;
     let renderedInstances = 0;
@@ -397,6 +445,9 @@ export class VoxelWorld {
       if (isRenderableBlock(blockId)) {
         renderedInstances += 1;
       }
+    }
+
+    for (let index = 0; index < this.zones.length; index += 1) {
       if (this.zones[index] !== 0) {
         zoneAssignments += 1;
       }
@@ -569,6 +620,30 @@ export function createFlatVoxelWorld() {
   world.clearDirtyChunks();
 
   return world;
+}
+
+function normalizeZoneLayer(config: WorldConfig, zones?: Uint8Array) {
+  const columnCount = config.width * config.depth;
+  const cellCount = columnCount * config.height;
+  if (!zones) return new Uint8Array(columnCount);
+  if (zones.length === columnCount) return new Uint8Array(zones);
+  if (zones.length !== cellCount) {
+    throw new RangeError(`Zone array must contain ${columnCount} columns or ${cellCount} legacy cells.`);
+  }
+
+  const columns = new Uint8Array(columnCount);
+  for (let y = 0; y < config.height; y += 1) {
+    for (let z = 0; z < config.depth; z += 1) {
+      for (let x = 0; x < config.width; x += 1) {
+        const legacyIndex = x + config.width * (z + config.depth * y);
+        const zoneId = zones[legacyIndex];
+        if (zoneId !== 0) {
+          columns[x + config.width * z] = zoneId;
+        }
+      }
+    }
+  }
+  return columns;
 }
 
 export const EXPECTED_WORLD_STATS = {

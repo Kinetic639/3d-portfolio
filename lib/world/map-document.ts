@@ -15,6 +15,7 @@ import {
 
 export const MAP_DOCUMENT_VERSION = 1;
 export const MAP_DOCUMENT_CELL_VERSION = 2;
+export const MAP_DOCUMENT_ZONE_VERSION = 3;
 export const MAP_DOCUMENT_FILENAME = "portfolio-map.v1.json";
 
 export type MapEntityAnchor = {
@@ -33,12 +34,13 @@ export type MapBlockEdit = GridCoordinate & {
   state?: number;
 };
 
-export type MapZoneAssignment = GridCoordinate & {
+export type MapZoneAssignment = Pick<GridCoordinate, "x" | "z"> & {
+  y?: number;
   zoneId: number;
 };
 
 export type MapDocument = {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   world: {
     width: 64;
     depth: 64;
@@ -48,6 +50,7 @@ export type MapDocument = {
     generator: "flat-v1";
   };
   cellEncoding?: "flat-edits-v1" | "cell-edits-v2";
+  zoneEncoding?: "voxel-zones-v1" | "column-zones-v2";
   edits: MapBlockEdit[];
   zones: MapZoneAssignment[];
   entities: MapEntityAnchor[];
@@ -90,7 +93,13 @@ export function serializeMapDocument(world: VoxelWorld, entities: MapEntityAncho
         ...(state !== DEFAULT_STATE ? { state } : {}),
       });
     }
+  }
 
+  for (let index = 0; index < world.zones.length; index += 1) {
+    const coordinates = world.getZoneCoordinates(index);
+    if (!coordinates) {
+      continue;
+    }
     const zoneId = world.zones[index];
     if (zoneId !== 0) {
       zones.push({ ...coordinates, zoneId });
@@ -98,11 +107,12 @@ export function serializeMapDocument(world: VoxelWorld, entities: MapEntityAncho
   }
 
   edits.sort(compareCoordinates);
-  zones.sort(compareCoordinates);
+  zones.sort(compareZoneAssignments);
 
   return {
-    version: MAP_DOCUMENT_CELL_VERSION,
+    version: MAP_DOCUMENT_ZONE_VERSION,
     cellEncoding: "cell-edits-v2",
+    zoneEncoding: "column-zones-v2",
     world: {
       width: WORLD_CONFIG.width,
       depth: WORLD_CONFIG.depth,
@@ -122,7 +132,7 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
     return { ok: false, error: "Map document must be a JSON object." };
   }
 
-  if (input.version !== MAP_DOCUMENT_VERSION && input.version !== MAP_DOCUMENT_CELL_VERSION) {
+  if (input.version !== MAP_DOCUMENT_VERSION && input.version !== MAP_DOCUMENT_CELL_VERSION && input.version !== MAP_DOCUMENT_ZONE_VERSION) {
     return { ok: false, error: `Unsupported map document version: ${String(input.version)}.` };
   }
 
@@ -159,8 +169,9 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
   return {
     ok: true,
     document: {
-      version: input.version === MAP_DOCUMENT_VERSION ? MAP_DOCUMENT_VERSION : MAP_DOCUMENT_CELL_VERSION,
+      version: input.version === MAP_DOCUMENT_VERSION ? MAP_DOCUMENT_VERSION : input.version === MAP_DOCUMENT_CELL_VERSION ? MAP_DOCUMENT_CELL_VERSION : MAP_DOCUMENT_ZONE_VERSION,
       cellEncoding: input.version === MAP_DOCUMENT_VERSION ? "flat-edits-v1" : "cell-edits-v2",
+      zoneEncoding: input.version === MAP_DOCUMENT_ZONE_VERSION ? "column-zones-v2" : "voxel-zones-v1",
       world: {
         width: WORLD_CONFIG.width,
         depth: WORLD_CONFIG.depth,
@@ -170,7 +181,7 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
         generator: "flat-v1",
       },
       edits: edits.value.sort(compareCoordinates),
-      zones: zones.value.sort(compareCoordinates),
+      zones: zones.value.sort(compareZoneAssignments),
       entities: entities.value.sort((a, b) => a.id.localeCompare(b.id)),
     },
   };
@@ -193,7 +204,7 @@ export function createMapStateFromDocument(document: MapDocument): ImportedMapSt
   }
 
   for (const zone of document.zones) {
-    world.setZone(zone.x, zone.y, zone.z, zone.zoneId);
+    world.setColumnZone(zone.x, zone.z, zone.zoneId);
   }
 
   world.clearDirtyChunks();
@@ -270,24 +281,35 @@ function parseZoneAssignments(input: unknown): { ok: true; value: MapZoneAssignm
   const validationWorld = createFlatVoxelWorld();
 
   for (const value of input) {
-    if (!isRecord(value) || !isGridCoordinate(value)) {
-      return { ok: false, error: "Every zone assignment must include integer x, y and z coordinates." };
+    if (!isRecord(value) || !isZoneCoordinate(value)) {
+      return { ok: false, error: "Every zone assignment must include integer x and z coordinates." };
     }
     const zoneId = value.zoneId;
-    if (typeof zoneId !== "number" || !Number.isInteger(zoneId) || zoneId < 0 || zoneId > 5) {
-      return { ok: false, error: `Zone id must be between 0 and 5: ${String(value.zoneId)}.` };
+    if (typeof zoneId !== "number" || !Number.isInteger(zoneId) || zoneId < 0 || zoneId > 10) {
+      return { ok: false, error: `Zone id must be between 0 and 10: ${String(value.zoneId)}.` };
     }
 
-    const index = validationWorld.getIndex(value.x, value.y, value.z);
+    const index = validationWorld.getZoneIndex(value.x, value.z);
     if (index === null) {
-      return { ok: false, error: `Zone coordinate is out of bounds: ${value.x},${value.y},${value.z}.` };
+      return { ok: false, error: `Zone coordinate is out of bounds: ${value.x},${value.z}.` };
     }
     if (seen.has(index)) {
-      return { ok: false, error: `Duplicate zone coordinate: ${value.x},${value.y},${value.z}.` };
+      zones[zones.findIndex((zone) => zone.x + WORLD_CONFIG.width * zone.z === index)] = {
+        x: value.x,
+        z: value.z,
+        ...(Number.isInteger(value.y) ? { y: value.y as number } : {}),
+        zoneId,
+      };
+      continue;
     }
 
     seen.add(index);
-    zones.push({ x: value.x, y: value.y, z: value.z, zoneId });
+    zones.push({
+      x: value.x,
+      z: value.z,
+      ...(Number.isInteger(value.y) ? { y: value.y as number } : {}),
+      zoneId,
+    });
   }
 
   return { ok: true, value: zones };
@@ -330,6 +352,10 @@ function compareCoordinates(left: GridCoordinate, right: GridCoordinate) {
   return left.y - right.y || left.z - right.z || left.x - right.x;
 }
 
+function compareZoneAssignments(left: MapZoneAssignment, right: MapZoneAssignment) {
+  return left.z - right.z || left.x - right.x;
+}
+
 function cloneEntity(entity: MapEntityAnchor): MapEntityAnchor {
   return {
     id: entity.id,
@@ -343,6 +369,10 @@ function cloneEntity(entity: MapEntityAnchor): MapEntityAnchor {
 
 function isGridCoordinate(value: Record<string, unknown>): value is GridCoordinate & Record<string, unknown> {
   return Number.isInteger(value.x) && Number.isInteger(value.y) && Number.isInteger(value.z);
+}
+
+function isZoneCoordinate(value: Record<string, unknown>): value is MapZoneAssignment & Record<string, unknown> {
+  return Number.isInteger(value.x) && Number.isInteger(value.z) && (value.y === undefined || Number.isInteger(value.y));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

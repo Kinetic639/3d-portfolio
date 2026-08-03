@@ -12,10 +12,12 @@ describe("voxel world foundation", () => {
     expect(world.shapes).toBeInstanceOf(Uint8Array);
     expect(world.rotations).toBeInstanceOf(Uint8Array);
     expect(world.states).toBeInstanceOf(Uint8Array);
+    expect(world.zones).toBeInstanceOf(Uint8Array);
     expect(world.blocks).toHaveLength(WORLD_CELL_COUNT);
     expect(world.shapes).toHaveLength(WORLD_CELL_COUNT);
     expect(world.rotations).toHaveLength(WORLD_CELL_COUNT);
     expect(world.states).toHaveLength(WORLD_CELL_COUNT);
+    expect(world.zones).toHaveLength(WORLD_SURFACE_CELL_COUNT);
     expect(world.getStats().logicalCells).toBe(49_152);
   });
 
@@ -56,6 +58,39 @@ describe("voxel world foundation", () => {
       state: 0,
       zoneId: 3,
     });
+  });
+
+  it("stores outdoor zones by X/Z column independently from terrain elevation", () => {
+    const world = createFlatVoxelWorld();
+
+    expect(world.setZone(4, 0, 5, 3)).toBe(true);
+
+    expect(world.getZone(4, 0, 5)).toBe(3);
+    expect(world.getZone(4, 8, 5)).toBe(3);
+    expect(world.getColumnZone(4, 5)).toBe(3);
+    expect(world.getStats().zoneAssignments).toBe(1);
+    expect([...world.dirtyZoneChunks]).toEqual(["chunk-0-0"]);
+
+    world.setBlock(4, 0, 5, BLOCK_IDS.Air);
+
+    expect(world.getColumnZone(4, 5)).toBe(3);
+  });
+
+  it("migrates legacy 3D zone arrays into compact column zones", () => {
+    const legacyZones = new Uint8Array(WORLD_CELL_COUNT);
+    const legacyWorld = new VoxelWorld();
+    const low = legacyWorld.getIndex(6, 0, 7);
+    const high = legacyWorld.getIndex(6, 4, 7);
+    expect(low).not.toBeNull();
+    expect(high).not.toBeNull();
+    legacyZones[low as number] = 2;
+    legacyZones[high as number] = 4;
+
+    const world = new VoxelWorld(WORLD_CONFIG, undefined, legacyZones);
+
+    expect(world.zones).toHaveLength(WORLD_SURFACE_CELL_COUNT);
+    expect(world.getColumnZone(6, 7)).toBe(4);
+    expect(world.getStats().zoneAssignments).toBe(1);
   });
 
   it("generates a deterministic flat ground layer and leaves upper cells as air", () => {

@@ -8,6 +8,7 @@ import {
 import { createFlatVoxelWorld, type RenderChunk, type VoxelWorld } from "@/lib/world/voxel-world";
 import type { GridCoordinate } from "@/lib/world/world-config";
 import type { TerrainCellMutation } from "./terrain-brushes";
+import type { ZoneColumnChange } from "./zone-tools";
 import { DEFAULT_ROTATION, DEFAULT_SHAPE_ID, DEFAULT_STATE, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 
 export type EditorTool =
@@ -214,7 +215,7 @@ export class MapEditorSession {
       cells: [{
         coordinate,
         before: this.captureCell(coordinate),
-        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: 0 },
+        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(coordinate.x, coordinate.z) },
       }],
     });
   }
@@ -269,7 +270,7 @@ export class MapEditorSession {
       cells: [{
         coordinate: target,
         before: this.captureCell(target),
-        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: 0 },
+        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(target.x, target.z) },
       }],
     });
   }
@@ -283,7 +284,7 @@ export class MapEditorSession {
       const before = this.captureCell(cellCoordinate);
       const afterBlock = y <= coordinate.y ? targetBlock : BLOCK_IDS.Air;
       const after = afterBlock === BLOCK_IDS.Air
-        ? { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: 0 }
+        ? { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(cellCoordinate.x, cellCoordinate.z) }
         : { ...before, blockId: afterBlock };
       cells.push({ coordinate: cellCoordinate, before, after });
     }
@@ -344,9 +345,20 @@ export class MapEditorSession {
     });
   }
 
+  applyZoneColumnChanges(label: string, changes: ZoneColumnChange[]): EditorActionResult {
+    return this.applyCommand({
+      label,
+      zones: changes.map((change) => ({
+        coordinate: change.coordinate,
+        before: change.before,
+        after: change.after,
+      })),
+    });
+  }
+
   assignZone(coordinate: GridCoordinate, zoneId: number): EditorActionResult {
-    if (!Number.isInteger(zoneId) || zoneId < 0 || zoneId > 5) {
-      return { changed: false, rebuiltChunkIds: [], rebuiltChunks: [], message: { type: "error", text: "Zone ID must be 0-5." } };
+    if (!Number.isInteger(zoneId) || zoneId < 0 || zoneId > 10) {
+      return { changed: false, rebuiltChunkIds: [], rebuiltChunks: [], message: { type: "error", text: "Zone ID must be 0-10." } };
     }
 
     return this.applyCommand({
@@ -606,12 +618,12 @@ function sameCellData(left: CellData, right: CellData) {
 }
 
 function collectDocumentZoneChanges(before: MapDocument, after: MapDocument): ZoneChange[] {
-  const beforeMap = new Map(before.zones.map((zone) => [coordinateKey(zone), zone.zoneId]));
-  const afterMap = new Map(after.zones.map((zone) => [coordinateKey(zone), zone.zoneId]));
+  const beforeMap = new Map(before.zones.map((zone) => [zoneCoordinateKey(zone), zone.zoneId]));
+  const afterMap = new Map(after.zones.map((zone) => [zoneCoordinateKey(zone), zone.zoneId]));
   const keys = new Set([...beforeMap.keys(), ...afterMap.keys()]);
 
   return [...keys].map((key) => ({
-    coordinate: parseCoordinateKey(key),
+    coordinate: parseZoneCoordinateKey(key),
     before: beforeMap.get(key) ?? 0,
     after: afterMap.get(key) ?? 0,
   }));
@@ -625,9 +637,18 @@ function coordinateKey(coordinate: GridCoordinate) {
   return `${coordinate.x},${coordinate.y},${coordinate.z}`;
 }
 
+function zoneCoordinateKey(coordinate: Pick<GridCoordinate, "x" | "z">) {
+  return `${coordinate.x},${coordinate.z}`;
+}
+
 function parseCoordinateKey(key: string): GridCoordinate {
   const [x, y, z] = key.split(",").map(Number);
   return { x, y, z };
+}
+
+function parseZoneCoordinateKey(key: string): GridCoordinate {
+  const [x, z] = key.split(",").map(Number);
+  return { x, y: 0, z };
 }
 
 function cloneEntity(entity: MapEntityAnchor): MapEntityAnchor {

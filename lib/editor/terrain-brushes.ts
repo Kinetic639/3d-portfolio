@@ -148,7 +148,7 @@ function createCellMutation(
   let afterShape = world.getShape(cell.x, cell.y, cell.z);
   let afterRotation = world.getRotation(cell.x, cell.y, cell.z);
   let afterState = world.getState(cell.x, cell.y, cell.z);
-  let afterZone = world.getZone(cell.x, cell.y, cell.z);
+  let afterZone = world.getColumnZone(cell.x, cell.z);
 
   switch (operation) {
     case "paint":
@@ -168,7 +168,7 @@ function createCellMutation(
       afterShape = DEFAULT_SHAPE_ID;
       afterRotation = DEFAULT_ROTATION;
       afterState = DEFAULT_STATE;
-      afterZone = 0;
+      afterZone = world.getColumnZone(cell.x, cell.z);
       break;
     case "raise": {
       const y = topY === null ? 0 : topY + 1;
@@ -178,7 +178,7 @@ function createCellMutation(
       afterShape = shapeId;
       afterRotation = rotation;
       afterState = state;
-      afterZone = world.getZone(target.x, target.y, target.z);
+      afterZone = world.getColumnZone(target.x, target.z);
       break;
     }
     case "lower": {
@@ -188,7 +188,7 @@ function createCellMutation(
       afterShape = DEFAULT_SHAPE_ID;
       afterRotation = DEFAULT_ROTATION;
       afterState = DEFAULT_STATE;
-      afterZone = 0;
+      afterZone = world.getColumnZone(target.x, target.z);
       break;
     }
     case "flatten": {
@@ -198,7 +198,7 @@ function createCellMutation(
         afterShape = DEFAULT_SHAPE_ID;
         afterRotation = DEFAULT_ROTATION;
         afterState = DEFAULT_STATE;
-        afterZone = 0;
+        afterZone = world.getColumnZone(cell.x, cell.z);
       } else if (cell.y === desiredY) {
         afterBlock = blockId === BLOCK_IDS.Air ? BLOCK_IDS.Ground : blockId;
         afterShape = shapeId;
@@ -210,12 +210,12 @@ function createCellMutation(
     case "paint-path":
       target = { x: cell.x, y: topY ?? 0, z: cell.z };
       afterBlock = blockId;
-      afterZone = world.getZone(target.x, target.y, target.z);
+      afterZone = world.getColumnZone(target.x, target.z);
       break;
     case "remove-path":
       target = { x: cell.x, y: topY ?? 0, z: cell.z };
       afterBlock = BLOCK_IDS.Ground;
-      afterZone = world.getZone(target.x, target.y, target.z);
+      afterZone = world.getColumnZone(target.x, target.z);
       break;
     case "assign-zone":
       afterZone = zoneId;
@@ -230,7 +230,7 @@ function createCellMutation(
   const beforeShape = world.getShape(target.x, target.y, target.z);
   const beforeRotation = world.getRotation(target.x, target.y, target.z);
   const beforeState = world.getState(target.x, target.y, target.z);
-  const beforeZone = world.getZone(target.x, target.y, target.z);
+  const beforeZone = world.getColumnZone(target.x, target.z);
   if (
     beforeBlock === afterBlock &&
     beforeShape === afterShape &&

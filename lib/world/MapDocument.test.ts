@@ -28,7 +28,7 @@ describe("map document format", () => {
       { x: 8, y: 0, z: 9, blockId: BLOCK_IDS.Path },
       { x: 8, y: 1, z: 9, blockId: BLOCK_IDS.Special },
     ]);
-    expect(document.zones).toEqual([{ x: 8, y: 0, z: 9, zoneId: 3 }]);
+    expect(document.zones).toEqual([{ x: 8, z: 9, zoneId: 3 }]);
     expect(imported.world.getBlock(8, 1, 9)).toBe(BLOCK_IDS.Special);
     expect(imported.world.getZone(8, 0, 9)).toBe(3);
     expect(imported.entities).toHaveLength(1);
@@ -93,8 +93,9 @@ describe("map document format", () => {
     const document = serializeMapDocument(world, []);
     const imported = createMapStateFromDocument(document);
 
-    expect(document.version).toBe(2);
+    expect(document.version).toBe(3);
     expect(document.cellEncoding).toBe("cell-edits-v2");
+    expect(document.zoneEncoding).toBe("column-zones-v2");
     expect(document.edits).toContainEqual({
       x: 10,
       y: 1,
@@ -111,6 +112,45 @@ describe("map document format", () => {
       state: 1,
     });
     expect(serializeMapDocument(imported.world, imported.entities)).toEqual(document);
+  });
+
+  it("migrates legacy voxel zone assignments into one X/Z column assignment", () => {
+    const document: MapDocument = {
+      version: 2,
+      cellEncoding: "cell-edits-v2",
+      zoneEncoding: "voxel-zones-v1",
+      world: {
+        width: 64,
+        depth: 64,
+        height: 12,
+        blockSize: 1,
+        chunkSize: 16,
+        generator: "flat-v1",
+      },
+      edits: [],
+      zones: [
+        { x: 12, y: 0, z: 14, zoneId: 2 },
+        { x: 12, y: 3, z: 14, zoneId: 2 },
+        { x: 13, y: 1, z: 14, zoneId: 3 },
+      ],
+      entities: [],
+    };
+
+    const parsed = parseMapDocument(document);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    expect(parsed.document.zones).toEqual([
+      { x: 12, y: 3, z: 14, zoneId: 2 },
+      { x: 13, y: 1, z: 14, zoneId: 3 },
+    ]);
+    const imported = createMapStateFromDocument(parsed.document);
+    expect(imported.world.getColumnZone(12, 14)).toBe(2);
+    expect(imported.world.getColumnZone(13, 14)).toBe(3);
+    expect(serializeMapDocument(imported.world, []).zones).toEqual([
+      { x: 12, z: 14, zoneId: 2 },
+      { x: 13, z: 14, zoneId: 3 },
+    ]);
   });
 
   it("rejects invalid document versions and coordinates without mutating current worlds", () => {

@@ -32,11 +32,13 @@ import {
   Route,
   Save,
   Search,
-  Square,
+  Shapes,
+  SquareDashedMousePointer,
   Trash2,
   Undo2,
   Upload,
   X,
+  Replace,
   type LucideIcon,
 } from "lucide-react";
 import { createEditorCommands, findEditorCommands, type EditorCommand, type EditorIconName } from "@/lib/editor/editor-commands";
@@ -54,7 +56,9 @@ import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-coun
 import type { EditorMessage, EditorTool } from "@/lib/editor/map-editor";
 import { MAP_PRESETS, type MapPresetId } from "@/lib/editor/map-presets";
 import type { BrushShape, TerrainBrushSettings } from "@/lib/editor/terrain-brushes";
+import type { ZoneEditMode, ZoneSelectionMode } from "@/lib/editor/zone-tools";
 import type { MapRegistryEntry } from "@/lib/maps/map-registry";
+import type { MapZoneDefinition } from "@/lib/maps/map-definition";
 import type { CollisionMode, PlacedMapEntity, PrimitiveType } from "@/lib/maps/map-entities";
 import type { NavigationNodeType } from "@/lib/maps/map-navigation";
 import { BUILT_IN_PREFABS, listPrefabCategories } from "@/lib/prefabs/prefab-library";
@@ -80,6 +84,9 @@ type EditorIconKey =
   | "collapse-left"
   | "collapse-right"
   | "collapse-bottom"
+  | "zone-area-fill"
+  | "zone-paint"
+  | "zone-replace"
   | "close";
 
 export type EditorLayerId =
@@ -111,6 +118,13 @@ export type EditorInspectorState = {
   presetId: MapPresetId;
   renderMode: TerrainRenderMode;
   zoneId: number;
+  zoneEditMode: ZoneEditMode;
+  zoneSelectionMode: ZoneSelectionMode;
+  zoneDefinitions: MapZoneDefinition[];
+  zoneNeutralTerrain: boolean;
+  zoneNeutralTerrainColor: string;
+  zoneGridLinesVisible: boolean;
+  zoneGridLineColor: string;
   hovered: GridCoordinate | null;
   selected: GridCoordinate | null;
   selectedBlockId: BlockId | null;
@@ -177,6 +191,15 @@ export type MapEditorToolbarProps = EditorInspectorState & {
   onRenameMap: () => void;
   onRenderModeChange: (mode: TerrainRenderMode) => void;
   onZoneChange: (zoneId: number) => void;
+  onZoneEditModeChange: (mode: ZoneEditMode) => void;
+  onZoneSelectionModeChange: (mode: ZoneSelectionMode) => void;
+  onZoneDefinitionChange: (numericId: number, patch: Partial<Pick<MapZoneDefinition, "label" | "shortLabel" | "description" | "color" | "visibleInLegend" | "overlayVisible" | "locked">>) => void;
+  onZoneNeutralTerrainChange: (enabled: boolean) => void;
+  onZoneNeutralTerrainColorChange: (color: string) => void;
+  onZoneGridLinesVisibleChange: (visible: boolean) => void;
+  onZoneGridLineColorChange: (color: string) => void;
+  onFocusActiveZone: () => void;
+  onClearActiveZone: () => void;
   onUndo: () => void;
   onRedo: () => void;
   onResetUnsaved: () => void;
@@ -239,7 +262,7 @@ const WORKSPACE_TOOLS: Record<EditorWorkspace, EditorTool[]> = {
   map: ["select", "marker"],
   terrain: ["select", "paint", "add", "erase", "raise", "lower", "flatten", "fill", "clear", "path"],
   objects: ["select", "entity"],
-  zones: ["select", "zone", "removeZone"],
+  zones: ["select"],
   navigation: ["select", "navigation"],
   review: ["select"],
 };
@@ -256,7 +279,7 @@ const TOOL_LABELS: Record<EditorTool, string> = {
   clear: "Clear",
   path: "Path",
   removePath: "Remove Path",
-  zone: "Paint Zone",
+  zone: "Zone Area",
   removeZone: "Clear Zone",
   marker: "Marker",
   entity: "Place",
@@ -321,6 +344,9 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
   const patchLayout = (patch: Partial<typeof layout>) => setLayout((current) => ({ ...current, ...patch }));
   const setWorkspace = (workspace: string) => {
     const nextWorkspace = workspace as EditorWorkspace;
+    if (nextWorkspace === "zones") {
+      props.onToolChange("zone");
+    }
     setLayout((current) => ({
       ...current,
       activeWorkspace: nextWorkspace,
@@ -436,9 +462,9 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
       } as React.CSSProperties}
       onPointerDown={() => setOpenMenu(null)}
     >
-      <MenuBar commands={commands} openMenu={openMenu} setOpenMenu={setOpenMenu} onCloseEditor={props.onClose} />
+      <MenuBar commands={commands} openMenu={openMenu} setOpenMenu={setOpenMenu} props={props} onCloseEditor={props.onClose} />
       <MainToolbar props={props} commands={commands} layout={layout} setWorkspace={setWorkspace} toggleCleanPreview={toggleCleanPreview} />
-      <ToolRail workspace={layout.activeWorkspace} activeTool={props.tool} onToolChange={props.onToolChange} />
+      <ToolRail workspace={layout.activeWorkspace} activeTool={props.tool} props={props} onToolChange={props.onToolChange} />
       {!layout.maximizedViewport ? (
         <aside className={`editor-left-dock ${layout.collapsed.left ? "editor-dock--collapsed" : ""}`} aria-label="Contextual palette" onPointerDown={(event) => event.stopPropagation()}>
           <DockHeader title="Tool Settings" side="left" collapsed={layout.collapsed.left} onToggle={() => setLayout((current) => ({ ...current, collapsed: { ...current.collapsed, left: !current.collapsed.left } }))} />
@@ -487,7 +513,7 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
   );
 }
 
-function MenuBar({ commands, openMenu, setOpenMenu, onCloseEditor }: { commands: EditorCommand[]; openMenu: string | null; setOpenMenu: (menu: string | null) => void; onCloseEditor: () => void }) {
+function MenuBar({ commands, openMenu, setOpenMenu, props, onCloseEditor }: { commands: EditorCommand[]; openMenu: string | null; setOpenMenu: (menu: string | null) => void; props: MapEditorToolbarProps; onCloseEditor: () => void }) {
   return (
     <header className="editor-menu-bar" role="menubar" aria-label="Editor menu bar" onPointerDown={(event) => event.stopPropagation()}>
       <strong>Map Editor</strong>
@@ -499,12 +525,45 @@ function MenuBar({ commands, openMenu, setOpenMenu, onCloseEditor }: { commands:
           {openMenu === group ? (
             <div className="editor-menu-popover" role="menu">
               {commands.filter((command) => command.category === group).map((command) => <CommandMenuItem key={command.id} command={command} />)}
+              {group === "view" ? <ViewMenuSettings props={props} /> : null}
             </div>
           ) : null}
         </div>
       ))}
       <button className="editor-window-button" type="button" onClick={onCloseEditor}><EditorIcon name="close" /><span>Close</span></button>
     </header>
+  );
+}
+
+function ViewMenuSettings({ props }: { props: MapEditorToolbarProps }) {
+  const objectsVisible = isLayerVisibleInToolbar(props, "entities") || isLayerVisibleInToolbar(props, "markers");
+  return (
+    <div className="editor-menu-settings" role="group" aria-label="View settings">
+      <label>
+        <span>Hide terrain material</span>
+        <input type="checkbox" checked={props.zoneNeutralTerrain} onChange={(event) => props.onZoneNeutralTerrainChange(event.target.checked)} />
+      </label>
+      <label>
+        <span>Hide objects</span>
+        <input type="checkbox" checked={!objectsVisible} onChange={(event) => {
+          const visible = !event.target.checked;
+          props.onLayerVisibilityChange("entities", visible);
+          props.onLayerVisibilityChange("markers", visible);
+        }} />
+      </label>
+      <label>
+        <span>Grid block color</span>
+        <input type="color" value={props.zoneNeutralTerrainColor} onChange={(event) => props.onZoneNeutralTerrainColorChange(event.target.value)} />
+      </label>
+      <label>
+        <span>Show grid lines</span>
+        <input type="checkbox" checked={props.zoneGridLinesVisible} onChange={(event) => props.onZoneGridLinesVisibleChange(event.target.checked)} />
+      </label>
+      <label>
+        <span>Grid line color</span>
+        <input type="color" value={props.zoneGridLineColor} onChange={(event) => props.onZoneGridLineColorChange(event.target.value)} />
+      </label>
+    </div>
   );
 }
 
@@ -534,7 +593,7 @@ function MainToolbar({ props, commands, layout, setWorkspace, toggleCleanPreview
   );
 }
 
-function ToolRail({ workspace, activeTool, onToolChange }: { workspace: EditorWorkspace; activeTool: EditorTool; onToolChange: (tool: EditorTool) => void }) {
+function ToolRail({ workspace, activeTool, props, onToolChange }: { workspace: EditorWorkspace; activeTool: EditorTool; props: MapEditorToolbarProps; onToolChange: (tool: EditorTool) => void }) {
   return (
     <nav className="editor-tool-rail" aria-label={`${workspace} tools`} onPointerDown={(event) => event.stopPropagation()}>
       {WORKSPACE_TOOLS[workspace].map((tool) => (
@@ -543,7 +602,42 @@ function ToolRail({ workspace, activeTool, onToolChange }: { workspace: EditorWo
           <span>{TOOL_LABELS[tool]}</span>
         </button>
       ))}
+      {workspace === "zones" ? <ZoneRailTools props={props} /> : null}
     </nav>
+  );
+}
+
+function ZoneRailTools({ props }: { props: MapEditorToolbarProps }) {
+  return (
+    <>
+      <div className="editor-tool-rail-divider" aria-hidden="true" />
+      <div className="editor-tool-rail-group" aria-label="Zone operation">
+        {(["paint", "replace", "erase"] as ZoneEditMode[]).map((mode) => (
+          <button key={mode} type="button" className={props.zoneEditMode === mode && props.zoneSelectionMode === "brush" ? "active" : ""} title={zoneEditLabel(mode)} aria-label={`Zone ${zoneEditLabel(mode)}`} onClick={() => { props.onToolChange("zone"); props.onZoneEditModeChange(mode); props.onZoneSelectionModeChange("brush"); }}>
+            <EditorIcon name={zoneEditIcon(mode)} />
+            <span>{zoneEditLabel(mode)}</span>
+          </button>
+        ))}
+      </div>
+      <div className="editor-tool-rail-divider" aria-hidden="true" />
+      <div className="editor-tool-rail-group" aria-label="Zone area mode">
+        <button type="button" className={props.zoneSelectionMode === "rectangle" ? "active" : ""} title="Area Fill" aria-label="Zone Area Fill" onClick={() => { props.onToolChange("zone"); props.onZoneSelectionModeChange("rectangle"); }}>
+          <EditorIcon name="zone-area-fill" />
+          <span>Area Fill</span>
+        </button>
+      </div>
+      <div className="editor-tool-rail-divider" aria-hidden="true" />
+      <div className="editor-tool-rail-group" aria-label="Zone focus">
+        <button type="button" title="Focus Zone" aria-label="Focus Zone" onClick={props.onFocusActiveZone}>
+          <EditorIcon name="search" />
+          <span>Focus Zone</span>
+        </button>
+        <button type="button" title="Remove Selected Zone" aria-label="Remove Selected Zone" onClick={props.onClearActiveZone}>
+          <EditorIcon name="delete" />
+          <span>Remove Zone</span>
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -628,9 +722,29 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
   }
 
   if (workspace === "zones") {
+    const activeZone = props.zoneDefinitions.find((zone) => zone.numericId === props.zoneId) ?? props.zoneDefinitions[0];
     return (
       <Panel title="Zones">
-        <label>Current zone<select value={props.zoneId} onChange={(event) => props.onZoneChange(Number(event.target.value))}>{[0, 1, 2, 3, 4, 5].map((zoneId) => <option key={zoneId} value={zoneId}>{zoneId === 0 ? "Clear zone" : `Zone ${zoneId}`}</option>)}</select></label>
+        <span className="editor-muted">{props.zoneSelectionMode === "rectangle" ? `${zoneEditLabel(props.zoneEditMode)} · Area Fill` : zoneEditLabel(props.zoneEditMode)}</span>
+        <label>Current zone<select value={props.zoneId} onChange={(event) => props.onZoneChange(Number(event.target.value))}>{props.zoneDefinitions.slice(0, 10).map((zone) => <option key={zone.numericId} value={zone.numericId}>{zone.label}</option>)}</select></label>
+        {activeZone ? (
+          <Section title="Zone Metadata">
+            <label>Name<input value={activeZone.label} onChange={(event) => props.onZoneDefinitionChange(activeZone.numericId, { label: event.target.value })} /></label>
+            <label>Short label<input value={activeZone.shortLabel ?? ""} onChange={(event) => props.onZoneDefinitionChange(activeZone.numericId, { shortLabel: event.target.value })} /></label>
+            <label>Colour<input type="color" value={activeZone.color} onChange={(event) => props.onZoneDefinitionChange(activeZone.numericId, { color: event.target.value })} /></label>
+            <label>Description<textarea value={activeZone.description ?? ""} onChange={(event) => props.onZoneDefinitionChange(activeZone.numericId, { description: event.target.value })} /></label>
+            <label><input type="checkbox" checked={activeZone.visibleInLegend} onChange={(event) => props.onZoneDefinitionChange(activeZone.numericId, { visibleInLegend: event.target.checked })} /> Legend visible</label>
+            <label><input type="checkbox" checked={activeZone.overlayVisible} onChange={(event) => props.onZoneDefinitionChange(activeZone.numericId, { overlayVisible: event.target.checked })} /> Overlay visible</label>
+            <label><input type="checkbox" checked={activeZone.locked} onChange={(event) => props.onZoneDefinitionChange(activeZone.numericId, { locked: event.target.checked })} /> Locked</label>
+          </Section>
+        ) : null}
+        {props.zoneSelectionMode === "brush" ? (
+          <>
+            <label>Footprint<select value={props.brushSettings.shape} onChange={(event) => props.onBrushShapeChange(event.target.value as BrushShape)}><option value="single">Single</option><option value="square">Square</option><option value="circle">Circle</option></select></label>
+            <label>Size<input type="number" min={1} max={9} value={props.brushSettings.size} onChange={(event) => props.onBrushSizeChange(Number(event.target.value))} /></label>
+          </>
+        ) : null}
+        <span className="editor-muted">{props.brushAffectedCellCount} zone columns · {props.zoneAssignmentCount} assigned</span>
         <LayerList props={props} ids={["zones"]} />
       </Panel>
     );
@@ -649,7 +763,7 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
 
   const showsBlockPicker = ["paint", "add", "raise", "fill"].includes(props.tool);
   const showsShapePicker = ["add", "raise", "fill"].includes(props.tool);
-  const showsBrushShape = ["paint", "erase", "raise", "lower", "flatten", "fill", "clear", "zone", "removeZone"].includes(props.tool);
+  const showsBrushShape = ["paint", "erase", "raise", "lower", "flatten", "fill", "clear"].includes(props.tool);
   const showsBrushSize = showsBrushShape;
   const showsPathWidth = props.tool === "path" || props.tool === "removePath";
   const showsFlattenHeight = props.tool === "flatten";
@@ -1088,7 +1202,10 @@ const EDITOR_ICONS: Record<EditorIconKey, LucideIcon> = {
   undo: Undo2,
   validate: CheckCircle2,
   warning: AlertTriangle,
-  zone: Square,
+  zone: Shapes,
+  "zone-area-fill": SquareDashedMousePointer,
+  "zone-paint": Brush,
+  "zone-replace": Replace,
 };
 
 function EditorIcon({ name }: { name: EditorIconKey }) {
@@ -1131,6 +1248,10 @@ function layerStateLabel(props: MapEditorToolbarProps, id: EditorLayerId) {
   return `${layer.visible ? "shown" : "hidden"} / ${layer.locked ? "locked" : "editable"}`;
 }
 
+function isLayerVisibleInToolbar(props: MapEditorToolbarProps, id: EditorLayerId) {
+  return props.layerStates.find((item) => item.id === id)?.visible ?? true;
+}
+
 function getViewport() {
   return { width: window.innerWidth, height: window.innerHeight };
 }
@@ -1154,4 +1275,16 @@ function formatVector(vector: { x: number; y: number; z: number }) {
 
 function title(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function zoneEditLabel(mode: ZoneEditMode) {
+  if (mode === "paint") return "Paint";
+  if (mode === "replace") return "Replace";
+  return "Erase";
+}
+
+function zoneEditIcon(mode: ZoneEditMode): EditorIconKey {
+  if (mode === "paint") return "zone-paint";
+  if (mode === "replace") return "zone-replace";
+  return "erase";
 }

@@ -9,7 +9,7 @@ test("keeps editor hidden before explore", async ({ page }) => {
 });
 
 test("enables editor in development after explore", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?editor=1");
 
   const experience = page.locator(".experience-shell");
   await expect(experience).toHaveAttribute("data-phase", "ready", { timeout: 10_000 });

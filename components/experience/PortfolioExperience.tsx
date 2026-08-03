@@ -14,6 +14,7 @@ import {
   type TerrainChunk,
 } from "@/lib/terrain/terrain";
 import { buildSurfaceChunkMesh, type SurfaceChunkMeshData } from "@/lib/terrain/surface-mesher";
+import { buildZoneOverlayChunkMeshes, buildZoneOverlayMeshes, type ZoneOverlayChunkMeshData } from "@/lib/terrain/zone-overlay";
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import { parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
 import type { GridCoordinate } from "@/lib/world/world-config";
@@ -44,6 +45,13 @@ import {
   type TerrainBrushOperation,
   type TerrainBrushSettings,
 } from "@/lib/editor/terrain-brushes";
+import {
+  createZoneColumnChanges,
+  getZoneBrushFootprint,
+  getZoneRectangleFootprint,
+  type ZoneEditMode,
+  type ZoneSelectionMode,
+} from "@/lib/editor/zone-tools";
 import { addNavigationEdge, addNavigationNode, addNavigationRoute } from "@/lib/editor/navigation-authoring";
 import type { CollisionMode, PlacedMapEntity, PrimitiveType } from "@/lib/maps/map-entities";
 import type { NavigationNodeType } from "@/lib/maps/map-navigation";
@@ -57,7 +65,9 @@ import {
   type MapDefinition,
   type MapCameraPreset,
   type MapMarkerDefinition,
+  type MapZoneDefinition,
 } from "@/lib/maps/map-definition";
+import { ensureEditableZones, resetEditableZone, updateEditableZone } from "@/lib/maps/zone-authoring";
 import {
   DEFAULT_AUTHORED_MAP_ID,
   deleteMapDraft,
@@ -458,12 +468,27 @@ type MapUiState = {
   map: MapDefinition;
   hoveredZoneId: string | null;
   selectedMarkerId: string | null;
+  zoneFocusDirection: ZoneFocusDirection;
+  onZoneFocusDirectionChange: (direction: ZoneFocusDirection) => void;
   onSelectZone: (zoneId: string) => void;
   onFocusZone: () => void;
   onReturnOverview: () => void;
   onOpenContent: () => void;
   onCloseContent: () => void;
 };
+
+type ZoneFocusDirection = "north" | "south" | "east" | "west" | "northeast" | "northwest" | "southeast" | "southwest";
+
+const ZONE_FOCUS_DIRECTIONS: Array<{ id: ZoneFocusDirection; label: string }> = [
+  { id: "north", label: "North" },
+  { id: "south", label: "South" },
+  { id: "east", label: "East" },
+  { id: "west", label: "West" },
+  { id: "northeast", label: "North East" },
+  { id: "northwest", label: "North West" },
+  { id: "southeast", label: "South East" },
+  { id: "southwest", label: "South West" },
+];
 
 function ExperienceOverlay({ phase }: { phase: ExperiencePhase }) {
   const resetView = useExperienceStore((state) => state.resetView);
@@ -685,6 +710,16 @@ function MapBrowserOverlay({ state }: { state: MapUiState }) {
           <h2>{selectedMarker?.label ?? selectedZone?.label}</h2>
           <p>{selectedMarker ? getMarkerDescription(selectedMarker) : selectedZone?.description}</p>
           <div>
+            {selectedZone ? (
+              <label className="map-context-direction">
+                <span>View</span>
+                <select value={state.zoneFocusDirection} onChange={(event) => state.onZoneFocusDirectionChange(event.target.value as ZoneFocusDirection)}>
+                  {ZONE_FOCUS_DIRECTIONS.map((direction) => (
+                    <option key={direction.id} value={direction.id}>{direction.label}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             {selectedZone ? <button type="button" onClick={state.onFocusZone}>Focus</button> : null}
             {selectedMarker?.contentReference ? <button type="button" onClick={state.onOpenContent}>Open</button> : null}
           </div>
@@ -796,9 +831,10 @@ function ExperienceScene({
   onCloseEditor: () => void;
 }) {
   const initialState = useMemo(() => createInitialExperienceMapState(initialMapId), [initialMapId]);
-  const [currentMap, setCurrentMap] = useState<MapDefinition>(initialState.loadedMap.definition);
+  const [currentMap, setCurrentMap] = useState<MapDefinition>(() => editorEnabled ? ensureEditableZones(initialState.loadedMap.definition) : initialState.loadedMap.definition);
   const mapHistoryRef = useRef<{ undo: MapDefinition[]; redo: MapDefinition[] }>({ undo: [], redo: [] });
   const [terrain, setTerrain] = useState(initialState.terrain);
+  const [zoneOverlay, setZoneOverlay] = useState(() => buildZoneOverlayMeshes(initialState.loadedMap.world));
   const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities));
   const [tool, setTool] = useState<EditorTool>("select");
   const [paintBlockId, setPaintBlockId] = useState<BlockId>(BLOCK_IDS.Path);
@@ -809,10 +845,14 @@ function ExperienceScene({
   const [presetId, setPresetId] = useState<MapPresetId>("portfolioCampus");
   const [renderMode, setRenderMode] = useState<TerrainRenderMode>("surface");
   const [zoneId, setZoneId] = useState(1);
+  const [zoneEditMode, setZoneEditMode] = useState<ZoneEditMode>("paint");
+  const [zoneSelectionMode, setZoneSelectionMode] = useState<ZoneSelectionMode>("brush");
+  const [zoneFocusDirection, setZoneFocusDirection] = useState<ZoneFocusDirection>("south");
   const [activeMapId, setActiveMapId] = useState(initialState.loadedMap.definition.id);
   const [hoveredZoneId, setHoveredZoneId] = useState<string | null>(null);
   const [browsing, dispatchBrowsing] = useReducer(reduceBrowsingState, initialState.loadedMap.definition.id, createBrowsingState);
   const [hoveredCell, setHoveredCell] = useState<GridCoordinate | null>(null);
+  const [zoneRectangleAnchor, setZoneRectangleAnchor] = useState<GridCoordinate | null>(null);
   const [selectedCell, setSelectedCell] = useState<GridCoordinate | null>(null);
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>([]);
@@ -829,6 +869,10 @@ function ExperienceScene({
   const [navigationNodeType, setNavigationNodeType] = useState<NavigationNodeType>("walk");
   const [layerStates, setLayerStates] = useState<EditorLayerState[]>(DEFAULT_EDITOR_LAYERS);
   const [cleanPreview, setCleanPreview] = useState(false);
+  const [zoneNeutralTerrain, setZoneNeutralTerrain] = useState(false);
+  const [zoneNeutralTerrainColor, setZoneNeutralTerrainColor] = useState("#f7f7f2");
+  const [zoneGridLinesVisible, setZoneGridLinesVisible] = useState(true);
+  const [zoneGridLineColor, setZoneGridLineColor] = useState("#9a9f98");
   const [validationSummary, setValidationSummary] = useState<string[]>([]);
   const [editorMessage, setEditorMessage] = useState<EditorMessage | null>(
     initialState.error ? { type: "error", text: initialState.error } : null,
@@ -860,6 +904,10 @@ function ExperienceScene({
   const editorAvailable = editorEnabled && phase === "explore";
   const lastEditorPanelSignature = useRef<string | null>(null);
   const activeRenderMode: TerrainRenderMode = phase === "explore" ? renderMode : "instanced";
+  const editorZoneBrowsing = useMemo<BrowsingState>(() => {
+    const activeZone = currentMap.zones.find((zone) => zone.numericId === zoneId);
+    return activeZone ? { mode: "zoneSelected", mapId: currentMap.id, zoneId: activeZone.id } : createBrowsingState(currentMap.id);
+  }, [currentMap.id, currentMap.zones, zoneId]);
   const dynamicStats = editorSession.world.getStats();
   const snapshot = editorSession.getSnapshot();
   const selectedWorldPosition = selectedCell
@@ -880,18 +928,27 @@ function ExperienceScene({
     ? editorSession.world.getState(selectedCell.x, selectedCell.y, selectedCell.z)
     : null;
   const selectedZoneId = selectedCell ? editorSession.world.getZone(selectedCell.x, selectedCell.y, selectedCell.z) : 0;
+  const activeZoneDefinition = currentMap.zones.find((zone) => zone.numericId === zoneId) ?? null;
   const selectedEntity = currentMap.entities.find((entity) => selectedEntityIds.includes(entity.id)) ?? null;
   const brushSettings = useMemo(() => getBrushSettingsForTool(tool, brushSettingsByTool), [brushSettingsByTool, tool]);
   const effectiveBrushSettings = useMemo(() => getEffectiveTerrainBrushSettings(tool, brushSettings), [brushSettings, tool]);
   const brushAffectedCellCount = useMemo(
     () => {
+      if (tool === "zone") {
+        void previewRevision;
+        if (!hoveredCell) return 0;
+        if (zoneSelectionMode === "rectangle" && zoneRectangleAnchor) {
+          return getZoneRectangleFootprint(zoneRectangleAnchor, hoveredCell).length;
+        }
+        return getZoneBrushFootprint(hoveredCell, effectiveBrushSettings).length;
+      }
       if (!getTerrainBrushOperation(tool)) {
         return 0;
       }
       void previewRevision;
       return hoveredCell ? getToolPreviewFootprint(hoveredCell, tool, effectiveBrushSettings, editorSession.world, getActiveTerrainBlockId(paintBlockId, activeShapeId), zoneId).length : 0;
     },
-    [activeShapeId, editorSession.world, effectiveBrushSettings, hoveredCell, paintBlockId, previewRevision, tool, zoneId],
+    [activeShapeId, editorSession.world, effectiveBrushSettings, hoveredCell, paintBlockId, previewRevision, tool, zoneId, zoneRectangleAnchor, zoneSelectionMode],
   );
   const editorPanelSignature = useMemo(() => JSON.stringify({
     available: editorAvailable,
@@ -907,6 +964,13 @@ function ExperienceScene({
     presetId,
     renderMode,
     zoneId,
+    zoneEditMode,
+    zoneSelectionMode,
+    zoneNeutralTerrain,
+    zoneNeutralTerrainColor,
+    zoneGridLinesVisible,
+    zoneGridLineColor,
+    zones: currentMap.zones.map((zone) => `${zone.numericId}:${zone.label}:${zone.color}:${zone.visibleInLegend ? 1 : 0}:${zone.overlayVisible ? 1 : 0}:${zone.locked ? 1 : 0}`).join("|"),
     hovered: coordinateKeyOrEmpty(hoveredCell),
     selected: coordinateKeyOrEmpty(selectedCell),
     selectedBlockId,
@@ -999,9 +1063,20 @@ function ExperienceScene({
     tool,
     validationSummary,
     zoneId,
+    zoneEditMode,
+    zoneSelectionMode,
+    zoneNeutralTerrain,
+    zoneNeutralTerrainColor,
+    zoneGridLinesVisible,
+    zoneGridLineColor,
+    currentMap.zones,
   ]);
   const availableMaps = useMemo(() => listMapRegistryEntries({ includeDevelopment: process.env.NODE_ENV !== "production" }), []);
-  const activeCameraPreset = useMemo(() => getBrowsingCameraPreset(currentMap, browsing), [browsing, currentMap]);
+  const activeCameraPreset = useMemo(
+    () => getBrowsingCameraPreset(currentMap, browsing, editorSession.world, zoneFocusDirection),
+    [browsing, currentMap, editorSession.world, zoneFocusDirection],
+  );
+  const normalizeEditableMap = useCallback((map: MapDefinition) => editorEnabled ? ensureEditableZones(map) : map, [editorEnabled]);
 
   const commitMapDefinitionChange = (nextMap: MapDefinition, message: string) => {
     mapHistoryRef.current.undo.push(currentMap);
@@ -1009,7 +1084,7 @@ function ExperienceScene({
       mapHistoryRef.current.undo.shift();
     }
     mapHistoryRef.current.redo = [];
-    setCurrentMap(nextMap);
+    setCurrentMap(normalizeEditableMap(nextMap));
     setEditorMessage({ type: "info", text: message });
     setEditorRevision((revision) => revision + 1);
   };
@@ -1017,7 +1092,7 @@ function ExperienceScene({
   const createCurrentMapDefinition = () => createMapDefinitionFromWorld({
     ...currentMap,
     world: editorSession.world,
-    zones: currentMap.zones,
+    zones: ensureEditableZones(currentMap).zones,
     markers: mergeMarkerDefinitions(currentMap.markers, editorSession.entities),
     entities: currentMap.entities,
     entityGroups: currentMap.entityGroups,
@@ -1032,15 +1107,18 @@ function ExperienceScene({
   });
 
   const replaceLoadedMap = (map: MapDefinition, markSaved: boolean, message: string) => {
-    const document = mapDefinitionToDocument(map);
+    const editableMap = normalizeEditableMap(map);
+    const document = mapDefinitionToDocument(editableMap);
     const result = editorSession.replaceWithDocument(document, markSaved);
     const nextTerrain = createTerrainDataFromWorld(editorSession.world);
+    const nextZoneOverlay = buildZoneOverlayMeshes(editorSession.world);
 
-    setCurrentMap(map);
+    setCurrentMap(editableMap);
     mapHistoryRef.current = { undo: [], redo: [] };
     setActiveMapId(map.id);
     dispatchBrowsing({ type: "changeMap", mapId: map.id });
     setTerrain(nextTerrain);
+    setZoneOverlay(nextZoneOverlay);
     setLastRebuiltChunks(result.rebuiltChunkIds);
     setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
     setSelectedCell(null);
@@ -1052,14 +1130,20 @@ function ExperienceScene({
 
   const replaceRebuiltChunks = (rebuiltChunks: ReturnType<MapEditorSession["applyTool"]>["rebuiltChunks"]) => {
     if (rebuiltChunks.length === 0) {
+      if (editorSession.world.dirtyZoneChunks.size > 0) {
+        replaceZoneOverlayChunks([...editorSession.world.dirtyZoneChunks]);
+        editorSession.world.clearDirtyZoneChunks();
+      }
       setLastChunkRebuildMs(0);
       setEditorRevision((revision) => revision + 1);
       return;
     }
 
+    // eslint-disable-next-line react-hooks/purity
     const startedAt = performance.now();
     const rebuiltTerrainChunks = new Map(rebuiltChunks.map((chunk) => [chunk.id, toTerrainChunk(chunk)]));
     const rebuiltSurfaceChunks = new Map(rebuiltChunks.map((chunk) => [chunk.id, buildSurfaceChunkMesh(editorSession.world, chunk.chunkX, chunk.chunkZ)]));
+    // eslint-disable-next-line react-hooks/purity
     const rebuildMs = Number((performance.now() - startedAt).toFixed(3));
     incrementEditorPerfCounter("terrainChunkRebuilds", rebuiltChunks.length);
 
@@ -1079,9 +1163,33 @@ function ExperienceScene({
         0,
       ),
     }));
+    replaceZoneOverlayChunks([...new Set([...rebuiltChunks.map((chunk) => chunk.id), ...editorSession.world.dirtyZoneChunks])]);
+    editorSession.world.clearDirtyZoneChunks();
     setLastRebuiltChunks([...rebuiltTerrainChunks.keys()]);
     setLastChunkRebuildMs(rebuildMs);
     setEditorRevision((revision) => revision + 1);
+  };
+
+  const replaceZoneOverlayChunks = (chunkIds: string[]) => {
+    if (chunkIds.length === 0) return;
+    const startedAt = performance.now();
+    const chunkIdSet = new Set(chunkIds);
+    const rebuiltZoneChunks = chunkIds.flatMap((chunkId) => {
+      const coordinates = parseChunkId(chunkId);
+      return coordinates ? buildZoneOverlayChunkMeshes(editorSession.world, coordinates.chunkX, coordinates.chunkZ) : [];
+    });
+    setZoneOverlay((currentOverlay) => {
+      const chunks = [
+        ...currentOverlay.chunks.filter((chunk) => !chunkIdSet.has(zoneOverlayBaseChunkId(chunk.id))),
+        ...rebuiltZoneChunks,
+      ].sort(compareZoneOverlayChunks);
+      return {
+        chunks,
+        totalTriangles: chunks.reduce((sum, chunk) => sum + chunk.triangles, 0),
+        totalCells: chunks.reduce((sum, chunk) => sum + chunk.cellCount, 0),
+        buildMs: Number((performance.now() - startedAt).toFixed(3)),
+      };
+    });
   };
 
   const handleEditorCell = (coordinate: GridCoordinate) => {
@@ -1098,6 +1206,14 @@ function ExperienceScene({
       return;
     }
 
+    if (tool === "zone") {
+      const columns = zoneSelectionMode === "rectangle" && zoneRectangleAnchor
+        ? getZoneRectangleFootprint(zoneRectangleAnchor, coordinate)
+        : getZoneBrushFootprint(coordinate, effectiveBrushSettings);
+      applyZoneColumns(columns, coordinate);
+      return;
+    }
+
     const editCoordinate = getToolTargetCoordinate(editorSession, tool, coordinate);
     if (!editCoordinate) {
       setEditorMessage({ type: "error", text: "No valid cell for this tool." });
@@ -1107,6 +1223,10 @@ function ExperienceScene({
     setSelectedCell(editCoordinate);
     setSelectedMarkerId(null);
     setSelectedEntityIds([]);
+    if (tool === "select") {
+      const selectedColumnZone = editorSession.world.getColumnZone(editCoordinate.x, editCoordinate.z);
+      if (selectedColumnZone > 0) setZoneId(selectedColumnZone);
+    }
 
     const brushOperation = getTerrainBrushOperation(tool);
     const result = brushOperation
@@ -1143,6 +1263,11 @@ function ExperienceScene({
       return;
     }
 
+    if (tool === "zone") {
+      applyZoneColumns(coordinates, coordinates[coordinates.length - 1]);
+      return;
+    }
+
     const brushOperation = getTerrainBrushOperation(tool);
     if (!brushOperation) {
       handleEditorCell(coordinates[coordinates.length - 1]);
@@ -1171,6 +1296,34 @@ function ExperienceScene({
     setSelectedEntityIds([]);
     replaceRebuiltChunks(result.rebuiltChunks);
     if (result.changed) setPreviewRevision((revision) => revision + 1);
+  };
+
+  const applyZoneColumns = (columns: GridCoordinate[], selection: GridCoordinate) => {
+    if (activeZoneDefinition?.locked) {
+      setEditorMessage({ type: "error", text: `${activeZoneDefinition.label} is locked.` });
+      return;
+    }
+    const changes = createZoneColumnChanges({
+      world: editorSession.world,
+      columns,
+      mode: zoneEditMode,
+      zoneId,
+    });
+    const result = editorSession.applyZoneColumnChanges(`Zone ${zoneEditMode}`, changes);
+    setSelectedCell(selection);
+    setSelectedMarkerId(null);
+    setSelectedEntityIds([]);
+    if (result.message) setEditorMessage(result.message);
+    setEditorMessage({ type: "info", text: `${zoneEditMode} zone applied to ${changes.length} column${changes.length === 1 ? "" : "s"}.` });
+    replaceRebuiltChunks(result.rebuiltChunks);
+    if (result.changed) setPreviewRevision((revision) => revision + 1);
+  };
+
+  const handleZoneDefinitionChange = (
+    numericId: number,
+    patch: Partial<Pick<MapZoneDefinition, "label" | "shortLabel" | "description" | "color" | "visibleInLegend" | "overlayVisible" | "locked">>,
+  ) => {
+    commitMapDefinitionChange(updateEditableZone(currentMap, numericId, patch), "Zone updated.");
   };
 
   const handleUndo = () => {
@@ -1236,7 +1389,9 @@ function ExperienceScene({
     const presetWorld = createMapPresetWorld(nextPresetId);
     const result = editorSession.replaceWithDocument(serializeMapDocument(presetWorld, []), true);
     const nextTerrain = createTerrainDataFromWorld(editorSession.world);
+    const nextZoneOverlay = buildZoneOverlayMeshes(editorSession.world);
     setTerrain(nextTerrain);
+    setZoneOverlay(nextZoneOverlay);
     setLastRebuiltChunks(result.rebuiltChunkIds);
     setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
     setSelectedCell(null);
@@ -1254,16 +1409,19 @@ function ExperienceScene({
 
     try {
       const draft = loadMapDraft(localStorage, nextMapId);
-      const loaded = draft ? createLoadedMapState(draft) : loadMapStateSync(nextMapId, { includeDevelopment: true });
+      const loaded = draft ? createLoadedMapState(normalizeEditableMap(draft)) : loadMapStateSync(nextMapId, { includeDevelopment: true });
+      const editableDefinition = normalizeEditableMap(loaded.definition);
 
       const nextSession = new MapEditorSession(loaded.world, loaded.entities);
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
+      const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
       setEditorSession(nextSession);
-      setCurrentMap(loaded.definition);
+      setCurrentMap(editableDefinition);
       mapHistoryRef.current = { undo: [], redo: [] };
       setActiveMapId(loaded.definition.id);
       dispatchBrowsing({ type: "changeMap", mapId: loaded.definition.id });
       setTerrain(nextTerrain);
+      setZoneOverlay(nextZoneOverlay);
       setLastRebuiltChunks(nextTerrain.chunks.map((chunk) => chunk.id));
       setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
       setSelectedCell(null);
@@ -1279,16 +1437,19 @@ function ExperienceScene({
   const loadBenchmarkMap = useCallback((nextMapId: string) => {
     try {
       const draft = loadMapDraft(localStorage, nextMapId);
-      const loaded = draft ? createLoadedMapState(draft) : loadMapStateSync(nextMapId, { includeDevelopment: true });
+      const loaded = draft ? createLoadedMapState(normalizeEditableMap(draft)) : loadMapStateSync(nextMapId, { includeDevelopment: true });
+      const editableDefinition = normalizeEditableMap(loaded.definition);
       const nextSession = new MapEditorSession(loaded.world, loaded.entities);
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
+      const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
 
       setEditorSession(nextSession);
-      setCurrentMap(loaded.definition);
+      setCurrentMap(editableDefinition);
       mapHistoryRef.current = { undo: [], redo: [] };
       setActiveMapId(loaded.definition.id);
       dispatchBrowsing({ type: "changeMap", mapId: loaded.definition.id });
       setTerrain(nextTerrain);
+      setZoneOverlay(nextZoneOverlay);
       setLastRebuiltChunks(nextTerrain.chunks.map((chunk) => chunk.id));
       setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
       setSelectedCell(null);
@@ -1301,7 +1462,7 @@ function ExperienceScene({
       setEditorMessage({ type: "error", text: error instanceof Error ? error.message : "Map load failed." });
       return false;
     }
-  }, []);
+  }, [normalizeEditableMap]);
 
   const handleNewMap = () => {
     if (snapshot.hasUnsavedChanges && !window.confirm("Discard unsaved edits and create a blank development map?")) {
@@ -1317,15 +1478,18 @@ function ExperienceScene({
     if (!name) return;
 
     try {
-      const map = createBlankMapDefinition({ id, name, flatBaseLayer: true });
+      const map = normalizeEditableMap(createBlankMapDefinition({ id, name, flatBaseLayer: true }));
       const nextSession = new MapEditorSession();
       nextSession.replaceWithDocument(mapDefinitionToDocument(map), true);
+      const nextTerrain = createTerrainDataFromWorld(nextSession.world);
+      const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
       setEditorSession(nextSession);
       setCurrentMap(map);
       mapHistoryRef.current = { undo: [], redo: [] };
       setActiveMapId(map.id);
       dispatchBrowsing({ type: "changeMap", mapId: map.id });
-      setTerrain(createTerrainDataFromWorld(nextSession.world));
+      setTerrain(nextTerrain);
+      setZoneOverlay(nextZoneOverlay);
       setSelectedCell(null);
       setSelectedMarkerId(null);
       setSelectedEntityIds([]);
@@ -1350,7 +1514,7 @@ function ExperienceScene({
   };
 
   const handleSaveDraft = () => {
-    const saved = saveMapDraft(localStorage, createCurrentMapDefinition());
+    const saved = normalizeEditableMap(saveMapDraft(localStorage, createCurrentMapDefinition()));
     setCurrentMap(saved);
     editorSession.markSaved();
     setAutosaveStatus(`draft saved ${new Date().toLocaleTimeString()}`);
@@ -1360,7 +1524,7 @@ function ExperienceScene({
   const handleRenameMap = () => {
     const name = window.prompt("Map name", currentMap.name);
     if (!name || name === currentMap.name) return;
-    setCurrentMap({ ...currentMap, name, metadata: { ...currentMap.metadata, updatedAt: new Date().toISOString() } });
+    setCurrentMap(normalizeEditableMap({ ...currentMap, name, metadata: { ...currentMap.metadata, updatedAt: new Date().toISOString() } }));
     setEditorMessage({ type: "info", text: "Map renamed. Save draft or export to persist it." });
     setEditorRevision((revision) => revision + 1);
   };
@@ -1691,6 +1855,13 @@ function ExperienceScene({
       presetId,
       renderMode,
       zoneId,
+      zoneEditMode,
+      zoneSelectionMode,
+      zoneDefinitions: currentMap.zones,
+      zoneNeutralTerrain,
+      zoneNeutralTerrainColor,
+      zoneGridLinesVisible,
+      zoneGridLineColor,
       hovered: hoveredCell,
       selected: selectedCell,
       selectedBlockId,
@@ -1778,7 +1949,66 @@ function ExperienceScene({
       onSaveDraft: handleSaveDraft,
       onRenameMap: handleRenameMap,
       onRenderModeChange: setRenderMode,
-      onZoneChange: setZoneId,
+      onZoneChange: (nextZoneId) => {
+        setZoneId(nextZoneId);
+        setTool("zone");
+      },
+      onZoneEditModeChange: (mode) => {
+        setZoneEditMode(mode);
+        setTool("zone");
+      },
+      onZoneSelectionModeChange: (mode) => {
+        setZoneSelectionMode(mode);
+        setZoneRectangleAnchor(null);
+        setTool("zone");
+      },
+      onZoneDefinitionChange: handleZoneDefinitionChange,
+      onZoneNeutralTerrainChange: setZoneNeutralTerrain,
+      onZoneNeutralTerrainColorChange: setZoneNeutralTerrainColor,
+      onZoneGridLinesVisibleChange: setZoneGridLinesVisible,
+      onZoneGridLineColorChange: setZoneGridLineColor,
+      onFocusActiveZone: () => {
+        const activeZone = currentMap.zones.find((zone) => zone.numericId === zoneId);
+        if (!activeZone) {
+          setEditorMessage({ type: "error", text: "No active zone selected." });
+          return;
+        }
+        dispatchBrowsing({ type: "selectZone", zoneId: activeZone.id });
+        dispatchBrowsing({ type: "focusZone", previousViewId: currentMap.defaultCameraPresetId });
+        setEditorMessage({ type: "info", text: `Focusing ${activeZone.label}.` });
+      },
+      onClearActiveZone: () => {
+        const activeZone = currentMap.zones.find((zone) => zone.numericId === zoneId);
+        if (!activeZone) {
+          setEditorMessage({ type: "error", text: "No active zone selected." });
+          return;
+        }
+        if (activeZone.locked) {
+          setEditorMessage({ type: "error", text: `${activeZone.label} is locked.` });
+          return;
+        }
+        const changes = [];
+        for (let z = 0; z < editorSession.world.config.depth; z += 1) {
+          for (let x = 0; x < editorSession.world.config.width; x += 1) {
+            if (editorSession.world.getColumnZone(x, z) === zoneId) {
+              changes.push({ coordinate: { x, y: 0, z }, before: zoneId, after: 0 });
+            }
+          }
+        }
+        const result = editorSession.applyZoneColumnChanges(`Clear ${activeZone.label}`, changes);
+        mapHistoryRef.current.undo.push(currentMap);
+        if (mapHistoryRef.current.undo.length > 80) {
+          mapHistoryRef.current.undo.shift();
+        }
+        mapHistoryRef.current.redo = [];
+        setCurrentMap(resetEditableZone(currentMap, zoneId));
+        setEditorRevision((revision) => revision + 1);
+        if (result.changed || editorSession.world.dirtyZoneChunks.size > 0) {
+          replaceRebuiltChunks(result.rebuiltChunks);
+        }
+        setSelectedCell(null);
+        setEditorMessage({ type: "info", text: changes.length ? `Removed ${activeZone.label} and cleared ${changes.length} column${changes.length === 1 ? "" : "s"}.` : `${activeZone.label} settings reset.` });
+      },
       onUndo: handleUndo,
       onRedo: handleRedo,
       onResetUnsaved: handleResetUnsaved,
@@ -1867,6 +2097,12 @@ function ExperienceScene({
     tool,
     validationSummary,
     zoneId,
+    zoneEditMode,
+    zoneSelectionMode,
+    zoneNeutralTerrain,
+    zoneNeutralTerrainColor,
+    zoneGridLinesVisible,
+    zoneGridLineColor,
     layerStates,
     navigationNodeType,
   ]);
@@ -1882,6 +2118,8 @@ function ExperienceScene({
       map: currentMap,
       hoveredZoneId,
       selectedMarkerId: browsing.mode === "itemSelected" || browsing.mode === "contentOpen" ? browsing.markerId : null,
+      zoneFocusDirection,
+      onZoneFocusDirectionChange: setZoneFocusDirection,
       onSelectZone: (nextZoneId) => dispatchBrowsing({ type: "selectZone", zoneId: nextZoneId }),
       onFocusZone: () => dispatchBrowsing({ type: "focusZone", previousViewId: currentMap.defaultCameraPresetId }),
       onReturnOverview: () => dispatchBrowsing({ type: "returnToOverview", previousViewId: currentMap.defaultCameraPresetId }),
@@ -1890,7 +2128,7 @@ function ExperienceScene({
     });
 
     return () => onMapUiStateChange(null);
-  }, [browsing, currentMap, hoveredZoneId, onMapUiStateChange, phase]);
+  }, [browsing, currentMap, hoveredZoneId, onMapUiStateChange, phase, zoneFocusDirection]);
 
   useEffect(() => {
     if (!editorAvailable || !snapshot.hasUnsavedChanges) {
@@ -1906,8 +2144,10 @@ function ExperienceScene({
 
         const result = editorSession.replaceWithDocument(mapDefinitionToDocument(savedDraft), true);
         const nextTerrain = createTerrainDataFromWorld(editorSession.world);
-        setCurrentMap(savedDraft);
+        const nextZoneOverlay = buildZoneOverlayMeshes(editorSession.world);
+        setCurrentMap(normalizeEditableMap(savedDraft));
         setTerrain(nextTerrain);
+        setZoneOverlay(nextZoneOverlay);
         setLastRebuiltChunks(result.rebuiltChunkIds);
         setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
         setAutosaveStatus("draft restored");
@@ -2166,6 +2406,10 @@ function ExperienceScene({
         chunks={terrain.surfaceChunks}
         visible={activeRenderMode === "surface" || phase === "loading"}
         warmup={phase === "loading"}
+        neutral={editorAvailable && zoneNeutralTerrain}
+        neutralColor={zoneNeutralTerrainColor}
+        gridLinesVisible={editorAvailable && zoneGridLinesVisible}
+        gridLineColor={zoneGridLineColor}
       />
       <WorldEntryItem visible={phase === "ready"} onActivate={startExpansion} />
       <ConstrainedMapControls
@@ -2179,6 +2423,7 @@ function ExperienceScene({
       <EditorInteractionOverlay
         editorEnabled={editorAvailable && !entityTransformDragging}
         tool={tool}
+        zoneSelectionMode={zoneSelectionMode}
         renderMode={activeRenderMode}
         chunks={terrain.chunks}
         surfaceChunks={terrain.surfaceChunks}
@@ -2186,12 +2431,16 @@ function ExperienceScene({
         world={editorSession.world}
         hoveredCell={hoveredCell}
         onHoverCell={setHoveredCell}
+        onZoneRectangleAnchor={setZoneRectangleAnchor}
         onEditCell={handleEditorCell}
         onEditCells={handleEditorCells}
       />
       <BrushFootprintIndicator
         coordinate={hoveredCell}
         tool={tool}
+        zoneEditMode={zoneEditMode}
+        zoneSelectionMode={zoneSelectionMode}
+        zoneRectangleAnchor={zoneRectangleAnchor}
         settings={effectiveBrushSettings}
         world={editorSession.world}
         blockId={paintBlockId}
@@ -2256,9 +2505,20 @@ function ExperienceScene({
         editorEnabled={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "navigation")}
         map={currentMap}
       />
+      {editorAvailable && !cleanPreview && isLayerVisible(layerStates, "zones") ? (
+        <ZoneOverlayChunks
+          map={currentMap}
+          chunks={zoneOverlay.chunks}
+          browsing={editorZoneBrowsing}
+          interactive={false}
+          onHoverZone={() => undefined}
+          onSelectZone={() => undefined}
+        />
+      ) : null}
       <MapInteractionProxies
         map={currentMap}
         world={editorSession.world}
+        zoneOverlayChunks={zoneOverlay.chunks}
         enabled={phase === "explore" && !editorAvailable}
         browsing={browsing}
         onHoverZone={setHoveredZoneId}
@@ -2346,10 +2606,18 @@ function SurfaceTerrainChunks({
   chunks,
   visible,
   warmup,
+  neutral,
+  neutralColor,
+  gridLinesVisible,
+  gridLineColor,
 }: {
   chunks: SurfaceChunkMeshData[];
   visible: boolean;
   warmup: boolean;
+  neutral: boolean;
+  neutralColor: string;
+  gridLinesVisible: boolean;
+  gridLineColor: string;
 }) {
   const material = useMemo(
     () =>
@@ -2359,6 +2627,25 @@ function SurfaceTerrainChunks({
         side: THREE.FrontSide,
       }),
     [],
+  );
+  const neutralMaterial = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: neutralColor,
+        roughness: 0.74,
+        metalness: 0,
+      }),
+    [neutralColor],
+  );
+  const gridLineMaterial = useMemo(
+    () =>
+      new THREE.LineBasicMaterial({
+        color: gridLineColor,
+        transparent: true,
+        opacity: 0.42,
+        depthWrite: false,
+      }),
+    [gridLineColor],
   );
   const waterMaterial = useMemo(
     () =>
@@ -2386,14 +2673,22 @@ function SurfaceTerrainChunks({
     return () => {
       material.dispose();
       waterMaterial.dispose();
+      neutralMaterial.dispose();
+      gridLineMaterial.dispose();
       warmupMaterial.dispose();
     };
-  }, [material, warmupMaterial, waterMaterial]);
+  }, [gridLineMaterial, material, neutralMaterial, warmupMaterial, waterMaterial]);
 
   return (
     <group visible={visible}>
       {chunks.map((chunk) => (
-        <SurfaceTerrainChunkMesh key={chunk.id} chunk={chunk} material={warmup ? warmupMaterial : chunk.materialFamily === "water" ? waterMaterial : material} />
+        <SurfaceTerrainChunkMesh
+          key={chunk.id}
+          chunk={chunk}
+          material={warmup ? warmupMaterial : neutral ? neutralMaterial : chunk.materialFamily === "water" ? waterMaterial : material}
+          gridLineMaterial={gridLineMaterial}
+          gridLinesVisible={gridLinesVisible}
+        />
       ))}
     </group>
   );
@@ -2402,9 +2697,13 @@ function SurfaceTerrainChunks({
 function SurfaceTerrainChunkMesh({
   chunk,
   material,
+  gridLineMaterial,
+  gridLinesVisible,
 }: {
   chunk: SurfaceChunkMeshData;
   material: THREE.Material;
+  gridLineMaterial: THREE.Material;
+  gridLinesVisible: boolean;
 }) {
   const geometry = useMemo(() => {
     const nextGeometry = new THREE.BufferGeometry();
@@ -2417,23 +2716,35 @@ function SurfaceTerrainChunkMesh({
     nextGeometry.computeBoundingSphere();
     return nextGeometry;
   }, [chunk]);
+  const edgeGeometry = useMemo(() => new THREE.EdgesGeometry(geometry, 8), [geometry]);
 
   useEffect(() => {
     return () => {
       geometry.dispose();
+      edgeGeometry.dispose();
     };
-  }, [geometry]);
+  }, [edgeGeometry, geometry]);
 
   return (
-    <mesh
-      geometry={geometry}
-      material={material}
-      userData={{
-        portfolioSurfaceChunkId: chunk.id,
-        portfolioSurfaceTriangleToCell: chunk.triangleToCell,
-      }}
-      frustumCulled
-    />
+    <group>
+      <mesh
+        geometry={geometry}
+        material={material}
+        userData={{
+          portfolioSurfaceChunkId: chunk.id,
+          portfolioSurfaceTriangleToCell: chunk.triangleToCell,
+        }}
+        frustumCulled
+      />
+      {gridLinesVisible ? (
+        <lineSegments
+          geometry={edgeGeometry}
+          material={gridLineMaterial}
+          position={[0, 0.003, 0]}
+          frustumCulled
+        />
+      ) : null}
+    </group>
   );
 }
 
@@ -2645,6 +2956,7 @@ function TerrainChunkMesh({
 function EditorInteractionOverlay({
   editorEnabled,
   tool,
+  zoneSelectionMode,
   renderMode,
   chunks,
   surfaceChunks,
@@ -2652,11 +2964,13 @@ function EditorInteractionOverlay({
   world,
   hoveredCell,
   onHoverCell,
+  onZoneRectangleAnchor,
   onEditCell,
   onEditCells,
 }: {
   editorEnabled: boolean;
   tool: EditorTool;
+  zoneSelectionMode: ZoneSelectionMode;
   renderMode: TerrainRenderMode;
   chunks: TerrainChunk[];
   surfaceChunks: SurfaceChunkMeshData[];
@@ -2664,6 +2978,7 @@ function EditorInteractionOverlay({
   world: MapEditorSession["world"];
   hoveredCell: GridCoordinate | null;
   onHoverCell: (coordinate: GridCoordinate | null) => void;
+  onZoneRectangleAnchor: (coordinate: GridCoordinate | null) => void;
   onEditCell: (coordinate: GridCoordinate) => void;
   onEditCells: (coordinates: GridCoordinate[]) => void;
 }) {
@@ -2672,6 +2987,7 @@ function EditorInteractionOverlay({
   const surfaceChunkById = useMemo(() => new Map(surfaceChunks.map((chunk) => [chunk.id, chunk])), [surfaceChunks]);
   const mousePosition = useRef(new THREE.Vector2(0, 0));
   const pointerDownPosition = useRef<{ x: number; y: number } | null>(null);
+  const zoneRectangleAnchorRef = useRef<GridCoordinate | null>(null);
   const brushActive = useRef(false);
   const brushedCellKeys = useRef(new Set<string>());
   const brushedCells = useRef<GridCoordinate[]>([]);
@@ -2733,17 +3049,17 @@ function EditorInteractionOverlay({
       incrementEditorPerfCounter("raycasts");
       const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
       if (!currentHover) {
-        return false;
+        return null;
       }
 
       const key = editorCoordinateKey(currentHover);
       if (brushedCellKeys.current.has(key)) {
-        return false;
+        return null;
       }
 
       brushedCellKeys.current.add(key);
       brushedCells.current.push(currentHover);
-      return true;
+      return currentHover;
     };
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -2757,11 +3073,20 @@ function EditorInteractionOverlay({
       }
       pointerDownPosition.current = { x: event.clientX, y: event.clientY };
 
-      if (isStrokeBrushTool(tool)) {
+      if (tool === "zone" && zoneSelectionMode === "rectangle") {
+        raycaster.setFromCamera(mousePosition.current, camera);
+        incrementEditorPerfCounter("raycasts");
+        const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
+        zoneRectangleAnchorRef.current = currentHover;
+        onZoneRectangleAnchor(currentHover);
+      } else if (isStrokeBrushTool(tool)) {
         brushActive.current = true;
         brushedCellKeys.current.clear();
         brushedCells.current = [];
-        paintCurrentHover();
+        const paintedHover = paintCurrentHover();
+        if (paintedHover && tool === "zone" && zoneSelectionMode === "brush") {
+          onEditCell(paintedHover);
+        }
       }
 
       event.preventDefault();
@@ -2776,15 +3101,36 @@ function EditorInteractionOverlay({
         return;
       }
 
-      if (paintCurrentHover()) {
+      const paintedHover = paintCurrentHover();
+      if (paintedHover) {
+        if (tool === "zone" && zoneSelectionMode === "brush") {
+          onEditCell(paintedHover);
+        }
         event.preventDefault();
       }
     };
 
     const handlePointerUp = (event: PointerEvent) => {
+      if (tool === "zone" && zoneSelectionMode === "rectangle" && zoneRectangleAnchorRef.current) {
+        raycaster.setFromCamera(mousePosition.current, camera);
+        incrementEditorPerfCounter("raycasts");
+        const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
+        const anchor = zoneRectangleAnchorRef.current;
+        zoneRectangleAnchorRef.current = null;
+        onZoneRectangleAnchor(null);
+        pointerDownPosition.current = null;
+        if (currentHover) {
+          onEditCells(getZoneRectangleFootprint(anchor, currentHover));
+          event.preventDefault();
+        }
+        return;
+      }
+
       if (brushActive.current) {
         brushActive.current = false;
-        onEditCells(brushedCells.current);
+        if (!(tool === "zone" && zoneSelectionMode === "brush")) {
+          onEditCells(brushedCells.current);
+        }
         brushedCellKeys.current.clear();
         brushedCells.current = [];
         pointerDownPosition.current = null;
@@ -2819,6 +3165,8 @@ function EditorInteractionOverlay({
 
     const handlePointerCancel = () => {
       brushActive.current = false;
+      zoneRectangleAnchorRef.current = null;
+      onZoneRectangleAnchor(null);
       brushedCellKeys.current.clear();
       brushedCells.current = [];
       pointerDownPosition.current = null;
@@ -2835,7 +3183,7 @@ function EditorInteractionOverlay({
       window.removeEventListener("pointerup", handlePointerUp, { capture: true });
       window.removeEventListener("pointercancel", handlePointerCancel, { capture: true });
     };
-  }, [camera, chunkById, editorEnabled, gl.domElement, onEditCell, onEditCells, onHoverCell, raycaster, renderMode, surfaceChunkById, tool, world]);
+  }, [camera, chunkById, editorEnabled, gl.domElement, onEditCell, onEditCells, onHoverCell, onZoneRectangleAnchor, raycaster, renderMode, surfaceChunkById, tool, world, zoneSelectionMode]);
 
   useEffect(() => {
     shouldRaycast.current = true;
@@ -3008,6 +3356,9 @@ function SelectionIndicator({
 function BrushFootprintIndicator({
   coordinate,
   tool,
+  zoneEditMode,
+  zoneSelectionMode,
+  zoneRectangleAnchor,
   settings,
   world,
   blockId,
@@ -3018,6 +3369,9 @@ function BrushFootprintIndicator({
 }: {
   coordinate: GridCoordinate | null;
   tool: EditorTool;
+  zoneEditMode: ZoneEditMode;
+  zoneSelectionMode: ZoneSelectionMode;
+  zoneRectangleAnchor: GridCoordinate | null;
   settings: TerrainBrushSettings;
   world: MapEditorSession["world"];
   blockId: BlockId;
@@ -3029,11 +3383,17 @@ function BrushFootprintIndicator({
   const cells = useMemo(
     () => {
       void revision;
+      if (tool === "zone" && coordinate) {
+        return zoneSelectionMode === "rectangle" && zoneRectangleAnchor
+          ? getZoneRectangleFootprint(zoneRectangleAnchor, coordinate)
+          : getZoneBrushFootprint(coordinate, settings);
+      }
       return coordinate ? getToolPreviewFootprint(coordinate, tool, settings, world, blockId, zoneId) : [];
     },
-    [blockId, coordinate, revision, settings, tool, world, zoneId],
+    [blockId, coordinate, revision, settings, tool, world, zoneId, zoneRectangleAnchor, zoneSelectionMode],
   );
   const previewStyle = getBrushPreviewStyle(tool);
+  const zonePreviewColor = zoneEditMode === "erase" ? "#facc15" : color;
   return (
     <>
       {cells.map((cell) => (
@@ -3049,8 +3409,9 @@ function BrushFootprintIndicator({
           <SurfaceBrushCellIndicator
             key={`${cell.x}-${cell.y}-${cell.z}`}
             coordinate={cell}
+            world={world}
             visible={visible}
-            color={color}
+            color={tool === "zone" ? zonePreviewColor : color}
           />
         )
       ))}
@@ -3060,24 +3421,33 @@ function BrushFootprintIndicator({
 
 function SurfaceBrushCellIndicator({
   coordinate,
+  world,
   visible,
   color,
 }: {
   coordinate: GridCoordinate;
+  world: MapEditorSession["world"];
   visible: boolean;
   color: string;
 }) {
+  const geometry = useMemo(() => {
+    const surface = getTerrainSurfaceAt(world, coordinate.x, coordinate.z);
+    if (!surface.valid) return null;
+    const data = buildPreviewSurfaceGeometry(world, surface.grid);
+    const nextGeometry = new THREE.BufferGeometry();
+    nextGeometry.setAttribute("position", new THREE.BufferAttribute(data.positions, 3));
+    nextGeometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
+    nextGeometry.computeVertexNormals();
+    return nextGeometry;
+  }, [coordinate.x, coordinate.z, world]);
   const lineGeometry = useMemo(() => {
+    const surface = getTerrainSurfaceAt(world, coordinate.x, coordinate.z);
+    if (!surface.valid) return null;
+    const data = buildPreviewSurfaceGeometry(world, surface.grid);
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
-      -0.5, 0, -0.5, 0.5, 0, -0.5,
-      0.5, 0, -0.5, 0.5, 0, 0.5,
-      0.5, 0, 0.5, -0.5, 0, 0.5,
-      -0.5, 0, 0.5, -0.5, 0, -0.5,
-    ]), 3));
+    geometry.setAttribute("position", new THREE.BufferAttribute(data.boundaryPositions, 3));
     return geometry;
-  }, []);
-  const fillGeometry = useMemo(() => new THREE.PlaneGeometry(0.94, 0.94), []);
+  }, [coordinate.x, coordinate.z, world]);
   const lineMaterial = useMemo(
     () => new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.95, depthTest: false }),
     [color],
@@ -3089,36 +3459,68 @@ function SurfaceBrushCellIndicator({
 
   useEffect(() => {
     return () => {
-      lineGeometry.dispose();
-      fillGeometry.dispose();
+      geometry?.dispose();
+      lineGeometry?.dispose();
       lineMaterial.dispose();
       fillMaterial.dispose();
     };
-  }, [fillGeometry, fillMaterial, lineGeometry, lineMaterial]);
+  }, [fillMaterial, geometry, lineGeometry, lineMaterial]);
 
-  if (!visible) {
+  if (!visible || !geometry || !lineGeometry) {
     return null;
   }
 
   return (
-    <group position={[coordinate.x - 31.5, coordinate.y + 1.012, coordinate.z - 31.5]} renderOrder={11}>
-      <mesh geometry={fillGeometry} material={fillMaterial} rotation={[-Math.PI / 2, 0, 0]} />
+    <group renderOrder={11}>
+      <mesh geometry={geometry} material={fillMaterial} />
       <lineSegments geometry={lineGeometry} material={lineMaterial} />
     </group>
   );
 }
 
-type ZoneProxy = {
-  zoneId: string;
-  label: string;
-  color: string;
-  center: THREE.Vector3;
-  size: THREE.Vector3;
-};
+function buildPreviewSurfaceGeometry(world: MapEditorSession["world"], coordinate: GridCoordinate) {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const boundaryPositions: number[] = [];
+  const center = world.gridToWorld(coordinate.x, coordinate.y, coordinate.z);
+  const shape = getShapeDefinition(world.getShape(coordinate.x, coordinate.y, coordinate.z));
+  const faces = shape.faces(world.getRotation(coordinate.x, coordinate.y, coordinate.z), world.getState(coordinate.x, coordinate.y, coordinate.z));
+  for (const face of faces) {
+    if (face.direction !== "py") continue;
+    const offset = positions.length / 3;
+    const normal = new THREE.Vector3(...face.normal).normalize();
+    for (const corner of face.corners) {
+      positions.push(
+        center.x + corner[0] * 1.02 + normal.x * 0.024,
+        center.y + corner[1] * 1.02 + normal.y * 0.024,
+        center.z + corner[2] * 1.02 + normal.z * 0.024,
+      );
+    }
+    indices.push(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
+    for (let index = 0; index < face.corners.length; index += 1) {
+      const a = face.corners[index];
+      const b = face.corners[(index + 1) % face.corners.length];
+      boundaryPositions.push(
+        center.x + a[0] * 1.025 + normal.x * 0.03,
+        center.y + a[1] * 1.025 + normal.y * 0.03,
+        center.z + a[2] * 1.025 + normal.z * 0.03,
+        center.x + b[0] * 1.025 + normal.x * 0.03,
+        center.y + b[1] * 1.025 + normal.y * 0.03,
+        center.z + b[2] * 1.025 + normal.z * 0.03,
+      );
+    }
+  }
+  return {
+    positions: new Float32Array(positions),
+    indices: new Uint32Array(indices),
+    boundaryPositions: new Float32Array(boundaryPositions),
+  };
+}
 
 function MapInteractionProxies({
   map,
   world,
+  zoneOverlayChunks,
   enabled,
   browsing,
   onHoverZone,
@@ -3127,46 +3529,24 @@ function MapInteractionProxies({
 }: {
   map: MapDefinition;
   world: MapEditorSession["world"];
+  zoneOverlayChunks: ZoneOverlayChunkMeshData[];
   enabled: boolean;
   browsing: BrowsingState;
   onHoverZone: (zoneId: string | null) => void;
   onSelectZone: (zoneId: string) => void;
   onSelectMarker: (marker: MapMarkerDefinition) => void;
 }) {
-  const zoneProxies = useMemo(() => createZoneProxies(map, world), [map, world]);
-  const zoneGeometry = useMemo(() => new THREE.BoxGeometry(1, 0.08, 1), []);
   const markerGeometry = useMemo(() => new THREE.ConeGeometry(0.34, 0.82, 5), []);
   const markerMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#d8b45a" }), []);
   const selectedMarkerMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#ffffff" }), []);
-  const zoneMaterials = useMemo(
-    () => new Map(zoneProxies.map((proxy) => [
-      proxy.zoneId,
-      new THREE.MeshBasicMaterial({
-        color: proxy.color,
-        transparent: true,
-        opacity: browsing.mode !== "overview" && "zoneId" in browsing && browsing.zoneId === proxy.zoneId ? 0.32 : 0.16,
-        depthWrite: false,
-      }),
-    ])),
-    [browsing, zoneProxies],
-  );
 
   useEffect(() => {
     return () => {
-      zoneGeometry.dispose();
       markerGeometry.dispose();
       markerMaterial.dispose();
       selectedMarkerMaterial.dispose();
     };
-  }, [markerGeometry, markerMaterial, selectedMarkerMaterial, zoneGeometry]);
-
-  useEffect(() => {
-    return () => {
-      for (const material of zoneMaterials.values()) {
-        material.dispose();
-      }
-    };
-  }, [zoneMaterials]);
+  }, [markerGeometry, markerMaterial, selectedMarkerMaterial]);
 
   if (!enabled) {
     return null;
@@ -3174,29 +3554,13 @@ function MapInteractionProxies({
 
   return (
     <group>
-      {zoneProxies.map((proxy) => (
-        <mesh
-          key={proxy.zoneId}
-          geometry={zoneGeometry}
-          material={zoneMaterials.get(proxy.zoneId)}
-          position={proxy.center}
-          scale={proxy.size}
-          onPointerOver={(event) => {
-            event.stopPropagation();
-            document.body.style.cursor = "pointer";
-            onHoverZone(proxy.zoneId);
-          }}
-          onPointerOut={(event) => {
-            event.stopPropagation();
-            document.body.style.cursor = "";
-            onHoverZone(null);
-          }}
-          onClick={(event) => {
-            event.stopPropagation();
-            onSelectZone(proxy.zoneId);
-          }}
-        />
-      ))}
+      <ZoneOverlayChunks
+        map={map}
+        chunks={zoneOverlayChunks}
+        browsing={browsing}
+        onHoverZone={onHoverZone}
+        onSelectZone={onSelectZone}
+      />
       {map.markers.filter((marker) => marker.runtimeVisible).map((marker) => {
         const position = world.gridToWorld(marker.gridPosition.x, marker.gridPosition.y, marker.gridPosition.z);
         const selected = (browsing.mode === "itemSelected" || browsing.mode === "contentOpen") && browsing.markerId === marker.id;
@@ -3230,49 +3594,150 @@ function MapInteractionProxies({
   );
 }
 
-function createZoneProxies(map: MapDefinition, world: MapEditorSession["world"]) {
-  const zonesByNumber = new Map(map.zones.map((zone) => [zone.numericId, zone]));
-  const bounds = new Map<number, { minX: number; maxX: number; minZ: number; maxZ: number; y: number }>();
-
-  for (const assignment of map.zoneAssignments) {
-    const zone = zonesByNumber.get(assignment.zoneId);
-    if (!zone?.overlayVisible) {
-      continue;
-    }
-    const current = bounds.get(assignment.zoneId);
-    if (!current) {
-      bounds.set(assignment.zoneId, {
-        minX: assignment.x,
-        maxX: assignment.x,
-        minZ: assignment.z,
-        maxZ: assignment.z,
-        y: assignment.y,
-      });
-      continue;
-    }
-    current.minX = Math.min(current.minX, assignment.x);
-    current.maxX = Math.max(current.maxX, assignment.x);
-    current.minZ = Math.min(current.minZ, assignment.z);
-    current.maxZ = Math.max(current.maxZ, assignment.z);
-    current.y = Math.max(current.y, assignment.y);
-  }
-
-  const proxies: ZoneProxy[] = [];
-  for (const [numericId, box] of bounds) {
-    const zone = zonesByNumber.get(numericId);
-    if (!zone) continue;
-    const min = world.gridToWorld(box.minX, box.y, box.minZ);
-    const max = world.gridToWorld(box.maxX, box.y, box.maxZ);
-    proxies.push({
-      zoneId: zone.id,
-      label: zone.label,
+function ZoneOverlayChunks({
+  map,
+  chunks,
+  browsing,
+  interactive = true,
+  onHoverZone,
+  onSelectZone,
+}: {
+  map: MapDefinition;
+  chunks: ZoneOverlayChunkMeshData[];
+  browsing: BrowsingState;
+  interactive?: boolean;
+  onHoverZone: (zoneId: string | null) => void;
+  onSelectZone: (zoneId: string) => void;
+}) {
+  const zonesByNumber = useMemo(() => new Map(map.zones.map((zone) => [zone.numericId, zone])), [map.zones]);
+  const materials = useMemo(() => new Map(map.zones.map((zone) => [
+    zone.numericId,
+    new THREE.MeshBasicMaterial({
       color: zone.color,
-      center: new THREE.Vector3((min.x + max.x) / 2, box.y + 1.04, (min.z + max.z) / 2),
-      size: new THREE.Vector3(Math.max(1, box.maxX - box.minX + 1), 1, Math.max(1, box.maxZ - box.minZ + 1)),
-    });
-  }
+      transparent: true,
+      opacity: browsing.mode !== "overview" && "zoneId" in browsing && browsing.zoneId === zone.id ? 0.34 : 0.18,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  ])), [browsing, map.zones]);
+  const boundaryMaterials = useMemo(() => new Map(map.zones.map((zone) => [
+    zone.numericId,
+    new THREE.LineBasicMaterial({
+      color: zone.color,
+      transparent: true,
+      opacity: browsing.mode !== "overview" && "zoneId" in browsing && browsing.zoneId === zone.id ? 0.95 : 0.72,
+      depthTest: true,
+    }),
+  ])), [browsing, map.zones]);
 
-  return proxies;
+  useEffect(() => () => {
+    for (const material of materials.values()) material.dispose();
+    for (const material of boundaryMaterials.values()) material.dispose();
+  }, [boundaryMaterials, materials]);
+
+  return (
+    <>
+      {chunks.map((chunk) => {
+        const zone = zonesByNumber.get(chunk.zoneId);
+        if (!zone?.overlayVisible) return null;
+        return (
+          <ZoneOverlayChunk
+            key={chunk.id}
+            chunk={chunk}
+            zoneId={zone.id}
+            material={materials.get(chunk.zoneId)}
+            boundaryMaterial={boundaryMaterials.get(chunk.zoneId)}
+            interactive={interactive}
+            onHoverZone={onHoverZone}
+            onSelectZone={onSelectZone}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+function parseChunkId(chunkId: string) {
+  const match = /^chunk-(\d+)-(\d+)$/.exec(chunkId);
+  if (!match) return null;
+  return {
+    chunkX: Number(match[1]),
+    chunkZ: Number(match[2]),
+  };
+}
+
+function zoneOverlayBaseChunkId(zoneOverlayChunkId: string) {
+  const match = /^(chunk-\d+-\d+)-zone-\d+$/.exec(zoneOverlayChunkId);
+  return match?.[1] ?? zoneOverlayChunkId;
+}
+
+function compareZoneOverlayChunks(left: ZoneOverlayChunkMeshData, right: ZoneOverlayChunkMeshData) {
+  return left.chunkZ - right.chunkZ || left.chunkX - right.chunkX || left.zoneId - right.zoneId;
+}
+
+function ZoneOverlayChunk({
+  chunk,
+  zoneId,
+  material,
+  boundaryMaterial,
+  interactive,
+  onHoverZone,
+  onSelectZone,
+}: {
+  chunk: ZoneOverlayChunkMeshData;
+  zoneId: string;
+  material?: THREE.Material;
+  boundaryMaterial?: THREE.Material;
+  interactive: boolean;
+  onHoverZone: (zoneId: string | null) => void;
+  onSelectZone: (zoneId: string) => void;
+}) {
+  const geometry = useMemo(() => {
+    const nextGeometry = new THREE.BufferGeometry();
+    nextGeometry.setAttribute("position", new THREE.BufferAttribute(chunk.positions, 3));
+    nextGeometry.setIndex(new THREE.BufferAttribute(chunk.indices, 1));
+    nextGeometry.computeVertexNormals();
+    return nextGeometry;
+  }, [chunk]);
+  const boundaryGeometry = useMemo(() => {
+    const nextGeometry = new THREE.BufferGeometry();
+    nextGeometry.setAttribute("position", new THREE.BufferAttribute(chunk.boundaryPositions, 3));
+    return nextGeometry;
+  }, [chunk]);
+
+  useEffect(() => () => {
+    geometry.dispose();
+    boundaryGeometry.dispose();
+  }, [boundaryGeometry, geometry]);
+
+  if (!material || !boundaryMaterial) return null;
+
+  return (
+    <group renderOrder={8}>
+      <mesh
+        geometry={geometry}
+        material={material}
+        onPointerOver={(event) => {
+          if (!interactive) return;
+          event.stopPropagation();
+          document.body.style.cursor = "pointer";
+          onHoverZone(zoneId);
+        }}
+        onPointerOut={(event) => {
+          if (!interactive) return;
+          event.stopPropagation();
+          document.body.style.cursor = "";
+          onHoverZone(null);
+        }}
+        onClick={(event) => {
+          if (!interactive) return;
+          event.stopPropagation();
+          onSelectZone(zoneId);
+        }}
+      />
+      <lineSegments geometry={boundaryGeometry} material={boundaryMaterial} />
+    </group>
+  );
 }
 
 function EditorMarkers({
@@ -4028,9 +4493,7 @@ function getEffectiveTerrainBrushSettings(tool: EditorTool, settings: TerrainBru
     tool === "lower" ||
     tool === "flatten" ||
     tool === "fill" ||
-    tool === "clear" ||
-    tool === "zone" ||
-    tool === "removeZone"
+    tool === "clear"
   ) {
     return settings;
   }
@@ -4105,10 +4568,6 @@ function getTerrainBrushOperation(tool: EditorTool): TerrainBrushOperation | nul
       return "paint-path";
     case "removePath":
       return "remove-path";
-    case "zone":
-      return "assign-zone";
-    case "removeZone":
-      return "remove-zone";
     default:
       return null;
   }
@@ -4119,7 +4578,7 @@ function getActiveTerrainBlockId(blockId: BlockId, shapeId: ShapeId): BlockId {
 }
 
 function isStrokeBrushTool(tool: EditorTool) {
-  return getTerrainBrushOperation(tool) !== null;
+  return tool === "zone" || getTerrainBrushOperation(tool) !== null;
 }
 
 function isLayerVisible(layers: EditorLayerState[], id: EditorLayerId) {
@@ -4210,16 +4669,21 @@ function isEditorUiEvent(event: PointerEvent) {
   return target instanceof HTMLElement && Boolean(target.closest(".map-editor-toolbar, button, input, select, textarea, [role='button']"));
 }
 
-function getBrowsingCameraPreset(map: MapDefinition, browsing: BrowsingState) {
+function getBrowsingCameraPreset(
+  map: MapDefinition,
+  browsing: BrowsingState,
+  world: MapEditorSession["world"],
+  zoneFocusDirection: ZoneFocusDirection,
+) {
   if (browsing.mode === "returningToOverview") {
     return getMapCameraPreset(map, map.defaultCameraPresetId);
   }
   if (browsing.mode === "zoneFocused") {
     const zone = map.zones.find((candidate) => candidate.id === browsing.zoneId);
-    const marker = zone?.defaultFocusMarkerId
-      ? map.markers.find((candidate) => candidate.id === zone.defaultFocusMarkerId)
-      : null;
-    return getMapCameraPreset(map, marker?.focusCameraPresetId) ?? getMapCameraPreset(map, map.defaultCameraPresetId);
+    return zone
+      ? createZoneFocusCameraPreset(world, zone, zoneFocusDirection)
+        ?? getMapCameraPreset(map, map.defaultCameraPresetId)
+      : getMapCameraPreset(map, map.defaultCameraPresetId);
   }
   if (browsing.mode === "itemSelected" || browsing.mode === "contentOpen") {
     const marker = map.markers.find((candidate) => candidate.id === browsing.markerId);
@@ -4227,6 +4691,119 @@ function getBrowsingCameraPreset(map: MapDefinition, browsing: BrowsingState) {
   }
 
   return null;
+}
+
+function createZoneFocusCameraPreset(
+  world: MapEditorSession["world"],
+  zone: MapZoneDefinition,
+  direction: ZoneFocusDirection,
+): MapCameraPreset | null {
+  const bounds = getZoneSurfaceBounds(world, zone.numericId);
+  if (!bounds) {
+    return null;
+  }
+
+  const spanX = Math.max(1, bounds.maxX - bounds.minX + world.config.blockSize);
+  const spanZ = Math.max(1, bounds.maxZ - bounds.minZ + world.config.blockSize);
+  const horizontalSpan = Math.max(spanX, spanZ);
+  const distance = THREE.MathUtils.clamp(horizontalSpan * 2.15 + 18, 24, 96);
+  const height = THREE.MathUtils.clamp(horizontalSpan * 0.42 + 18 + Math.max(0, bounds.maxY - bounds.minY) * 0.35, 18, 50);
+  const directionVector = getZoneFocusDirectionVector(direction);
+
+  return {
+    id: `zone-focus-${zone.id}-${direction}-${bounds.revisionKey}`,
+    label: `${zone.label} focus`,
+    cameraPosition: {
+      x: bounds.centerX + directionVector.x * distance,
+      y: bounds.centerY + height,
+      z: bounds.centerZ + directionVector.z * distance,
+    },
+    controlsTarget: {
+      x: bounds.centerX,
+      y: bounds.centerY,
+      z: bounds.centerZ,
+    },
+    minDistance: 16,
+    maxDistance: 112,
+    transitionDuration: 1.35,
+    preferredPolarAngle: THREE.MathUtils.degToRad(58),
+  };
+}
+
+function getZoneSurfaceBounds(world: MapEditorSession["world"], zoneId: number) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  let count = 0;
+
+  for (let z = 0; z < world.config.depth; z += 1) {
+    for (let x = 0; x < world.config.width; x += 1) {
+      if (world.getColumnZone(x, z) !== zoneId) {
+        continue;
+      }
+
+      const surface = getTerrainSurfaceAt(world, x, z);
+      if (!surface.valid) {
+        continue;
+      }
+
+      minX = Math.min(minX, surface.worldPosition.x);
+      maxX = Math.max(maxX, surface.worldPosition.x);
+      minY = Math.min(minY, surface.worldPosition.y);
+      maxY = Math.max(maxY, surface.worldPosition.y);
+      minZ = Math.min(minZ, surface.worldPosition.z);
+      maxZ = Math.max(maxZ, surface.worldPosition.z);
+      count += 1;
+    }
+  }
+
+  if (count === 0) {
+    return null;
+  }
+
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    minZ,
+    maxZ,
+    centerX: (minX + maxX) / 2,
+    centerY: (minY + maxY) / 2 + 0.75,
+    centerZ: (minZ + maxZ) / 2,
+    revisionKey: `${count}-${minX.toFixed(1)}-${maxX.toFixed(1)}-${minZ.toFixed(1)}-${maxZ.toFixed(1)}-${maxY.toFixed(1)}`,
+  };
+}
+
+function getZoneFocusDirectionVector(direction: ZoneFocusDirection) {
+  switch (direction) {
+    case "north":
+      return { x: 0, z: -1 };
+    case "south":
+      return { x: 0, z: 1 };
+    case "east":
+      return { x: 1, z: 0 };
+    case "west":
+      return { x: -1, z: 0 };
+    case "northeast":
+      return normalizeDirection2(1, -1);
+    case "northwest":
+      return normalizeDirection2(-1, -1);
+    case "southeast":
+      return normalizeDirection2(1, 1);
+    case "southwest":
+      return normalizeDirection2(-1, 1);
+    default:
+      return { x: 0, z: 1 };
+  }
+}
+
+function normalizeDirection2(x: number, z: number) {
+  const length = Math.hypot(x, z) || 1;
+  return { x: x / length, z: z / length };
 }
 
 function getMapCameraPreset(map: MapDefinition, presetId: string | undefined) {
@@ -4399,17 +4976,38 @@ function ConstrainedMapControls({
     const tweenState = { progress: 0 };
     const startCamera = camera.position.clone();
     const startTarget = controls.target.clone();
+    const startOffset = startCamera.clone().sub(startTarget);
+    const endOffset = targetCamera.clone().sub(targetControls);
+    const startRadius = Math.max(1, Math.hypot(startOffset.x, startOffset.z));
+    const endRadius = Math.max(1, Math.hypot(endOffset.x, endOffset.z));
+    const startHeight = startOffset.y;
+    const endHeight = endOffset.y;
+    const startAngle = Math.atan2(startOffset.z, startOffset.x);
+    const endAngle = Math.atan2(endOffset.z, endOffset.x);
+    const angleDelta = normalizeAngleRadians(endAngle - startAngle);
+    const spinDelta = angleDelta + (angleDelta >= 0 ? Math.PI * 2 : -Math.PI * 2);
 
     focusTween.current = gsap.to(tweenState, {
       progress: 1,
-      duration: reducedMotion ? 0.01 : focusPreset.transitionDuration ?? 0.9,
+      duration: reducedMotion ? 0.01 : focusPreset.transitionDuration ?? 1.15,
       ease: "power3.inOut",
       onUpdate: () => {
-        camera.position.lerpVectors(startCamera, targetCamera, tweenState.progress);
-        controls.target.lerpVectors(startTarget, targetControls, tweenState.progress);
+        const progress = tweenState.progress;
+        const nextTarget = controls.target.lerpVectors(startTarget, targetControls, progress);
+        const radius = THREE.MathUtils.lerp(startRadius, endRadius, progress);
+        const height = THREE.MathUtils.lerp(startHeight, endHeight, progress);
+        const angle = startAngle + spinDelta * progress;
+        camera.position.set(
+          nextTarget.x + Math.cos(angle) * radius,
+          nextTarget.y + height,
+          nextTarget.z + Math.sin(angle) * radius,
+        );
         controls.update();
       },
       onComplete: () => {
+        camera.position.copy(targetCamera);
+        controls.target.copy(targetControls);
+        controls.update();
         focusTween.current = null;
       },
     });
@@ -4504,6 +5102,13 @@ function ConstrainedMapControls({
       target={[0, 13.5, 0]}
     />
   );
+}
+
+function normalizeAngleRadians(angle: number) {
+  let normalized = angle;
+  while (normalized > Math.PI) normalized -= Math.PI * 2;
+  while (normalized < -Math.PI) normalized += Math.PI * 2;
+  return normalized;
 }
 
 function easeInOutCinematic(progress: number) {
