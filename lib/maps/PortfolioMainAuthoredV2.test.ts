@@ -8,17 +8,35 @@ import { cloneMapDefinition, createLoadedMapState, mapDefinitionToDocument, vali
 import { DEFAULT_AUTHORED_MAP_ID, listMapRegistryEntries, loadMapStateSync } from "./map-registry";
 
 const MAP_ID = "portfolio-main-authored-v2";
+const PRIMARY_FLAT_MAP_ID = "portfolio-primary-flat";
 
 describe("portfolio main authored v2 map", () => {
-  it("is the default authored map while v1 remains registered", () => {
+  it("keeps authored v2 registered while the flat map is primary", () => {
     const entries = listMapRegistryEntries({ includeDevelopment: true });
-    expect(DEFAULT_AUTHORED_MAP_ID).toBe(MAP_ID);
+    expect(DEFAULT_AUTHORED_MAP_ID).toBe(PRIMARY_FLAT_MAP_ID);
     expect(entries.map((entry) => entry.id)).toEqual(expect.arrayContaining([
+      PRIMARY_FLAT_MAP_ID,
       MAP_ID,
       "portfolio-main-greybox-v1",
       "portfolio-v2-prefab-showcase",
     ]));
     expect(entries.find((entry) => entry.id === "portfolio-v2-prefab-showcase")?.developmentOnly).toBe(true);
+  });
+
+  it("provides the new primary flat map as a full one-level foundation", () => {
+    const state = loadMapStateSync(PRIMARY_FLAT_MAP_ID, { includeDevelopment: true });
+    expect(validateMapDefinition(state.definition).ok).toBe(true);
+    expect(state.world.getStats().nonAirBlocks).toBe(64 * 64);
+    expect(state.definition.entities).toHaveLength(0);
+    expect(state.definition.markers).toHaveLength(0);
+    expect(state.definition.zones).toHaveLength(0);
+
+    for (let z = 0; z < 64; z += 1) {
+      for (let x = 0; x < 64; x += 1) {
+        expect(state.world.getBlock(x, 0, z)).toBe(BLOCK_IDS.Ground);
+        expect(state.world.getHighestNonAirY(x, z)).toBe(0);
+      }
+    }
   });
 
   it("uses the portfolio-v2 namespace for every placed prefab", () => {

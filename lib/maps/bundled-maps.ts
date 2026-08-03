@@ -1,5 +1,5 @@
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
-import { VoxelWorld } from "@/lib/world/voxel-world";
+import { createFlatVoxelWorld, VoxelWorld } from "@/lib/world/voxel-world";
 import { WORLD_CONFIG } from "@/lib/world/world-config";
 import {
   createBlankMapDefinition,
@@ -19,6 +19,7 @@ import { ROTATIONS, SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/vox
 
 const PHASE4_CREATED_AT = "2026-08-01T00:00:00.000Z";
 const PHASE5_CREATED_AT = "2026-08-02T00:00:00.000Z";
+const PRIMARY_FLAT_CREATED_AT = "2026-08-03T00:00:00.000Z";
 
 type GridXZ = { x: number; z: number };
 type PortfolioZoneId = "projects" | "experience" | "about" | "skills" | "contact";
@@ -289,6 +290,39 @@ export function createPortfolioMainAuthoredV2MapDefinition(): MapDefinition {
       createdAt: PHASE5_CREATED_AT,
       updatedAt: PHASE5_CREATED_AT,
       authoringVersion: "phase-5-authored-v2",
+    },
+  });
+}
+
+export function createPortfolioPrimaryFlatMapDefinition(): MapDefinition {
+  const world = createFlatVoxelWorld();
+
+  return createMapDefinitionFromWorld({
+    id: "portfolio-primary-flat",
+    name: "Portfolio Primary Flat",
+    description: "Primary portfolio map foundation: a full 64 by 64 flat one-level terrain ready for authored zones, models and content.",
+    kind: "portfolio",
+    runtimeMode: "dynamic-voxel",
+    world,
+    zones: [],
+    markers: [],
+    entities: [],
+    navigation: { nodes: [], edges: [], routes: [] },
+    spawnPoints: [{
+      id: "arrival",
+      label: "Arrival",
+      position: { x: 31, y: 1, z: 31 },
+      rotationY: 0,
+      cameraTarget: { x: 31, y: 0, z: 31 },
+    }],
+    cameraPresets: [createDefaultOverviewCameraPreset()],
+    defaultSpawnId: "arrival",
+    defaultCameraPresetId: "overview",
+    presentation: { legendVisible: true, backgroundId: "neutral-day", environmentId: "graybox" },
+    metadata: {
+      createdAt: PRIMARY_FLAT_CREATED_AT,
+      updatedAt: PRIMARY_FLAT_CREATED_AT,
+      authoringVersion: "primary-flat-v1",
     },
   });
 }

@@ -3,6 +3,7 @@ import {
   createPortfolioMainAuthoredV2MapDefinition,
   createPortfolioMainGreyboxBasicBackupMapDefinition,
   createPortfolioMainGreyboxMapDefinition,
+  createPortfolioPrimaryFlatMapDefinition,
   createPortfolioPhase4MapDefinition,
   createPortfolioV2PrefabShowcaseMapDefinition,
   createPrefabCatalogMapDefinition,
@@ -24,7 +25,7 @@ import {
   type MapRuntimeMode,
 } from "./map-definition";
 
-export const DEFAULT_AUTHORED_MAP_ID = "portfolio-main-authored-v2";
+export const DEFAULT_AUTHORED_MAP_ID = "portfolio-primary-flat";
 export const MAP_DRAFT_STORAGE_PREFIX = "portfolio-map-definition-draft.v1:";
 
 export type MapRegistryEntry = {
@@ -45,6 +46,7 @@ type BundledMapSource = {
 };
 
 const BUNDLED_MAPS: BundledMapSource[] = [
+  createBundledEntry(createPortfolioPrimaryFlatMapDefinition, "bundled:portfolio-primary-flat", false),
   createBundledEntry(createPortfolioMainAuthoredV2MapDefinition, "bundled:portfolio-main-authored-v2", false),
   createBundledEntry(createPortfolioMainGreyboxMapDefinition, "bundled:portfolio-main-greybox-v1", false),
   createBundledEntry(createPortfolioMainGreyboxBasicBackupMapDefinition, "bundled:portfolio-main-greybox-v1-basic-backup", true),
