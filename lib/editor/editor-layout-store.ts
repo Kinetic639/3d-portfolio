@@ -12,6 +12,7 @@ export type EditorLayoutState = {
   shortcutsOpen: boolean;
   cleanPreview: boolean;
   maximizedViewport: boolean;
+  editorMinZoomDistance: number;
   dimensions: {
     leftWidth: number;
     rightWidth: number;
@@ -32,6 +33,7 @@ export const DEFAULT_EDITOR_LAYOUT: EditorLayoutState = {
   shortcutsOpen: false,
   cleanPreview: false,
   maximizedViewport: false,
+  editorMinZoomDistance: 22,
   dimensions: {
     leftWidth: 244,
     rightWidth: 332,
@@ -90,6 +92,7 @@ export function parseEditorLayout(input: unknown): EditorLayoutState {
     ...createDefaultEditorLayout(),
     ...input,
     activeBottomTab: isBottomDockTab(input.activeBottomTab) ? input.activeBottomTab : "overview",
+    editorMinZoomDistance: clampNumber(input.editorMinZoomDistance, 4, 22, DEFAULT_EDITOR_LAYOUT.editorMinZoomDistance),
     dimensions: {
       ...DEFAULT_EDITOR_LAYOUT.dimensions,
       ...(isRecord(input.dimensions) ? input.dimensions : {}),
@@ -153,6 +156,10 @@ function cloneLayout(layout: EditorLayoutState): EditorLayoutState {
 function clamp(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? clamp(value, min, max) : fallback;
 }
 
 function booleanRecord(value: unknown) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BLOCK_IDS } from "@/lib/world/block-registry";
 import { createFlatVoxelWorld } from "@/lib/world/voxel-world";
+import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 import { createTerrainMutations, getBrushFootprint, getDirtyChunkIdsForMutations, getTerrainOperationFootprint } from "./terrain-brushes";
 
 describe("terrain brushes", () => {
@@ -15,6 +16,27 @@ describe("terrain brushes", () => {
 
     expect(getTerrainOperationFootprint({ x: 10, y: 0, z: 10 }, "paint", settings)).toHaveLength(13);
     expect(getTerrainOperationFootprint({ x: 10, y: 0, z: 10 }, "paint-path", settings)).toHaveLength(9);
+  });
+
+  it("paints the selected shape onto existing terrain cells", () => {
+    const world = createFlatVoxelWorld();
+    const [mutation] = createTerrainMutations({
+      world,
+      operation: "paint",
+      center: { x: 10, y: 0, z: 10 },
+      blockId: BLOCK_IDS.Ground,
+      shapeId: SHAPE_IDS.CRYSTAL_MEDIUM,
+      rotation: ROTATIONS.EAST,
+      state: 0,
+      zoneId: 0,
+    });
+
+    expect(mutation).toMatchObject({
+      coordinate: { x: 10, y: 0, z: 10 },
+      beforeShape: SHAPE_IDS.CUBE,
+      afterShape: SHAPE_IDS.CRYSTAL_MEDIUM,
+      afterRotation: ROTATIONS.EAST,
+    });
   });
 
   it("creates raise, lower, flatten and path-width mutations", () => {

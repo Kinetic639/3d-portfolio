@@ -15,7 +15,7 @@ import {
 } from "@/lib/terrain/terrain";
 import { buildSurfaceChunkMesh, type SurfaceChunkMeshData } from "@/lib/terrain/surface-mesher";
 import { buildZoneOverlayChunkMeshes, buildZoneOverlayMeshes, type ZoneOverlayChunkMeshData } from "@/lib/terrain/zone-overlay";
-import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
+import { BLOCK_IDS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import { parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
 import { WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
@@ -80,7 +80,7 @@ import {
 } from "@/lib/maps/map-registry";
 import type { EditorLayerId, EditorLayerState, EditorViewportLayoutState, EntityTransformMode, MapEditorToolbarProps } from "@/components/experience/MapEditorToolbar";
 import { createBrowsingState, reduceBrowsingState, type BrowsingState } from "@/lib/portfolio/browsing-state";
-import { getShapeDefinition, type ShapeCategory } from "@/lib/voxel-shapes/shape-registry";
+import { getShapeDefinition, getShapePitch, setShapePitch, type ShapeCategory, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
 import { DEFAULT_ROTATION, DEFAULT_STATE, SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import { PORTFOLIO_CONTENT, resolveContentReference } from "@/lib/portfolio/content";
 import {
@@ -101,6 +101,7 @@ const DEFAULT_VIEWPORT_LAYOUT: EditorViewportLayoutState = {
   bottomCollapsed: false,
   cleanPreview: false,
   maximizedViewport: false,
+  editorMinZoomDistance: 22,
 };
 const COLLAPSED_SIDE_DOCK_WIDTH = 32;
 const COLLAPSED_BOTTOM_DOCK_HEIGHT = 30;
@@ -430,6 +431,7 @@ export default function PortfolioExperience({
               <ExperienceScene
                 initialMapId={initialMapId}
                 editorEnabled={editorEnabled}
+                editorMinZoomDistance={effectiveEditorLayout.editorMinZoomDistance}
                 benchmarkMode={benchmarkMode}
                 onEditorStateChange={setEditorPanel}
                 onMapUiStateChange={setMapUi}
@@ -643,6 +645,7 @@ function getEffectiveViewportLayout(layout: EditorViewportLayoutState): EditorVi
     leftWidth: hideSideDocks ? 0 : layout.leftCollapsed ? COLLAPSED_SIDE_DOCK_WIDTH : layout.leftWidth,
     rightWidth: hideSideDocks ? 0 : layout.rightCollapsed ? COLLAPSED_SIDE_DOCK_WIDTH : layout.rightWidth,
     bottomHeight: layout.cleanPreview || layout.maximizedViewport ? 0 : layout.bottomCollapsed ? COLLAPSED_BOTTOM_DOCK_HEIGHT : layout.bottomHeight,
+    editorMinZoomDistance: THREE.MathUtils.clamp(layout.editorMinZoomDistance, 4, 22),
   };
 }
 
@@ -906,6 +909,7 @@ function createInitialExperienceMapState(mapId: string) {
 function ExperienceScene({
   initialMapId,
   editorEnabled,
+  editorMinZoomDistance,
   benchmarkMode,
   onEditorStateChange,
   onMapUiStateChange,
@@ -913,6 +917,7 @@ function ExperienceScene({
 }: {
   initialMapId: string;
   editorEnabled: boolean;
+  editorMinZoomDistance: number;
   benchmarkMode: boolean;
   onEditorStateChange: (state: MapEditorToolbarProps | null) => void;
   onMapUiStateChange: (state: MapUiState | null) => void;
@@ -1346,7 +1351,7 @@ function ExperienceScene({
           center: editCoordinate,
           settings: effectiveBrushSettings,
           blockId: getTerrainMutationBlockId(tool, brushOperation, paintBlockId, activeShapeId),
-          shapeId: brushOperation === "paint" || brushOperation === "paint-path" || brushOperation === "remove-path" ? undefined : activeShapeId,
+          shapeId: brushOperation === "paint-path" || brushOperation === "remove-path" ? undefined : activeShapeId,
           rotation: activeRotation,
           state: activeShapeState,
           zoneId,
@@ -1391,7 +1396,7 @@ function ExperienceScene({
         center: editCoordinate,
         settings: effectiveBrushSettings,
         blockId: getTerrainMutationBlockId(tool, brushOperation, paintBlockId, activeShapeId),
-        shapeId: brushOperation === "paint" || brushOperation === "paint-path" || brushOperation === "remove-path" ? undefined : activeShapeId,
+        shapeId: brushOperation === "paint-path" || brushOperation === "remove-path" ? undefined : activeShapeId,
         rotation: activeRotation,
         state: activeShapeState,
         zoneId,
@@ -2586,6 +2591,7 @@ function ExperienceScene({
       <ConstrainedMapControls
         enabled={benchmarkMode ? benchmarkInputEnabled : isInteractivePhase(phase) && !entityTransformDragging}
         phase={phase}
+        editorMinZoomDistance={editorAvailable ? editorMinZoomDistance : undefined}
         focusPreset={activeCameraPreset}
         reducedMotion={reducedMotion}
         onFocusComplete={markExpanding}
@@ -2617,8 +2623,16 @@ function ExperienceScene({
         blockId={paintBlockId}
         zoneId={zoneId}
         revision={previewRevision}
-        visible={editorAvailable && tool !== "entity" && !cleanPreview && isLayerVisible(layerStates, "developmentHelpers")}
+        visible={editorAvailable && tool !== "entity" && tool !== "add" && !cleanPreview && isLayerVisible(layerStates, "developmentHelpers")}
         color={tool === "zone" && activeZoneDefinition ? activeZoneDefinition.color : TOOL_COLORS[tool]}
+      />
+      <BlockPlacementGhost
+        coordinate={hoveredCell}
+        visible={editorAvailable && tool === "add" && !cleanPreview && isLayerVisible(layerStates, "developmentHelpers")}
+        blockId={getActiveTerrainBlockId(paintBlockId, activeShapeId)}
+        shapeId={activeShapeId}
+        rotation={activeRotation}
+        state={activeShapeState}
       />
       <ObjectPlacementPreview
         coordinate={hoveredCell}
@@ -3531,6 +3545,92 @@ function SelectionIndicator({
       <mesh geometry={wireGeometry} material={wireMaterial} />
     </group>
   );
+}
+
+function BlockPlacementGhost({
+  coordinate,
+  visible,
+  blockId,
+  shapeId,
+  rotation,
+  state,
+}: {
+  coordinate: GridCoordinate | null;
+  visible: boolean;
+  blockId: BlockId;
+  shapeId: ShapeId;
+  rotation: CellRotation;
+  state: number;
+}) {
+  const shape = getShapeDefinition(shapeId);
+  const blockColor = getBlockDefinition(blockId).developmentColor;
+  const geometry = useMemo(() => createShapePreviewGeometry(shape.faces(rotation, state), blockColor), [blockColor, rotation, shape, state]);
+  const material = useMemo(
+    () => new THREE.ShaderMaterial({
+      vertexShader: SURFACE_VERTEX_SHADER,
+      fragmentShader: SURFACE_FRAGMENT_SHADER,
+      side: THREE.FrontSide,
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      geometry.dispose();
+      material.dispose();
+    };
+  }, [geometry, material]);
+
+  if (!visible || !coordinate) {
+    return null;
+  }
+
+  return (
+    <group position={[coordinate.x - 31.5, coordinate.y + 0.5, coordinate.z - 31.5]} renderOrder={12}>
+      <mesh geometry={geometry} material={material} />
+    </group>
+  );
+}
+
+function createShapePreviewGeometry(faces: ShapeFace[], colorHex: string) {
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const colors: number[] = [];
+  const variations: number[] = [];
+  const indices: number[] = [];
+  const color = hexToRgb(colorHex);
+
+  faces.forEach((face) => {
+    const base = positions.length / 3;
+    face.corners.forEach(([x, y, z]) => {
+      positions.push(x * 1.01, y * 1.01, z * 1.01);
+      normals.push(face.normal[0], face.normal[1], face.normal[2]);
+      colors.push(...color);
+      variations.push(0.5);
+    });
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  });
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setAttribute("aVariation", new THREE.Float32BufferAttribute(variations, 1));
+  geometry.setIndex(indices);
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const normalizedHex = hex.replace("#", "");
+  const value = Number.parseInt(normalizedHex, 16);
+
+  return [
+    ((value >> 16) & 255) / 255,
+    ((value >> 8) & 255) / 255,
+    (value & 255) / 255,
+  ];
 }
 
 function BrushFootprintIndicator({
@@ -5016,12 +5116,14 @@ function getMapCameraPreset(map: MapDefinition, presetId: string | undefined) {
 function ConstrainedMapControls({
   enabled,
   phase,
+  editorMinZoomDistance,
   focusPreset,
   reducedMotion,
   onFocusComplete,
 }: {
   enabled: boolean;
   phase: ExperiencePhase;
+  editorMinZoomDistance?: number;
   focusPreset: MapCameraPreset | null;
   reducedMotion: boolean;
   onFocusComplete: () => void;
@@ -5342,7 +5444,7 @@ function ConstrainedMapControls({
       panSpeed={panSpeed * 0.4}
       rotateSpeed={rotateSpeed * 0.4}
       maxDistance={98}
-      minDistance={22}
+      minDistance={editorMinZoomDistance ?? 22}
       minPolarAngle={THREE.MathUtils.degToRad(20)}
       maxPolarAngle={THREE.MathUtils.degToRad(82)}
       mouseButtons={{

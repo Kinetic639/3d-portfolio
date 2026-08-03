@@ -63,9 +63,9 @@ import type { CollisionMode, PlacedMapEntity, PrimitiveType } from "@/lib/maps/m
 import type { NavigationNodeType } from "@/lib/maps/map-navigation";
 import { BUILT_IN_PREFABS, listPrefabCategories } from "@/lib/prefabs/prefab-library";
 import type { PrefabCategory } from "@/lib/prefabs/prefab-types";
-import { RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
+import { BLOCK_IDS, RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
-import { getShapeDefinition, SHAPE_DEFINITIONS, type ShapeCategory } from "@/lib/voxel-shapes/shape-registry";
+import { getShapeDefinition, getShapePitch, getShapeStateValue, setShapePitch, SHAPE_DEFINITIONS, type ShapeCategory, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
 import { SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 
 export type TerrainRenderMode = "instanced" | "surface";
@@ -253,6 +253,7 @@ export type EditorViewportLayoutState = {
   bottomCollapsed: boolean;
   cleanPreview: boolean;
   maximizedViewport: boolean;
+  editorMinZoomDistance: number;
 };
 
 const WORKSPACES: Array<{ id: EditorWorkspace; label: string }> = [
@@ -295,7 +296,16 @@ const TOOL_LABELS: Record<EditorTool, string> = {
 const PRIMITIVES: PrimitiveType[] = ["box", "cylinder", "sphere", "plane", "platform", "sign"];
 const COLLISION_MODES: CollisionMode[] = ["none", "blocking", "walkable", "trigger"];
 const NODE_TYPES: NavigationNodeType[] = ["walk", "route-junction", "wait-point", "look-at", "character-spawn", "bird-perch"];
-const SHAPE_CATEGORIES: ShapeCategory[] = ["terrain", "transition", "structure", "roof", "utility", "fluid"];
+type ShapePickerCategory = ShapeCategory | "all";
+const SHAPE_CATEGORIES: ShapePickerCategory[] = ["all", "terrain", "transition", "structure", "roof", "utility", "fluid"];
+const TERRAIN_MATERIAL_OPTIONS = [
+  {
+    id: BLOCK_IDS.Ground,
+    displayName: "None",
+    developmentColor: getBlockDefinition(BLOCK_IDS.Ground).developmentColor,
+  },
+  ...RENDERABLE_BLOCK_DEFINITIONS.filter((block) => block.id !== BLOCK_IDS.Ground),
+];
 const MENU_GROUPS = ["file", "edit", "view", "map", "help"] as const;
 const MAP_PRESET_OPTIONS = MAP_PRESETS;
 const COLLAPSED_SIDE_DOCK_WIDTH = 32;
@@ -334,6 +344,7 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
       bottomCollapsed: layout.collapsed.bottom,
       cleanPreview: layout.cleanPreview,
       maximizedViewport: layout.maximizedViewport,
+      editorMinZoomDistance: layout.editorMinZoomDistance,
     });
   }, [layout, props.onLayoutChange]);
 
@@ -424,11 +435,19 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
       }
       if (event.key.toLowerCase() === "r") {
         event.preventDefault();
-        props.onCellRotationChange((((props.activeRotation + (event.shiftKey ? 3 : 1)) % 4) as CellRotation));
+        props.onShapeStateChange(setShapePitch(props.activeShapeState, getShapePitch(props.activeShapeState) + (event.shiftKey ? 3 : 1)));
+      }
+      if (event.key.toLowerCase() === "q") {
+        event.preventDefault();
+        props.onCellRotationChange((((props.activeRotation + 3) % 4) as CellRotation));
+      }
+      if (event.key.toLowerCase() === "e") {
+        event.preventDefault();
+        props.onCellRotationChange((((props.activeRotation + 1) % 4) as CellRotation));
       }
       if (event.key.toLowerCase() === "f" && props.activeShapeId === SHAPE_IDS.SLAB) {
         event.preventDefault();
-        props.onShapeStateChange(props.activeShapeState === 1 ? 0 : 1);
+        props.onShapeStateChange(setShapePitch(getShapeStateValue(props.activeShapeState) === 1 ? 0 : 1, getShapePitch(props.activeShapeState)));
       }
       if (event.key === "Escape") {
         if (layout.commandSearchOpen) patchLayout({ commandSearchOpen: false });
@@ -466,7 +485,18 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
       } as React.CSSProperties}
       onPointerDown={() => setOpenMenu(null)}
     >
-      <MenuBar commands={commands} openMenu={openMenu} setOpenMenu={setOpenMenu} props={props} onCloseEditor={props.onClose} />
+      <MenuBar
+        commands={commands}
+        openMenu={openMenu}
+        setOpenMenu={setOpenMenu}
+        props={props}
+        editorMinZoomDistance={layout.editorMinZoomDistance}
+        onEditorMinZoomDistanceChange={(distance) => setLayout((current) => ({
+          ...current,
+          editorMinZoomDistance: Math.max(4, Math.min(22, Math.floor(distance) || 4)),
+        }))}
+        onCloseEditor={props.onClose}
+      />
       <MainToolbar props={props} commands={commands} layout={layout} setWorkspace={setWorkspace} toggleCleanPreview={toggleCleanPreview} />
       <ToolRail workspace={layout.activeWorkspace} activeTool={props.tool} props={props} onToolChange={props.onToolChange} />
       {!layout.maximizedViewport ? (
@@ -517,7 +547,23 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
   );
 }
 
-function MenuBar({ commands, openMenu, setOpenMenu, props, onCloseEditor }: { commands: EditorCommand[]; openMenu: string | null; setOpenMenu: (menu: string | null) => void; props: MapEditorToolbarProps; onCloseEditor: () => void }) {
+function MenuBar({
+  commands,
+  openMenu,
+  setOpenMenu,
+  props,
+  editorMinZoomDistance,
+  onEditorMinZoomDistanceChange,
+  onCloseEditor,
+}: {
+  commands: EditorCommand[];
+  openMenu: string | null;
+  setOpenMenu: (menu: string | null) => void;
+  props: MapEditorToolbarProps;
+  editorMinZoomDistance: number;
+  onEditorMinZoomDistanceChange: (distance: number) => void;
+  onCloseEditor: () => void;
+}) {
   return (
     <header className="editor-menu-bar" role="menubar" aria-label="Editor menu bar" onPointerDown={(event) => event.stopPropagation()}>
       <strong>Map Editor</strong>
@@ -529,7 +575,13 @@ function MenuBar({ commands, openMenu, setOpenMenu, props, onCloseEditor }: { co
           {openMenu === group ? (
             <div className="editor-menu-popover" role="menu">
               {commands.filter((command) => command.category === group).map((command) => <CommandMenuItem key={command.id} command={command} />)}
-              {group === "view" ? <ViewMenuSettings props={props} /> : null}
+              {group === "view" ? (
+                <ViewMenuSettings
+                  props={props}
+                  editorMinZoomDistance={editorMinZoomDistance}
+                  onEditorMinZoomDistanceChange={onEditorMinZoomDistanceChange}
+                />
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -539,7 +591,15 @@ function MenuBar({ commands, openMenu, setOpenMenu, props, onCloseEditor }: { co
   );
 }
 
-function ViewMenuSettings({ props }: { props: MapEditorToolbarProps }) {
+function ViewMenuSettings({
+  props,
+  editorMinZoomDistance,
+  onEditorMinZoomDistanceChange,
+}: {
+  props: MapEditorToolbarProps;
+  editorMinZoomDistance: number;
+  onEditorMinZoomDistanceChange: (distance: number) => void;
+}) {
   const objectsVisible = isLayerVisibleInToolbar(props, "entities") || isLayerVisibleInToolbar(props, "markers");
   return (
     <div className="editor-menu-settings" role="group" aria-label="View settings">
@@ -570,6 +630,25 @@ function ViewMenuSettings({ props }: { props: MapEditorToolbarProps }) {
       <label>
         <span>Map background color</span>
         <input type="color" value={props.mapBackgroundColor} onChange={(event) => props.onMapBackgroundColorChange(event.target.value)} />
+      </label>
+      <label className="editor-menu-settings__range">
+        <span>Max zoom in</span>
+        <input
+          type="range"
+          min={4}
+          max={22}
+          step={1}
+          value={editorMinZoomDistance}
+          onChange={(event) => onEditorMinZoomDistanceChange(Number(event.target.value))}
+        />
+        <input
+          aria-label="Maximum zoom in distance"
+          type="number"
+          min={4}
+          max={22}
+          value={editorMinZoomDistance}
+          onChange={(event) => onEditorMinZoomDistanceChange(Number(event.target.value))}
+        />
       </label>
     </div>
   );
@@ -776,6 +855,42 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
     );
   }
 
+  return (
+    <Panel title="Terrain Palette" className="editor-panel--terrain-palette">
+      <MaterialControls props={props} />
+      <ShapeControls props={props} />
+    </Panel>
+  );
+}
+
+function MaterialControls({ props }: { props: MapEditorToolbarProps }) {
+  return (
+    <Section title="Material">
+      <label>Current material<select value={props.paintBlockId} onChange={(event) => props.onPaintBlockChange(Number(event.target.value) as BlockId)}>{TERRAIN_MATERIAL_OPTIONS.map((material) => <option key={material.id} value={material.id}>{material.displayName}</option>)}</select></label>
+    </Section>
+  );
+}
+
+function TerrainSelectionDetails({ props }: { props: MapEditorToolbarProps }) {
+  return (
+    <Section title="Selected Terrain">
+      <dl className="editor-mini-summary">
+        <KeyValue label="Grid" value={formatCoordinate(props.selected)} mono />
+        <KeyValue label="World" value={props.selectedWorldPosition ? formatVector(props.selectedWorldPosition) : "-"} mono />
+        <KeyValue label="Hovered" value={formatCoordinate(props.hovered)} mono />
+        <KeyValue label="Material" value={props.selectedBlockId === null ? "-" : getTerrainMaterialLabel(props.selectedBlockId)} />
+        <KeyValue label="Shape" value={props.selectedShapeId === null ? "-" : getShapeDefinition(props.selectedShapeId).name} />
+        <KeyValue label="Rotation" value={props.selectedRotation === null ? "-" : String(props.selectedRotation)} mono />
+        <KeyValue label="State" value={props.selectedState === null ? "-" : String(props.selectedState)} mono />
+        <KeyValue label="Zone" value={String(props.selectedZoneId)} mono />
+        <KeyValue label="Chunk" value={props.selectedChunk ? `${props.selectedChunk.chunkX},${props.selectedChunk.chunkZ}` : "-"} mono />
+        <KeyValue label="Local" value={props.selectedLocal ? `${props.selectedLocal.localX},${props.selectedLocal.localZ}` : "-"} mono />
+      </dl>
+    </Section>
+  );
+}
+
+function TerrainToolSettings({ props }: { props: MapEditorToolbarProps }) {
   const showsBlockPicker = ["paint", "add", "raise", "fill"].includes(props.tool);
   const showsShapePicker = ["add", "raise", "fill"].includes(props.tool);
   const showsBrushShape = ["paint", "erase", "raise", "lower", "flatten", "fill", "clear"].includes(props.tool);
@@ -784,11 +899,10 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
   const showsFlattenHeight = props.tool === "flatten";
 
   return (
-    <Panel title="Terrain Palette">
+    <Section title="Terrain Tool">
       <label>Preset<select value={props.presetId} onChange={(event) => props.onPresetChange(event.target.value as MapPresetId)}>{MAP_PRESET_OPTIONS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>
-      {props.tool === "select" ? <SelectionSummary props={props} /> : null}
-      {showsBlockPicker ? <label>Block<select value={props.paintBlockId} onChange={(event) => props.onPaintBlockChange(Number(event.target.value) as BlockId)}>{RENDERABLE_BLOCK_DEFINITIONS.map((block) => <option key={block.id} value={block.id}>{block.displayName}</option>)}</select></label> : null}
-      {showsShapePicker ? <ShapeControls props={props} /> : null}
+      {!showsBlockPicker ? <span className="editor-muted">Selected material is used by paint, add, raise and fill tools.</span> : null}
+      {!showsShapePicker ? <span className="editor-muted">Selected shape is used by paint, add, raise and fill tools.</span> : null}
       {showsBrushShape ? <label>Brush<select value={props.brushSettings.shape} onChange={(event) => props.onBrushShapeChange(event.target.value as BrushShape)}><option value="single">Single</option><option value="square">Square</option><option value="circle">Circle</option></select></label> : null}
       {(showsBrushSize || showsPathWidth) ? (
         <div className="editor-field-row">
@@ -797,8 +911,57 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
         </div>
       ) : null}
       {showsFlattenHeight ? <label>Flatten Y<input type="number" min={0} max={11} value={props.brushSettings.flattenHeight} onChange={(event) => props.onFlattenHeightChange(Number(event.target.value))} /></label> : null}
-      <span className="editor-muted">{props.brushAffectedCellCount} affected cells</span>
-    </Panel>
+      <KeyValue label="Affected" value={String(props.brushAffectedCellCount)} mono />
+    </Section>
+  );
+}
+
+function TerrainPlacementSettings({ props }: { props: MapEditorToolbarProps }) {
+  const visibleShape = props.activeShapeId;
+  const shapeStateValue = getShapeStateValue(props.activeShapeState);
+  const axisState = Math.max(0, Math.min(2, shapeStateValue));
+  const pitch = getShapePitch(props.activeShapeState);
+  const usesAxisState = isAxisOrientedShape(visibleShape);
+  const rotateLeft = () => props.onCellRotationChange((((props.activeRotation + 3) % 4) as CellRotation));
+  const rotateRight = () => props.onCellRotationChange((((props.activeRotation + 1) % 4) as CellRotation));
+  const tiltUp = () => props.onShapeStateChange(setShapePitch(props.activeShapeState, pitch + 1));
+  const tiltDown = () => props.onShapeStateChange(setShapePitch(props.activeShapeState, pitch + 3));
+
+  return (
+    <Section title="Placement">
+      <div className="editor-orientation-pad" aria-label="Placement orientation">
+        <button type="button" title="Tilt up (R)" onClick={tiltUp}><EditorIcon name="rotate" /><span>Tilt Up</span></button>
+        <button type="button" title="Rotate left (Q)" onClick={rotateLeft}><EditorIcon name="undo" /><span>Left</span></button>
+        <button type="button" title="Rotate right (E)" onClick={rotateRight}><EditorIcon name="redo" /><span>Right</span></button>
+        <button type="button" title="Tilt down (Shift+R)" onClick={tiltDown}><EditorIcon name="rotate" /><span>Tilt Down</span></button>
+      </div>
+      <span className="editor-muted">Yaw {["N", "E", "S", "W"][props.activeRotation]} · Tilt {pitch * 90}°</span>
+      {usesAxisState ? (
+        <div className="editor-segmented-control" aria-label="Shape axis">
+          {[0, 1, 2].map((axis) => (
+            <button key={axis} type="button" className={axisState === axis ? "active" : ""} onClick={() => props.onShapeStateChange(setShapePitch(axis, pitch))}>{["X", "Y", "Z"][axis]}</button>
+          ))}
+        </div>
+      ) : null}
+      {visibleShape === SHAPE_IDS.SLAB ? (
+        <div className="editor-segmented-control" aria-label="Slab position">
+          {[
+            { value: 0, label: "Lower" },
+            { value: 2, label: "Middle" },
+            { value: 1, label: "Upper" },
+          ].map((item) => (
+            <button key={item.value} type="button" className={shapeStateValue === item.value ? "active" : ""} onClick={() => props.onShapeStateChange(setShapePitch(item.value, pitch))}>{item.label}</button>
+          ))}
+        </div>
+      ) : null}
+      {visibleShape === SHAPE_IDS.WATER ? (
+        <label>Water level<input type="range" min={0} max={15} value={shapeStateValue} onChange={(event) => props.onShapeStateChange(setShapePitch(Number(event.target.value), pitch))} /></label>
+      ) : null}
+      {(visibleShape !== SHAPE_IDS.SLAB && visibleShape !== SHAPE_IDS.WATER && !usesAxisState) ? (
+        <label>State<input type="number" min={0} max={15} value={shapeStateValue} onChange={(event) => props.onShapeStateChange(setShapePitch(Number(event.target.value), pitch))} /></label>
+      ) : null}
+      <ActionButton icon="select" disabled={!props.selected} onClick={props.onEyedropperCell}>Eyedropper</ActionButton>
+    </Section>
   );
 }
 
@@ -825,34 +988,132 @@ function Outliner({ props, query, onQueryChange }: { props: MapEditorToolbarProp
 }
 
 function ShapeControls({ props }: { props: MapEditorToolbarProps }) {
-  const shapes = SHAPE_DEFINITIONS.filter((shape) => shape.category === props.activeShapeCategory);
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<ShapePickerCategory>(props.activeShapeCategory);
+  const [previewYaw, setPreviewYaw] = useState(0);
+  const previewDrag = useRef<{ x: number; yaw: number } | null>(null);
+  const normalizedQuery = query.trim().toLowerCase();
+  const shapes = category === "all" ? SHAPE_DEFINITIONS : SHAPE_DEFINITIONS.filter((shape) => shape.category === category);
+  const visibleShapes = normalizedQuery
+    ? shapes.filter((shape) => shape.name.toLowerCase().includes(normalizedQuery) || shape.key.includes(normalizedQuery))
+    : shapes;
   const activeShape = getShapeDefinition(props.activeShapeId);
   const visibleShape = shapes.some((shape) => shape.id === props.activeShapeId) ? props.activeShapeId : shapes[0]?.id ?? SHAPE_IDS.CUBE;
   const shapeForState = getShapeDefinition(visibleShape);
 
+  useEffect(() => {
+    setCategory((current) => current === "all" ? current : props.activeShapeCategory);
+  }, [props.activeShapeCategory]);
+
   return (
-    <Section title="Shape">
-      <label>Category<select value={props.activeShapeCategory} onChange={(event) => props.onShapeCategoryChange(event.target.value as ShapeCategory)}>{SHAPE_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
-      <label>Shape<select value={visibleShape} onChange={(event) => props.onShapeChange(Number(event.target.value) as ShapeId)}>{shapes.map((shape) => <option key={shape.id} value={shape.id}>{shape.name}</option>)}</select></label>
-      <label>Rotation<select value={props.activeRotation} onChange={(event) => props.onCellRotationChange(Number(event.target.value) as CellRotation)}><option value={0}>North</option><option value={1}>East</option><option value={2}>South</option><option value={3}>West</option></select></label>
-      {visibleShape === SHAPE_IDS.SLAB ? (
-        <label>Slab<select value={props.activeShapeState} onChange={(event) => props.onShapeStateChange(Number(event.target.value))}><option value={0}>Lower</option><option value={1}>Upper</option><option value={2}>Middle</option></select></label>
-      ) : null}
-      {visibleShape === SHAPE_IDS.WATER ? (
-        <label>Water level<input type="range" min={0} max={15} value={props.activeShapeState} onChange={(event) => props.onShapeStateChange(Number(event.target.value))} /></label>
-      ) : null}
-      {(visibleShape !== SHAPE_IDS.SLAB && visibleShape !== SHAPE_IDS.WATER) ? (
-        <label>State<input type="number" min={0} max={255} value={props.activeShapeState} onChange={(event) => props.onShapeStateChange(Number(event.target.value))} /></label>
-      ) : null}
+    <Section title="Block Shape">
+      <label>Category<select value={category} onChange={(event) => {
+        const nextCategory = event.target.value as ShapePickerCategory;
+        setCategory(nextCategory);
+        if (nextCategory !== "all") props.onShapeCategoryChange(nextCategory);
+      }}>{SHAPE_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+      <input aria-label="Search block shapes" placeholder="Search block shapes" value={query} onChange={(event) => setQuery(event.target.value)} />
+      <div className="editor-shape-list" role="listbox" aria-label="Shape selector">
+        {visibleShapes.map((shape) => (
+          <button key={shape.id} type="button" role="option" aria-selected={visibleShape === shape.id} className={visibleShape === shape.id ? "active" : ""} onClick={() => props.onShapeChange(shape.id)}>
+            <ShapePreview shapeId={shape.id} rotation={props.activeRotation} state={shape.id === visibleShape ? props.activeShapeState : 0} viewYaw={previewYaw} onViewYawChange={setPreviewYaw} dragRef={previewDrag} compact />
+            <span>{shape.name}</span>
+            <code>{shape.id}</code>
+          </button>
+        ))}
+        {visibleShapes.length === 0 ? <span className="editor-muted editor-empty-state">No matching block shapes.</span> : null}
+      </div>
       <dl className="editor-mini-summary">
         <KeyValue label="Active" value={activeShape.name} />
         <KeyValue label="Layer" value={shapeForState.renderLayer} />
         <KeyValue label="Walkable" value={shapeForState.walkable ? "yes" : "no"} />
         <KeyValue label="Support" value={shapeForState.supportsPrefabs ? "yes" : "no"} />
       </dl>
-      <ActionButton icon="select" disabled={!props.selected} onClick={props.onEyedropperCell}>Eyedropper</ActionButton>
     </Section>
   );
+}
+
+function isAxisOrientedShape(shapeId: ShapeId) {
+  return shapeId === SHAPE_IDS.BEAM || shapeId === SHAPE_IDS.PIPE || shapeId === SHAPE_IDS.PIPE_LONG;
+}
+
+function ShapePreview({
+  shapeId,
+  rotation,
+  state,
+  viewYaw = 0,
+  onViewYawChange,
+  dragRef,
+  compact = false,
+}: {
+  shapeId: ShapeId;
+  rotation: CellRotation;
+  state: number;
+  viewYaw?: number;
+  onViewYawChange?: (yaw: number) => void;
+  dragRef?: React.MutableRefObject<{ x: number; yaw: number } | null>;
+  compact?: boolean;
+}) {
+  const shape = getShapeDefinition(shapeId);
+  const polygons = buildShapePreviewPolygons(shape.faces(rotation, state), viewYaw);
+  const startPreviewDrag = (event: React.PointerEvent<HTMLSpanElement>) => {
+    if (!dragRef || !onViewYawChange) return;
+    event.stopPropagation();
+    dragRef.current = { x: event.clientX, yaw: viewYaw };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const dragPreview = (event: React.PointerEvent<HTMLSpanElement>) => {
+    if (!dragRef?.current || !onViewYawChange) return;
+    event.stopPropagation();
+    onViewYawChange(dragRef.current.yaw + (event.clientX - dragRef.current.x) * 0.018);
+  };
+  const endPreviewDrag = (event: React.PointerEvent<HTMLSpanElement>) => {
+    if (!dragRef) return;
+    event.stopPropagation();
+    dragRef.current = null;
+  };
+
+  return (
+    <span
+      className={`editor-shape-preview ${compact ? "editor-shape-preview--compact" : ""}`}
+      aria-label={`${shape.name} preview`}
+      onPointerDown={startPreviewDrag}
+      onPointerMove={dragPreview}
+      onPointerUp={endPreviewDrag}
+      onPointerCancel={endPreviewDrag}
+    >
+      <svg viewBox="0 0 120 92" role="img" aria-label={shape.name}>
+        {polygons.map((polygon, index) => (
+          <polygon key={`${polygon.points}-${index}`} points={polygon.points} fill={polygon.fill} />
+        ))}
+      </svg>
+      {!compact ? <span>{shape.name}</span> : null}
+    </span>
+  );
+}
+
+function buildShapePreviewPolygons(faces: ShapeFace[], viewYaw = 0) {
+  const cos = Math.cos(viewYaw);
+  const sin = Math.sin(viewYaw);
+  const projected = faces.map((face) => {
+    const points = face.corners.map(([x, y, z]) => {
+      const rx = x * cos - z * sin;
+      const rz = x * sin + z * cos;
+      const px = 60 + (rx - rz) * 34;
+      const py = 54 - y * 32 + (rx + rz) * 14;
+      return { x: px, y: py };
+    });
+    const normalX = face.normal[0] * cos - face.normal[2] * sin;
+    const normalZ = face.normal[0] * sin + face.normal[2] * cos;
+    const shade = Math.max(0.35, Math.min(0.95, 0.72 + face.normal[1] * 0.12 + normalX * 0.06 - normalZ * 0.06));
+    return {
+      depth: face.corners.reduce((total, corner) => total + corner[0] + corner[1] + corner[2], 0) / face.corners.length,
+      points: points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "),
+      fill: `rgba(${Math.round(176 * shade)}, ${Math.round(184 * shade)}, ${Math.round(178 * shade)}, 0.96)`,
+    };
+  });
+
+  return projected.sort((a, b) => a.depth - b.depth);
 }
 
 function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspace: EditorWorkspace }) {
@@ -868,7 +1129,7 @@ function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspa
     );
   }
 
-  if (props.selected) {
+  if (props.selected && workspace !== "terrain") {
     return (
       <Panel title="Inspector">
         <Section title="Terrain Selection">
@@ -879,6 +1140,25 @@ function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspa
           <KeyValue label="Chunk" value={props.selectedChunk ? `${props.selectedChunk.chunkX},${props.selectedChunk.chunkZ}` : "-"} mono />
           <KeyValue label="Dirty chunks" value={String(props.dirtyChunks)} mono />
         </Section>
+      </Panel>
+    );
+  }
+
+  if (props.selected && workspace === "terrain") {
+    return (
+      <Panel title="Inspector">
+        <TerrainPlacementSettings props={props} />
+        <TerrainToolSettings props={props} />
+        <TerrainSelectionDetails props={props} />
+      </Panel>
+    );
+  }
+
+  if (workspace === "terrain") {
+    return (
+      <Panel title="Inspector">
+        <TerrainPlacementSettings props={props} />
+        <TerrainToolSettings props={props} />
       </Panel>
     );
   }
@@ -938,7 +1218,7 @@ function WorkspaceOverviewTab({ props, workspace }: { props: MapEditorToolbarPro
     return (
       <dl className="editor-metrics-grid">
         <KeyValue label="Tool" value={TOOL_LABELS[props.tool]} />
-        <KeyValue label="Block" value={getBlockDefinition(props.paintBlockId).displayName} />
+        <KeyValue label="Material" value={getTerrainMaterialLabel(props.paintBlockId)} />
         <KeyValue label="Shape" value={getShapeDefinition(props.activeShapeId).name} />
         <KeyValue label="Brush cells" value={String(props.brushAffectedCellCount)} mono />
         <KeyValue label="Selected" value={formatCoordinate(props.selected)} mono />
@@ -1288,6 +1568,10 @@ function isTypingTarget(target: EventTarget | null) {
 
 function formatCoordinate(coordinate: GridCoordinate | null) {
   return coordinate ? `${coordinate.x},${coordinate.y},${coordinate.z}` : "-";
+}
+
+function getTerrainMaterialLabel(blockId: BlockId) {
+  return blockId === BLOCK_IDS.Ground ? "None" : getBlockDefinition(blockId).displayName;
 }
 
 function formatPerformance(fps: number | null | undefined, frameMs: number | null | undefined) {

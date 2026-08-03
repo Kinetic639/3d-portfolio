@@ -154,6 +154,9 @@ function createCellMutation(
     case "paint":
       if (afterBlock === BLOCK_IDS.Air && operation === "paint") return null;
       afterBlock = blockId;
+      afterShape = shapeId;
+      afterRotation = rotation;
+      afterState = state;
       break;
     case "fill":
       afterBlock = blockId;
