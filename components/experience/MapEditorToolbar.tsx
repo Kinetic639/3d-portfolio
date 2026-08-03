@@ -125,6 +125,7 @@ export type EditorInspectorState = {
   zoneNeutralTerrainColor: string;
   zoneGridLinesVisible: boolean;
   zoneGridLineColor: string;
+  mapBackgroundColor: string;
   hovered: GridCoordinate | null;
   selected: GridCoordinate | null;
   selectedBlockId: BlockId | null;
@@ -198,6 +199,7 @@ export type MapEditorToolbarProps = EditorInspectorState & {
   onZoneNeutralTerrainColorChange: (color: string) => void;
   onZoneGridLinesVisibleChange: (visible: boolean) => void;
   onZoneGridLineColorChange: (color: string) => void;
+  onMapBackgroundColorChange: (color: string) => void;
   onFocusActiveZone: () => void;
   onClearActiveZone: () => void;
   onUndo: () => void;
@@ -562,6 +564,10 @@ function ViewMenuSettings({ props }: { props: MapEditorToolbarProps }) {
       <label>
         <span>Grid line color</span>
         <input type="color" value={props.zoneGridLineColor} onChange={(event) => props.onZoneGridLineColorChange(event.target.value)} />
+      </label>
+      <label>
+        <span>Map background color</span>
+        <input type="color" value={props.mapBackgroundColor} onChange={(event) => props.onMapBackgroundColorChange(event.target.value)} />
       </label>
     </div>
   );

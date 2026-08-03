@@ -873,6 +873,7 @@ function ExperienceScene({
   const [zoneNeutralTerrainColor, setZoneNeutralTerrainColor] = useState("#f7f7f2");
   const [zoneGridLinesVisible, setZoneGridLinesVisible] = useState(true);
   const [zoneGridLineColor, setZoneGridLineColor] = useState("#9a9f98");
+  const [mapBackgroundColor, setMapBackgroundColor] = useState("#edf1ed");
   const [validationSummary, setValidationSummary] = useState<string[]>([]);
   const [editorMessage, setEditorMessage] = useState<EditorMessage | null>(
     initialState.error ? { type: "error", text: initialState.error } : null,
@@ -970,6 +971,7 @@ function ExperienceScene({
     zoneNeutralTerrainColor,
     zoneGridLinesVisible,
     zoneGridLineColor,
+    mapBackgroundColor,
     zones: currentMap.zones.map((zone) => `${zone.numericId}:${zone.label}:${zone.color}:${zone.visibleInLegend ? 1 : 0}:${zone.overlayVisible ? 1 : 0}:${zone.locked ? 1 : 0}`).join("|"),
     hovered: coordinateKeyOrEmpty(hoveredCell),
     selected: coordinateKeyOrEmpty(selectedCell),
@@ -1069,6 +1071,7 @@ function ExperienceScene({
     zoneNeutralTerrainColor,
     zoneGridLinesVisible,
     zoneGridLineColor,
+    mapBackgroundColor,
     currentMap.zones,
   ]);
   const availableMaps = useMemo(() => listMapRegistryEntries({ includeDevelopment: process.env.NODE_ENV !== "production" }), []);
@@ -1862,6 +1865,7 @@ function ExperienceScene({
       zoneNeutralTerrainColor,
       zoneGridLinesVisible,
       zoneGridLineColor,
+      mapBackgroundColor,
       hovered: hoveredCell,
       selected: selectedCell,
       selectedBlockId,
@@ -1967,6 +1971,7 @@ function ExperienceScene({
       onZoneNeutralTerrainColorChange: setZoneNeutralTerrainColor,
       onZoneGridLinesVisibleChange: setZoneGridLinesVisible,
       onZoneGridLineColorChange: setZoneGridLineColor,
+      onMapBackgroundColorChange: setMapBackgroundColor,
       onFocusActiveZone: () => {
         const activeZone = currentMap.zones.find((zone) => zone.numericId === zoneId);
         if (!activeZone) {
@@ -2103,6 +2108,7 @@ function ExperienceScene({
     zoneNeutralTerrainColor,
     zoneGridLinesVisible,
     zoneGridLineColor,
+    mapBackgroundColor,
     layerStates,
     navigationNodeType,
   ]);
@@ -2395,6 +2401,7 @@ function ExperienceScene({
 
   return (
     <>
+      <color attach="background" args={[editorAvailable ? mapBackgroundColor : "#edf1ed"]} />
       <ambientLight intensity={0.9} />
       <directionalLight position={[24, 42, 18]} intensity={1.2} />
       <TerrainChunks
