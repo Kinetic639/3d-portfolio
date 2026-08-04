@@ -43,10 +43,15 @@ type PrefabArchetype =
   | "tree"
   | "tree-wide"
   | "tree-columnar"
+  | "fallen-log"
+  | "tree-stump"
   | "bush"
   | "shrub-low"
   | "rock"
   | "rock-stack"
+  | "crate-stack"
+  | "bike-rack"
+  | "barrier"
   | "desk"
   | "workbench-rich"
   | "monitor-desk"
@@ -277,6 +282,25 @@ function createArchetypeParts(archetype: PrefabArchetype): PrefabPartDefinition[
       ];
     case "container":
       return [part("container", "box", { x: 0, y: 0.45, z: 0 }, { x: 0.8, y: 0.9, z: 0.8 }, "metal-proxy")];
+    case "crate-stack":
+      return [
+        part("crate-a", "box", { x: -0.13, y: 0.32, z: 0.08 }, { x: 0.64, y: 0.64, z: 0.64 }, "wood-proxy"),
+        part("crate-b", "box", { x: 0.19, y: 0.32, z: -0.14 }, { x: 0.6, y: 0.6, z: 0.6 }, "wood-proxy"),
+        part("crate-c", "box", { x: 0.02, y: 0.86, z: -0.02 }, { x: 0.52, y: 0.52, z: 0.52 }, "wood-proxy"),
+      ];
+    case "bike-rack":
+      return [
+        part("rail", "box", { x: 0, y: 0.34, z: 0 }, { x: 1.2, y: 0.06, z: 0.06 }, "metal-proxy"),
+        part("hoop-a", "box", { x: -0.4, y: 0.34, z: 0 }, { x: 0.06, y: 0.68, z: 0.06 }, "metal-proxy"),
+        part("hoop-b", "box", { x: 0, y: 0.34, z: 0 }, { x: 0.06, y: 0.68, z: 0.06 }, "metal-proxy"),
+        part("hoop-c", "box", { x: 0.4, y: 0.34, z: 0 }, { x: 0.06, y: 0.68, z: 0.06 }, "metal-proxy"),
+      ];
+    case "barrier":
+      return [
+        part("panel", "box", { x: 0, y: 0.42, z: 0 }, { x: 1.1, y: 0.5, z: 0.06 }, "accent-orange"),
+        part("leg-a", "box", { x: -0.42, y: 0.14, z: 0 }, { x: 0.1, y: 0.28, z: 0.32 }, "structure-dark"),
+        part("leg-b", "box", { x: 0.42, y: 0.14, z: 0 }, { x: 0.1, y: 0.28, z: 0.32 }, "structure-dark"),
+      ];
     case "mailbox-bank":
       return [
         part("rail", "box", { x: 0, y: 0.75, z: 0 }, { x: 2.4, y: 0.12, z: 0.16 }, "metal-proxy"),
@@ -302,6 +326,36 @@ function createArchetypeParts(archetype: PrefabArchetype): PrefabPartDefinition[
         part("trunk", "cylinder", { x: 0, y: 0.95, z: 0 }, { x: 0.18, y: 1.9, z: 0.18 }, "vegetation-trunk"),
         part("canopy-a", "sphere", { x: 0, y: 1.8, z: 0 }, { x: 0.75, y: 1.2, z: 0.75 }, "vegetation-canopy"),
         part("canopy-b", "sphere", { x: 0, y: 2.5, z: 0 }, { x: 0.55, y: 0.9, z: 0.55 }, "foliage-light"),
+      ];
+    case "fallen-log":
+      return [
+        {
+          id: "log",
+          primitive: "cylinder",
+          materialRole: "vegetation-trunk",
+          selectable: true,
+          transform: {
+            position: { x: 0, y: 0.17, z: 0 },
+            rotation: { x: 0, y: 0, z: Math.PI / 2 },
+            scale: { x: 0.34, y: 1.5, z: 0.34 },
+          },
+        },
+        {
+          id: "stub",
+          primitive: "cylinder",
+          materialRole: "vegetation-trunk",
+          selectable: true,
+          transform: {
+            position: { x: -0.6, y: 0.2, z: 0.14 },
+            rotation: { x: 0, y: 0.5, z: Math.PI / 2.4 },
+            scale: { x: 0.14, y: 0.4, z: 0.14 },
+          },
+        },
+      ];
+    case "tree-stump":
+      return [
+        part("stump", "cylinder", { x: 0, y: 0.18, z: 0 }, { x: 0.5, y: 0.36, z: 0.5 }, "vegetation-trunk"),
+        part("cut-top", "cylinder", { x: 0, y: 0.37, z: 0 }, { x: 0.46, y: 0.04, z: 0.46 }, "terrain-neutral"),
       ];
     case "bush":
       return [
@@ -465,6 +519,11 @@ function inferFootprint(archetype: PrefabArchetype): EntityFootprint {
   if (archetype === "skill-garden-landmark") return { width: 2.8, depth: 2.8, height: 3.2 };
   if (archetype === "person-scale-marker") return { width: 0.8, depth: 0.8, height: 1.9 };
   if (archetype === "navigation-anchor") return { width: 0.45, depth: 0.45, height: 0.45 };
+  if (archetype === "fallen-log") return { width: 1.5, depth: 0.4, height: 0.5 };
+  if (archetype === "tree-stump") return { width: 0.55, depth: 0.55, height: 0.42 };
+  if (archetype === "crate-stack") return { width: 0.75, depth: 0.75, height: 1.15 };
+  if (archetype === "bike-rack") return { width: 1.3, depth: 0.35, height: 0.75 };
+  if (archetype === "barrier") return { width: 1.15, depth: 0.4, height: 0.75 };
   return { width: 1, depth: 1, height: 1 };
 }
 
@@ -543,11 +602,11 @@ const CATALOG_SEEDS: CatalogSeed[] = [
   { name: "Portfolio V2 Workbench", category: "portfolio", archetype: "workbench-rich", variants: shortMediumLong, tags: ["portfolio-v2", "projects"] },
   { name: "Portfolio V2 Project Board", category: "portfolio", archetype: "display-rack", variants: sizeVariants, tags: ["portfolio-v2", "projects", "interactive"] },
   { name: "Portfolio V2 Featured Project Pedestal", category: "portfolio", archetype: "landmark", variants: sizeVariants, tags: ["portfolio-v2", "projects", "interactive"] },
-  { name: "Portfolio V2 Folder", category: "portfolio", archetype: "paper-stack", variants: sizeVariants, tags: ["portfolio-v2", "projects", "document"] },
-  { name: "Portfolio V2 Document Stack", category: "portfolio", archetype: "paper-stack", variants: shortMediumLong, tags: ["portfolio-v2", "projects", "document"] },
+  { name: "Portfolio V2 Folder", category: "portfolio", archetype: "paper-stack", collisionMode: "none", variants: sizeVariants, tags: ["portfolio-v2", "projects", "document"] },
+  { name: "Portfolio V2 Document Stack", category: "portfolio", archetype: "paper-stack", collisionMode: "none", variants: shortMediumLong, tags: ["portfolio-v2", "projects", "document"] },
   { name: "Portfolio V2 Storage Shelf", category: "office", archetype: "display-rack", variants: sizeVariants, tags: ["portfolio-v2", "projects", "storage"] },
   { name: "Portfolio V2 Tool Cabinet", category: "office", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "projects", "storage"] },
-  { name: "Portfolio V2 Crate Stack", category: "street-furniture", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "projects", "storage"] },
+  { name: "Portfolio V2 Crate Stack", category: "street-furniture", archetype: "crate-stack", variants: sizeVariants, tags: ["portfolio-v2", "projects", "storage"] },
   { name: "Portfolio V2 Cable Utility Box", category: "infrastructure", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "projects", "utility"] },
   { name: "Portfolio V2 Workshop Entrance Sign", category: "signage", archetype: "zone-board", tags: ["portfolio-v2", "projects", "signage"] },
   { name: "Portfolio V2 Timeline Entrance Arch", category: "portfolio", archetype: "timeline-arch", variants: sizeVariants, tags: ["portfolio-v2", "experience", "landmark"] },
@@ -593,8 +652,8 @@ const CATALOG_SEEDS: CatalogSeed[] = [
   { name: "Portfolio V2 Social Link Marker", category: "portfolio", archetype: "navigation-anchor", collisionMode: "trigger", tags: ["portfolio-v2", "contact", "interactive"] },
   { name: "Portfolio V2 Contact Form Marker", category: "portfolio", archetype: "landmark", collisionMode: "trigger", tags: ["portfolio-v2", "contact", "interactive"] },
   { name: "Portfolio V2 CV Download Marker", category: "portfolio", archetype: "board", collisionMode: "trigger", tags: ["portfolio-v2", "contact", "interactive"] },
-  { name: "Portfolio V2 Flyer", category: "portfolio", archetype: "paper-stack", variants: sizeVariants, tags: ["portfolio-v2", "contact", "flyer"] },
-  { name: "Portfolio V2 Flyer Pile", category: "portfolio", archetype: "paper-stack", variants: shortMediumLong, tags: ["portfolio-v2", "contact", "flyer"] },
+  { name: "Portfolio V2 Flyer", category: "portfolio", archetype: "paper-stack", collisionMode: "none", variants: sizeVariants, tags: ["portfolio-v2", "contact", "flyer"] },
+  { name: "Portfolio V2 Flyer Pile", category: "portfolio", archetype: "paper-stack", collisionMode: "none", variants: shortMediumLong, tags: ["portfolio-v2", "contact", "flyer"] },
   { name: "Portfolio V2 Wall Poster", category: "portfolio", archetype: "board", tags: ["portfolio-v2", "contact", "flyer"] },
   { name: "Portfolio V2 Contact Entrance Sign", category: "signage", archetype: "zone-board", tags: ["portfolio-v2", "contact", "signage"] },
   { name: "Portfolio V2 Broad Canopy Tree", category: "nature", archetype: "tree-wide", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
@@ -602,16 +661,16 @@ const CATALOG_SEEDS: CatalogSeed[] = [
   { name: "Portfolio V2 Ornamental Tree", category: "nature", archetype: "tree", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
   { name: "Portfolio V2 Large Shrub", category: "nature", archetype: "bush", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
   { name: "Portfolio V2 Low Shrub", category: "nature", archetype: "shrub-low", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
-  { name: "Portfolio V2 Grass Cluster", category: "nature", archetype: "shrub-low", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
-  { name: "Portfolio V2 Flower Cluster", category: "nature", archetype: "shrub-low", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
+  { name: "Portfolio V2 Grass Cluster", category: "nature", archetype: "shrub-low", collisionMode: "none", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
+  { name: "Portfolio V2 Flower Cluster", category: "nature", archetype: "shrub-low", collisionMode: "none", variants: sizeVariants, tags: ["portfolio-v2", "nature", "vegetation"] },
   { name: "Portfolio V2 Large Rock", category: "nature", archetype: "rock-stack", variants: sizeVariants, tags: ["portfolio-v2", "nature", "rock"] },
   { name: "Portfolio V2 Medium Rock", category: "nature", archetype: "rock", variants: sizeVariants, tags: ["portfolio-v2", "nature", "rock"] },
   { name: "Portfolio V2 Small Rock Cluster", category: "nature", archetype: "rock-stack", variants: sizeVariants, tags: ["portfolio-v2", "nature", "rock"] },
-  { name: "Portfolio V2 Fallen Log", category: "nature", archetype: "tree", variants: [{ id: "standard", label: "Standard", size: "standard", scale: { x: 1.4, y: 0.35, z: 0.35 }, footprint: { width: 1.4, depth: 0.35, height: 0.75 } }], tags: ["portfolio-v2", "nature"] },
+  { name: "Portfolio V2 Fallen Log", category: "nature", archetype: "fallen-log", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE, footprint: { width: 1.5, depth: 0.4, height: 0.5 } }], tags: ["portfolio-v2", "nature"] },
   { name: "Portfolio V2 Timber Stack", category: "nature", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "nature"] },
-  { name: "Portfolio V2 Ground Debris", category: "decoration", archetype: "rock-stack", variants: sizeVariants, tags: ["portfolio-v2", "decoration"] },
+  { name: "Portfolio V2 Ground Debris", category: "decoration", archetype: "rock-stack", collisionMode: "none", variants: sizeVariants, tags: ["portfolio-v2", "decoration"] },
   { name: "Portfolio V2 Crate", category: "street-furniture", archetype: "container", variants: sizeVariants, tags: ["portfolio-v2", "decoration"] },
-  { name: "Portfolio V2 Barrel Container", category: "street-furniture", archetype: "round-platform", variants: sizeVariants, tags: ["portfolio-v2", "decoration"] },
+  { name: "Portfolio V2 Barrel Container", category: "street-furniture", archetype: "round-platform", collisionMode: "blocking", variants: sizeVariants, tags: ["portfolio-v2", "decoration"] },
   { name: "Scale Reference Mannequin", category: "navigation", archetype: "person-scale-marker", collisionMode: "none", tags: ["navigation", "editor-helper", "scale-reference"] },
   { name: "Central Orientation Monument", category: "portfolio", archetype: "orientation-monument", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "tall", label: "Tall", size: "tall", scale: { x: 1.1, y: 1.18, z: 1.1 }, footprint: { width: 2.9, depth: 2.9, height: 3.8 } }] },
   { name: "Portfolio Workshop Compound", category: "architecture", archetype: "workshop-compound", variants: [{ id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }, { id: "large", label: "Large", size: "large", scale: { x: 1.15, y: 1.05, z: 1.1 }, footprint: { width: 8, depth: 6.2, height: 3.5 } }], futureAssetSlot: "future/modular-workshop" },
@@ -660,18 +719,56 @@ const CATALOG_SEEDS: CatalogSeed[] = [
 
   { name: "Bench", category: "street-furniture", archetype: "bench", variants: [{ id: "small", label: "Small", size: "small", scale: { x: 0.8, y: 0.9, z: 0.9 } }, { id: "standard", label: "Standard", size: "standard", scale: UNIT_SCALE }] },
   ...["Lamp Post", "Utility Pole", "Directional Signpost", "Central Multi-Direction Sign", "Bollard"].map((name) => ({ name, category: "street-furniture" as const, archetype: "post" as const, variants: name === "Lamp Post" ? [{ id: "short", label: "Short", size: "short" as const, scale: { x: 1, y: 0.8, z: 1 } }, { id: "tall", label: "Tall", size: "tall" as const, scale: { x: 1, y: 1.35, z: 1 } }] : undefined })),
-  ...["Section Sign", "Noticeboard", "Bulletin Board", "Information Pedestal"].map((name) => ({ name, category: "street-furniture" as const, archetype: "board" as const })),
-  ...["Mailbox", "Waste Bin", "Planter", "Bicycle Rack Proxy", "Simple Barrier", "Crate", "Barrel"].map((name) => ({ name, category: "street-furniture" as const, archetype: name.includes("Planter") || name.includes("Crate") ? "container" as const : name === "Barrel" ? "round-platform" as const : "container" as const, variants: name === "Planter" || name === "Crate" ? [{ id: "small", label: "Small", size: "small" as const, scale: { x: 0.75, y: 0.75, z: 0.75 } }, { id: "large", label: "Large", size: "large" as const, scale: { x: 1.25, y: 1.25, z: 1.25 } }] : undefined })),
+  ...["Section Sign", "Noticeboard", "Bulletin Board", "Information Pedestal"].map((name) => ({ name, category: name === "Information Pedestal" ? "street-furniture" as const : "signage" as const, archetype: "board" as const })),
+  ...["Mailbox", "Waste Bin", "Planter", "Bicycle Rack Proxy", "Simple Barrier", "Crate", "Barrel"].map((name) => ({
+    name,
+    category: "street-furniture" as const,
+    archetype:
+      name === "Bicycle Rack Proxy" ? "bike-rack" as const :
+      name === "Simple Barrier" ? "barrier" as const :
+      name.includes("Planter") || name.includes("Crate") ? "container" as const :
+      name === "Barrel" ? "round-platform" as const :
+      "container" as const,
+    collisionMode: name === "Barrel" ? "blocking" as const : undefined,
+    variants: name === "Planter" || name === "Crate" ? [{ id: "small", label: "Small", size: "small" as const, scale: { x: 0.75, y: 0.75, z: 0.75 } }, { id: "large", label: "Large", size: "large" as const, scale: { x: 1.25, y: 1.25, z: 1.25 } }] : undefined,
+  })),
 
   ...["Deciduous Tree", "Conifer", "Orchard Tree", "Skill Tree Placeholder"].map((name) => ({ name, category: "nature" as const, archetype: "tree" as const, variants: sizeVariants })),
   { name: "Narrow Tree", category: "nature", archetype: "tree", variants: [{ id: "small", label: "Small", size: "small", scale: { x: 0.65, y: 1, z: 0.65 } }, { id: "tall", label: "Tall", size: "tall", scale: { x: 0.7, y: 1.45, z: 0.7 } }] },
-  ...["Young Tree", "Tree Stump", "Fallen Log", "Bush", "Hedge", "Rock", "Boulder Cluster", "Grass Clump", "Flower Patch Marker"].map((name) => ({ name, category: "nature" as const, archetype: name.includes("Rock") || name.includes("Boulder") ? "rock" as const : name.includes("Tree") || name.includes("Log") ? "tree" as const : "bush" as const, variants: name === "Bush" || name === "Hedge" || name === "Rock" ? sizeVariants : name === "Fallen Log" ? [{ id: "short", label: "Short", size: "short" as const, scale: { x: 0.7, y: 0.4, z: 0.45 } }, { id: "long", label: "Long", size: "long" as const, scale: { x: 1.6, y: 0.4, z: 0.45 } }] : undefined })),
+  ...["Young Tree", "Tree Stump", "Fallen Log", "Bush", "Hedge", "Rock", "Boulder Cluster", "Grass Clump", "Flower Patch Marker"].map((name) => ({
+    name,
+    category: "nature" as const,
+    archetype:
+      name === "Tree Stump" ? "tree-stump" as const :
+      name === "Fallen Log" ? "fallen-log" as const :
+      name === "Boulder Cluster" ? "rock-stack" as const :
+      name.includes("Rock") ? "rock" as const :
+      name.includes("Tree") ? "tree" as const :
+      "bush" as const,
+    collisionMode: name === "Grass Clump" || name === "Flower Patch Marker" ? "none" as const : undefined,
+    variants:
+      name === "Bush" || name === "Hedge" || name === "Rock" ? sizeVariants :
+      name === "Fallen Log" ? [{ id: "short", label: "Short", size: "short" as const, scale: { x: 0.7, y: 1, z: 1 } }, { id: "long", label: "Long", size: "long" as const, scale: { x: 1.5, y: 1, z: 1 } }] :
+      undefined,
+  })),
 
   ...["Desk", "Worktable", "About Desk"].map((name) => ({ name, category: name === "About Desk" ? "portfolio" as const : "office" as const, archetype: "desk" as const, variants: name === "Desk" ? [{ id: "small", label: "Small", size: "small" as const, scale: { x: 0.75, y: 0.9, z: 0.8 } }, { id: "standard", label: "Standard", size: "standard" as const, scale: UNIT_SCALE }] : undefined })),
   ...["Chair Proxy", "Office Chair Proxy"].map((name) => ({ name, category: "office" as const, archetype: "chair" as const })),
   ...["Monitor", "Laptop", "Project Display Monitor"].map((name) => ({ name, category: name.includes("Project") ? "portfolio" as const : "office" as const, archetype: "screen" as const })),
-  ...["Keyboard Slab", "Folder", "Folder Stack", "Document Stack", "Sketchbook", "Rolled Plan", "CV Flyer", "Envelope", "Project Folder", "Featured Project Folder"].map((name) => ({ name, category: name.includes("Project") || name.includes("CV") || name === "Envelope" ? "portfolio" as const : "office" as const, archetype: "paper-stack" as const, variants: name === "Folder" || name === "CV Flyer" ? [{ id: "closed", label: "Closed", size: "small" as const, scale: UNIT_SCALE }, { id: "open", label: "Open", size: "wide" as const, scale: { x: 1.35, y: 0.7, z: 1 } }] : undefined })),
-  ...["Pinboard", "Filing Cabinet", "Storage Cabinet", "Shelf", "Desk Lamp", "Coffee Cup Proxy", "Headphones Proxy", "Presentation Pedestal", "Project Blueprint Board"].map((name) => ({ name, category: name.includes("Project") ? "portfolio" as const : "office" as const, archetype: name.includes("Board") || name === "Pinboard" ? "board" as const : name.includes("Lamp") ? "post" as const : "container" as const, variants: name === "Shelf" ? [{ id: "small", label: "Small", size: "small" as const, scale: { x: 0.7, y: 0.8, z: 0.55 } }, { id: "large", label: "Large", size: "large" as const, scale: { x: 1.35, y: 1.3, z: 0.75 } }] : undefined })),
+  ...["Keyboard Slab", "Folder", "Folder Stack", "Document Stack", "Sketchbook", "Rolled Plan", "CV Flyer", "Envelope", "Project Folder", "Featured Project Folder"].map((name) => ({
+    name,
+    category: name.includes("Project") || name.includes("CV") || name === "Envelope" ? "portfolio" as const : "office" as const,
+    archetype: "paper-stack" as const,
+    collisionMode: "none" as const,
+    variants: name === "Folder" || name === "CV Flyer" ? [{ id: "closed", label: "Closed", size: "small" as const, scale: UNIT_SCALE }, { id: "open", label: "Open", size: "wide" as const, scale: { x: 1.35, y: 0.7, z: 1 } }] : undefined,
+  })),
+  ...["Pinboard", "Filing Cabinet", "Storage Cabinet", "Shelf", "Desk Lamp", "Coffee Cup Proxy", "Headphones Proxy", "Presentation Pedestal", "Project Blueprint Board"].map((name) => ({
+    name,
+    category: name.includes("Project") ? "portfolio" as const : "office" as const,
+    archetype: name.includes("Board") || name === "Pinboard" ? "board" as const : name.includes("Lamp") ? "post" as const : "container" as const,
+    collisionMode: name === "Coffee Cup Proxy" || name === "Headphones Proxy" ? "none" as const : undefined,
+    variants: name === "Shelf" ? [{ id: "small", label: "Small", size: "small" as const, scale: { x: 0.7, y: 0.8, z: 0.55 } }, { id: "large", label: "Large", size: "large" as const, scale: { x: 1.35, y: 1.3, z: 0.75 } }] : undefined,
+  })),
 
   ...["Experience Milestone", "Experience Date Post", "Experience Noticeboard", "Skills Category Tree", "Skill Fruit Placeholder", "About Noticeboard", "Contact Mailbox", "Contact Noticeboard", "Contact Form Pedestal", "Central Portfolio Sign", "Section Landmark", "Future Portal Placeholder"].map((name) => ({ name, category: "portfolio" as const, archetype: name.includes("Tree") ? "tree" as const : name.includes("Mailbox") || name.includes("Pedestal") ? "container" as const : name.includes("Sign") || name.includes("Noticeboard") ? "board" as const : "landmark" as const, collisionMode: name.includes("Fruit") ? "none" as const : undefined, futureAssetSlot: name === "Future Portal Placeholder" ? "future/portal" : undefined })),
 
