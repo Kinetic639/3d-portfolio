@@ -339,9 +339,15 @@ export default function PortfolioExperience({
   const [editorLayout, setEditorLayout] = useState<EditorViewportLayoutState>(DEFAULT_VIEWPORT_LAYOUT);
   const [mapUi, setMapUi] = useState<MapUiState | null>(null);
   const phase = useExperienceStore((state) => state.phase);
-  const editorEnabled = !benchmarkMode && process.env.NODE_ENV !== "production" && editorRequested;
+  const editorEnabled =
+    !benchmarkMode &&
+    (process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_ENABLE_MAP_EDITOR === "true") &&
+    editorRequested;
   const editorActive = editorEnabled && phase === "explore";
-  const canOpenEditor = process.env.NODE_ENV !== "production" && phase === "explore" && !editorRequested;
+  const canOpenEditor =
+    (process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_ENABLE_MAP_EDITOR === "true") &&
+    phase === "explore" &&
+    !editorRequested;
   const effectiveEditorLayout = getEffectiveViewportLayout(editorActive ? editorLayout : DEFAULT_VIEWPORT_LAYOUT);
 
   useLayoutEffect(() => {
@@ -359,7 +365,7 @@ export default function PortfolioExperience({
   }, []);
 
   useEffect(() => {
-    if (process.env.NODE_ENV === "production") {
+    if (process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_ENABLE_MAP_EDITOR !== "true") {
       return;
     }
 
