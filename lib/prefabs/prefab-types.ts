@@ -11,7 +11,17 @@ export type PrefabCategory =
   | "portfolio"
   | "signage"
   | "navigation"
-  | "decoration";
+  | "decoration"
+  // Placeable-object categories for pieces converted out of the terrain
+  // shape palette (see docs/world-registry-refactor-audit.md).
+  | "roofs"
+  | "fences"
+  | "pipes-utilities"
+  | "wooden-walls"
+  | "retaining-structures"
+  | "rocks-rubble"
+  | "crystals-caves"
+  | "ice-formations";
 
 export type PrefabSize = "small" | "medium" | "large" | "custom" | "short" | "long" | "narrow" | "wide" | "low" | "tall" | "standard";
 
