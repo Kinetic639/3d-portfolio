@@ -80,11 +80,18 @@ body {
 }
 
 .experience-shell--editor .map-canvas-layer {
-  grid-column: 2 / 4;
+  /* Previously spanned columns 2/4 with padding-left:42px to fake reserving
+     space for the tool rail, which actually lives in a separate overlaid
+     grid (.editor-shell, position:fixed). That's two independently rounded
+     column widths that are only supposed to line up — any subpixel mismatch
+     between them let this layer's own light --background color peek through
+     as a thin vertical stripe right at the tool-rail/viewport seam. Just
+     occupy column 3 directly, matching the maximized/clean-preview case
+     below, so there's nothing left to misalign. */
+  grid-column: 3;
   grid-row: 3;
   min-width: 0;
   min-height: 0;
-  padding-left: 42px;
   border: 1px solid #111111;
   border-top: 0;
   position: relative;
