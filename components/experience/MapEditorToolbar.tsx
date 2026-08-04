@@ -65,7 +65,7 @@ import { BUILT_IN_PREFABS, listPrefabCategories } from "@/lib/prefabs/prefab-lib
 import type { PrefabCategory } from "@/lib/prefabs/prefab-types";
 import { BLOCK_IDS, RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
-import { getShapeDefinition, getShapePitch, getShapeStateValue, setShapePitch, SHAPE_DEFINITIONS, type ShapeCategory, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
+import { getShapeDefinition, getShapePitch, getShapeStateValue, setShapePitch, TERRAIN_PALETTE_SHAPE_DEFINITIONS, type ShapeCategory, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
 import { SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 
 export type TerrainRenderMode = "instanced" | "surface";
@@ -297,14 +297,21 @@ const PRIMITIVES: PrimitiveType[] = ["box", "cylinder", "sphere", "plane", "plat
 const COLLISION_MODES: CollisionMode[] = ["none", "blocking", "walkable", "trigger"];
 const NODE_TYPES: NavigationNodeType[] = ["walk", "route-junction", "wait-point", "look-at", "character-spawn", "bird-perch"];
 type ShapePickerCategory = ShapeCategory | "all";
-const SHAPE_CATEGORIES: ShapePickerCategory[] = ["all", "terrain", "transition", "structure", "roof", "utility", "fluid"];
+// "structure", "roof", "utility" and "fluid" are omitted: every shape in
+// those categories is now a placeable object (or, for water, the dedicated
+// water tool below) rather than a terrain-palette entry — see
+// docs/world-registry-refactor-audit.md.
+const SHAPE_CATEGORIES: ShapePickerCategory[] = ["all", "terrain", "transition"];
 const TERRAIN_MATERIAL_OPTIONS = [
   {
     id: BLOCK_IDS.Ground,
     displayName: "None",
     developmentColor: getBlockDefinition(BLOCK_IDS.Ground).developmentColor,
   },
-  ...RENDERABLE_BLOCK_DEFINITIONS.filter((block) => block.id !== BLOCK_IDS.Ground),
+  // Water is deliberately excluded here — it is painted as one atomic action
+  // (material + shape together) via the dedicated "Water" control in
+  // ShapeControls, not as an ordinary standalone material.
+  ...RENDERABLE_BLOCK_DEFINITIONS.filter((block) => block.id !== BLOCK_IDS.Ground && block.id !== BLOCK_IDS.Water),
 ];
 const MENU_GROUPS = ["file", "edit", "view", "map", "help"] as const;
 const MAP_PRESET_OPTIONS = MAP_PRESETS;
@@ -993,7 +1000,7 @@ function ShapeControls({ props }: { props: MapEditorToolbarProps }) {
   const [previewYaw, setPreviewYaw] = useState(0);
   const previewDrag = useRef<{ x: number; yaw: number } | null>(null);
   const normalizedQuery = query.trim().toLowerCase();
-  const shapes = category === "all" ? SHAPE_DEFINITIONS : SHAPE_DEFINITIONS.filter((shape) => shape.category === category);
+  const shapes = category === "all" ? TERRAIN_PALETTE_SHAPE_DEFINITIONS : TERRAIN_PALETTE_SHAPE_DEFINITIONS.filter((shape) => shape.category === category);
   const visibleShapes = normalizedQuery
     ? shapes.filter((shape) => shape.name.toLowerCase().includes(normalizedQuery) || shape.key.includes(normalizedQuery))
     : shapes;
@@ -1012,6 +1019,17 @@ function ShapeControls({ props }: { props: MapEditorToolbarProps }) {
         setCategory(nextCategory);
         if (nextCategory !== "all") props.onShapeCategoryChange(nextCategory);
       }}>{SHAPE_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+      <button
+        type="button"
+        aria-pressed={props.paintBlockId === BLOCK_IDS.Water && props.activeShapeId === SHAPE_IDS.WATER}
+        className={props.paintBlockId === BLOCK_IDS.Water && props.activeShapeId === SHAPE_IDS.WATER ? "active" : ""}
+        onClick={() => {
+          props.onPaintBlockChange(BLOCK_IDS.Water);
+          props.onShapeChange(SHAPE_IDS.WATER);
+        }}
+      >
+        Water
+      </button>
       <input aria-label="Search block shapes" placeholder="Search block shapes" value={query} onChange={(event) => setQuery(event.target.value)} />
       <div className="editor-shape-list" role="listbox" aria-label="Shape selector">
         {visibleShapes.map((shape) => (

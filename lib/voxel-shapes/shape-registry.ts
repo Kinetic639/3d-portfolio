@@ -713,6 +713,75 @@ export const SHAPE_REGISTRY = Object.fromEntries(
 
 export const SHAPE_DEFINITIONS = Object.values(SHAPE_REGISTRY);
 
+// Shapes that are the legacy terrain-shape representation of pieces which
+// are now independently placeable objects (walls, roofs, fences, pipes,
+// wooden walls, retaining walls, and natural cave-formation dressing), plus
+// water (now exposed through a single dedicated water tool instead of also
+// appearing as an ordinary terrain shape). See
+// docs/world-registry-refactor-audit.md, "Shapes that must become placeable
+// objects" and "Water".
+//
+// These remain fully defined in SHAPE_REGISTRY/getShapeDefinition — a saved
+// map that still references one of these shape ids continues to load and
+// render correctly. They are excluded only from the terrain editor's shape
+// picker via TERRAIN_PALETTE_SHAPE_DEFINITIONS below, so new placements can
+// no longer be made with them.
+export const PALETTE_HIDDEN_SHAPE_IDS: ReadonlySet<ShapeId> = new Set([
+  SHAPE_IDS.WALL,
+  SHAPE_IDS.BEAM,
+  SHAPE_IDS.PILLAR_BASE,
+  SHAPE_IDS.PILLAR_MIDDLE,
+  SHAPE_IDS.PILLAR_CAP,
+  SHAPE_IDS.ROOF_FLAT,
+  SHAPE_IDS.ROOF_SHALLOW,
+  SHAPE_IDS.ROOF_STEEP,
+  SHAPE_IDS.ROOF_OUTER_CORNER,
+  SHAPE_IDS.ROOF_INNER_CORNER,
+  SHAPE_IDS.ROOF_HOLLOW,
+  SHAPE_IDS.ROOF,
+  SHAPE_IDS.FENCE,
+  SHAPE_IDS.FENCE_POST,
+  SHAPE_IDS.FENCE_CORNER,
+  SHAPE_IDS.FENCE_T,
+  SHAPE_IDS.FENCE_CROSS,
+  SHAPE_IDS.FENCE_GATE,
+  SHAPE_IDS.PIPE,
+  SHAPE_IDS.PIPE_SHORT,
+  SHAPE_IDS.PIPE_LONG,
+  SHAPE_IDS.PIPE_CORNER,
+  SHAPE_IDS.WOODEN_WALL_FULL,
+  SHAPE_IDS.WOODEN_WALL_END,
+  SHAPE_IDS.WOODEN_WALL_CORNER,
+  SHAPE_IDS.WOODEN_WALL_T,
+  SHAPE_IDS.WOODEN_WALL_CROSS,
+  SHAPE_IDS.WOODEN_WALL_GATE,
+  SHAPE_IDS.SOLID_WOODEN_WALL_FULL,
+  SHAPE_IDS.SOLID_WOODEN_WALL_END,
+  SHAPE_IDS.SOLID_WOODEN_WALL_CORNER,
+  SHAPE_IDS.SOLID_WOODEN_WALL_T,
+  SHAPE_IDS.SOLID_WOODEN_WALL_CROSS,
+  SHAPE_IDS.SOLID_WOODEN_WALL_GATE,
+  SHAPE_IDS.RETAINING_WALL_LOW,
+  SHAPE_IDS.RUBBLE_SMALL,
+  SHAPE_IDS.RUBBLE_MEDIUM,
+  SHAPE_IDS.STALACTITE_SMALL,
+  SHAPE_IDS.STALACTITE_LARGE,
+  SHAPE_IDS.CRYSTAL_SMALL,
+  SHAPE_IDS.CRYSTAL_MEDIUM,
+  SHAPE_IDS.CRYSTAL_LARGE,
+  SHAPE_IDS.ICE_CHUNKS,
+  SHAPE_IDS.ICE_CHUNKS_MEDIUM,
+  SHAPE_IDS.ICICLES,
+  SHAPE_IDS.ICICLES_LARGE,
+  SHAPE_IDS.WATER,
+]);
+
+// The shape list the terrain editor's shape picker should render. Everything
+// else in SHAPE_DEFINITIONS remains a valid, fully-functional shape for
+// loading/rendering existing map data — it just can't be newly selected from
+// the Terrain tool.
+export const TERRAIN_PALETTE_SHAPE_DEFINITIONS = SHAPE_DEFINITIONS.filter((shape) => !PALETTE_HIDDEN_SHAPE_IDS.has(shape.id));
+
 export function getShapeDefinition(shapeId: number): ShapeDefinition {
   return SHAPE_REGISTRY[shapeId as ShapeId] ?? SHAPE_REGISTRY[SHAPE_IDS.CUBE];
 }
