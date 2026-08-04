@@ -33,6 +33,7 @@ import {
   Save,
   Search,
   Shapes,
+  Sparkles,
   SquareDashedMousePointer,
   Trash2,
   Undo2,
@@ -42,6 +43,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { createEditorCommands, findEditorCommands, type EditorCommand, type EditorIconName } from "@/lib/editor/editor-commands";
+import { useExperienceStore } from "@/lib/experience/experience-store";
 import {
   createDefaultEditorLayout,
   loadEditorLayout,
@@ -88,6 +90,8 @@ type EditorIconKey =
   | "zone-area-fill"
   | "zone-paint"
   | "zone-replace"
+  | "sparkles"
+  | "asset-preview"
   | "close";
 
 export type EditorLayerId =
@@ -230,6 +234,7 @@ export type MapEditorToolbarProps = EditorInspectorState & {
   onEntityColorChange: (color: string) => void;
   onEntityNameChange: (name: string) => void;
   onPlaceEntity: () => void;
+  onPreviewEntityPopAnimation: () => void;
   onDuplicateEntity: () => void;
   onDeleteEntity: () => void;
   onGroupEntity: () => void;
@@ -315,7 +320,7 @@ const TERRAIN_MATERIAL_OPTIONS = [
   // ShapeControls, not as an ordinary standalone material.
   ...RENDERABLE_BLOCK_DEFINITIONS.filter((block) => block.id !== BLOCK_IDS.Ground && block.id !== BLOCK_IDS.Water),
 ];
-const MENU_GROUPS = ["file", "edit", "view", "map", "help"] as const;
+const MENU_GROUPS = ["file", "edit", "view", "map", "settings", "help"] as const;
 const COLLAPSED_SIDE_DOCK_WIDTH = 32;
 const COLLAPSED_BOTTOM_DOCK_HEIGHT = 30;
 
@@ -330,6 +335,7 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [commandQuery, setCommandQuery] = useState("");
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [assetPreviewOpen, setAssetPreviewOpen] = useState(false);
 
   useEffect(() => {
     const serialized = serializeEditorLayout(layout);
@@ -506,7 +512,13 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
         onCloseEditor={props.onClose}
       />
       <MainToolbar props={props} commands={commands} layout={layout} setWorkspace={setWorkspace} toggleCleanPreview={toggleCleanPreview} />
-      <ToolRail workspace={layout.activeWorkspace} activeTool={props.tool} props={props} onToolChange={props.onToolChange} />
+      <ToolRail
+        workspace={layout.activeWorkspace}
+        activeTool={props.tool}
+        props={props}
+        onToolChange={props.onToolChange}
+        onOpenAssetPreview={() => setAssetPreviewOpen(true)}
+      />
       {!layout.maximizedViewport ? (
         <aside className={`editor-left-dock ${layout.collapsed.left ? "editor-dock--collapsed" : ""}`} aria-label="Contextual palette" onPointerDown={(event) => event.stopPropagation()}>
           <DockHeader title={leftDockTitle(layout.activeWorkspace, props.tool)} side="left" collapsed={layout.collapsed.left} onToggle={() => setLayout((current) => ({ ...current, collapsed: { ...current.collapsed, left: !current.collapsed.left } }))} />
@@ -551,6 +563,13 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
         />
       ) : null}
       {layout.shortcutsOpen ? <ShortcutsDialog commands={commands} onClose={() => patchLayout({ shortcutsOpen: false })} /> : null}
+      {assetPreviewOpen ? (
+        <AssetPreviewDialog
+          props={props}
+          workspace={layout.activeWorkspace}
+          onClose={() => setAssetPreviewOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -590,6 +609,7 @@ function MenuBar({
                   onEditorMinZoomDistanceChange={onEditorMinZoomDistanceChange}
                 />
               ) : null}
+              {group === "settings" ? <SettingsMenuSettings /> : null}
             </div>
           ) : null}
         </div>
@@ -662,6 +682,25 @@ function ViewMenuSettings({
   );
 }
 
+function SettingsMenuSettings() {
+  const panSpeed = useExperienceStore((state) => state.panSpeed);
+  const rotateSpeed = useExperienceStore((state) => state.rotateSpeed);
+  const setPanSpeed = useExperienceStore((state) => state.setPanSpeed);
+  const setRotateSpeed = useExperienceStore((state) => state.setRotateSpeed);
+  return (
+    <div className="editor-menu-settings" role="group" aria-label="Mouse sensitivity settings">
+      <label>
+        <span>Pan sensitivity <strong>{panSpeed.toFixed(1)}x</strong></span>
+        <input type="range" min={0.2} max={3} step={0.1} value={panSpeed} onChange={(event) => setPanSpeed(Number(event.target.value))} />
+      </label>
+      <label>
+        <span>Rotate sensitivity <strong>{rotateSpeed.toFixed(1)}x</strong></span>
+        <input type="range" min={0.2} max={3} step={0.1} value={rotateSpeed} onChange={(event) => setRotateSpeed(Number(event.target.value))} />
+      </label>
+    </div>
+  );
+}
+
 function MainToolbar({ props, commands, layout, setWorkspace, toggleCleanPreview }: { props: MapEditorToolbarProps; commands: EditorCommand[]; layout: ReturnType<typeof createDefaultEditorLayout>; setWorkspace: (workspace: string) => void; toggleCleanPreview: () => void }) {
   return (
     <div className="editor-main-toolbar" onPointerDown={(event) => event.stopPropagation()}>
@@ -688,7 +727,20 @@ function MainToolbar({ props, commands, layout, setWorkspace, toggleCleanPreview
   );
 }
 
-function ToolRail({ workspace, activeTool, props, onToolChange }: { workspace: EditorWorkspace; activeTool: EditorTool; props: MapEditorToolbarProps; onToolChange: (tool: EditorTool) => void }) {
+function ToolRail({
+  workspace,
+  activeTool,
+  props,
+  onToolChange,
+  onOpenAssetPreview,
+}: {
+  workspace: EditorWorkspace;
+  activeTool: EditorTool;
+  props: MapEditorToolbarProps;
+  onToolChange: (tool: EditorTool) => void;
+  onOpenAssetPreview: () => void;
+}) {
+  const canPreviewAssets = workspace === "terrain" || workspace === "objects";
   return (
     <nav className="editor-tool-rail" aria-label={`${workspace} tools`} onPointerDown={(event) => event.stopPropagation()}>
       {WORKSPACE_TOOLS[workspace].map((tool) => (
@@ -697,6 +749,15 @@ function ToolRail({ workspace, activeTool, props, onToolChange }: { workspace: E
           <span>{TOOL_LABELS[tool]}</span>
         </button>
       ))}
+      {canPreviewAssets ? (
+        <>
+          <div className="editor-tool-rail-divider" aria-hidden="true" />
+          <button type="button" title="Asset Preview" aria-label="Asset Preview" onClick={onOpenAssetPreview}>
+            <EditorIcon name="asset-preview" />
+            <span>Preview</span>
+          </button>
+        </>
+      ) : null}
       {workspace === "zones" ? <ZoneRailTools props={props} /> : null}
     </nav>
   );
@@ -796,6 +857,7 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
         <label>Colour<input type="color" value={props.entityColor} onChange={(event) => props.onEntityColorChange(event.target.value)} /></label>
         <label>Collision<select value={props.collisionMode} onChange={(event) => props.onCollisionModeChange(event.target.value as CollisionMode)}>{COLLISION_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></label>
         <ActionButton icon="object" className={props.tool === "entity" ? "active" : ""} onClick={() => props.onToolChange("entity")}>Place Entity</ActionButton>
+        <ActionButton icon="sparkles" disabled={!props.activePrefabId} onClick={props.onPreviewEntityPopAnimation}>Preview Pop</ActionButton>
         <div className="editor-segmented" role="group" aria-label="Object transform mode">
           <button type="button" className={props.tool === "entity" && props.entityTransformMode === "translate" ? "active" : ""} onClick={() => props.onEntityTransformModeChange("translate")}><EditorIcon name="move" /><span>Move</span></button>
           <button type="button" className={props.tool === "entity" && props.entityTransformMode === "rotate" ? "active" : ""} onClick={() => props.onEntityTransformModeChange("rotate")}><EditorIcon name="rotate" /><span>Rotate</span></button>
@@ -1147,26 +1209,50 @@ function ShapePreview({
 
 type PreviewFace = { normal: [number, number, number]; corners: Array<[number, number, number]> };
 
+// The projection below is an oblique isometric view from the (+X, +Y, +Z)
+// octant: screenX tracks (rx - rz), screenY tracks (rx + rz) minus height.
+// That implies a fixed camera direction of (1, 1, 1) in the *rotated* (view)
+// frame, which is what both the culling test and the depth sort below need
+// to use — everything is keyed off the same rx/y/rz per corner so a face's
+// visibility and paint order rotate together with the view instead of
+// silently staying pinned to the object's un-rotated axes.
 function buildShapePreviewPolygons(faces: PreviewFace[], viewYaw = 0) {
   const cos = Math.cos(viewYaw);
   const sin = Math.sin(viewYaw);
-  const projected = faces.map((face) => {
-    const points = face.corners.map(([x, y, z]) => {
-      const rx = x * cos - z * sin;
-      const rz = x * sin + z * cos;
-      const px = 60 + (rx - rz) * 34;
-      const py = 54 - y * 32 + (rx + rz) * 14;
-      return { x: px, y: py };
-    });
-    const normalX = face.normal[0] * cos - face.normal[2] * sin;
-    const normalZ = face.normal[0] * sin + face.normal[2] * cos;
-    const shade = Math.max(0.35, Math.min(0.95, 0.72 + face.normal[1] * 0.12 + normalX * 0.06 - normalZ * 0.06));
-    return {
-      depth: face.corners.reduce((total, corner) => total + corner[0] + corner[1] + corner[2], 0) / face.corners.length,
-      points: points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "),
-      fill: `rgba(${Math.round(176 * shade)}, ${Math.round(184 * shade)}, ${Math.round(178 * shade)}, 0.96)`,
-    };
-  });
+  const projected = faces
+    .map((face) => {
+      const normalX = face.normal[0] * cos - face.normal[2] * sin;
+      const normalY = face.normal[1];
+      const normalZ = face.normal[0] * sin + face.normal[2] * cos;
+
+      // Cull faces pointing away from the camera. Without this, every face
+      // of every box gets drawn regardless of which side actually faces the
+      // viewer, so a stray back face can land on top of (or peek out from
+      // behind) the correct front faces once the view is rotated, or on any
+      // non-convex/composite shape (prefabs built from several box parts)
+      // where the faces don't fully self-occlude by sheer coincidence.
+      const facing = normalX + normalY + normalZ;
+      if (facing <= 0.0001) return null;
+
+      let depth = 0;
+      const points = face.corners.map(([x, y, z]) => {
+        const rx = x * cos - z * sin;
+        const rz = x * sin + z * cos;
+        depth += rx + y + rz;
+        const px = 60 + (rx - rz) * 34;
+        const py = 54 - y * 32 + (rx + rz) * 14;
+        return { x: px, y: py };
+      });
+      depth /= face.corners.length;
+
+      const shade = Math.max(0.35, Math.min(0.95, 0.72 + normalY * 0.12 + normalX * 0.06 - normalZ * 0.06));
+      return {
+        depth,
+        points: points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "),
+        fill: `rgba(${Math.round(176 * shade)}, ${Math.round(184 * shade)}, ${Math.round(178 * shade)}, 0.96)`,
+      };
+    })
+    .filter((polygon): polygon is NonNullable<typeof polygon> => polygon !== null);
 
   return projected.sort((a, b) => a.depth - b.depth);
 }
@@ -1516,6 +1602,103 @@ function ShortcutsDialog({ commands, onClose }: { commands: EditorCommand[]; onC
   );
 }
 
+function AssetPreviewDialog({
+  props,
+  workspace,
+  onClose,
+}: {
+  props: MapEditorToolbarProps;
+  workspace: EditorWorkspace;
+  onClose: () => void;
+}) {
+  const [previewYaw, setPreviewYaw] = useState(0);
+  const [animationRun, setAnimationRun] = useState(0);
+  const dragRef = useRef<{ x: number; yaw: number } | null>(null);
+  const activePrefab = BUILT_IN_PREFABS.find((prefab) => prefab.id === props.activePrefabId) ?? null;
+  const shape = getShapeDefinition(props.activeShapeId);
+  const isObjectPreview = workspace === "objects";
+  const runPopAnimation = () => {
+    setAnimationRun((count) => count + 1);
+    props.onPreviewEntityPopAnimation();
+  };
+
+  return (
+    <div className="editor-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <div className="editor-dialog editor-asset-preview-dialog" role="dialog" aria-modal="true" aria-label="Asset preview" onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <strong>{isObjectPreview ? "Object Preview" : "Block Preview"}</strong>
+          <ActionButton icon="close" onClick={onClose}>Close</ActionButton>
+        </header>
+        <div className="editor-asset-preview-stage">
+          {isObjectPreview ? (
+            activePrefab ? (
+              <div key={`prefab-${activePrefab.id}-${props.activePrefabVariantId}-${animationRun}`} className={animationRun > 0 ? "editor-asset-preview-pop" : ""}>
+                <PrefabPreview
+                  prefab={activePrefab}
+                  variantId={props.activePrefabVariantId || activePrefab.defaultVariantId}
+                  viewYaw={previewYaw}
+                  onViewYawChange={setPreviewYaw}
+                  dragRef={dragRef}
+                />
+              </div>
+            ) : (
+              <div className="editor-asset-preview-empty">
+                <EditorIcon name="object" />
+                <span>Select a prefab to preview object animations.</span>
+              </div>
+            )
+          ) : (
+            <div key={`shape-${props.activeShapeId}-${props.activeRotation}-${props.activeShapeState}-${animationRun}`} className={animationRun > 0 ? "editor-asset-preview-pop" : ""}>
+              <ShapePreview
+                shapeId={props.activeShapeId}
+                rotation={props.activeRotation}
+                state={props.activeShapeState}
+                viewYaw={previewYaw}
+                onViewYawChange={setPreviewYaw}
+                dragRef={dragRef}
+              />
+            </div>
+          )}
+        </div>
+        <dl className="editor-mini-summary">
+          {isObjectPreview ? (
+            <>
+              <KeyValue label="Object" value={activePrefab?.name ?? "None"} />
+              <KeyValue label="Category" value={activePrefab?.category ?? "-"} />
+              <KeyValue label="Collision" value={activePrefab?.collisionMode ?? "-"} />
+              <KeyValue label="Variant" value={props.activePrefabVariantId || activePrefab?.defaultVariantId || "-"} />
+            </>
+          ) : (
+            <>
+              <KeyValue label="Shape" value={shape.name} />
+              <KeyValue label="Category" value={shape.category} />
+              <KeyValue label="Yaw" value={["N", "E", "S", "W"][props.activeRotation]} />
+              <KeyValue label="State" value={String(props.activeShapeState)} mono />
+            </>
+          )}
+        </dl>
+        <div className="editor-asset-preview-actions" aria-label="Preview actions">
+          {isObjectPreview ? (
+            <>
+              <ActionButton icon="sparkles" disabled={!activePrefab} onClick={runPopAnimation}>Pop Up</ActionButton>
+              <ActionButton icon="rotate" disabled={!activePrefab} onClick={() => setPreviewYaw((yaw) => yaw - Math.PI / 2)}>Turn Left</ActionButton>
+              <ActionButton icon="rotate" disabled={!activePrefab} onClick={() => setPreviewYaw((yaw) => yaw + Math.PI / 2)}>Turn Right</ActionButton>
+            </>
+          ) : (
+            <>
+              <ActionButton icon="sparkles" onClick={() => setAnimationRun((count) => count + 1)}>Pop Test</ActionButton>
+              <ActionButton icon="undo" onClick={() => props.onCellRotationChange((((props.activeRotation + 3) % 4) as CellRotation))}>Rotate Left</ActionButton>
+              <ActionButton icon="redo" onClick={() => props.onCellRotationChange((((props.activeRotation + 1) % 4) as CellRotation))}>Rotate Right</ActionButton>
+              <ActionButton icon="rotate" onClick={() => props.onShapeStateChange(setShapePitch(props.activeShapeState, getShapePitch(props.activeShapeState) + 1))}>Tilt Up</ActionButton>
+              <ActionButton icon="rotate" onClick={() => props.onShapeStateChange(setShapePitch(props.activeShapeState, getShapePitch(props.activeShapeState) + 3))}>Tilt Down</ActionButton>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StatusBar({ props, workspace }: { props: MapEditorToolbarProps; workspace: EditorWorkspace }) {
   const metrics = useEditorStatusMetrics();
 
@@ -1672,6 +1855,8 @@ const EDITOR_ICONS: Record<EditorIconKey, LucideIcon> = {
   "zone-area-fill": SquareDashedMousePointer,
   "zone-paint": Brush,
   "zone-replace": Replace,
+  sparkles: Sparkles,
+  "asset-preview": Eye,
 };
 
 function EditorIcon({ name }: { name: EditorIconKey }) {

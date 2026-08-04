@@ -960,11 +960,16 @@ function ExperienceScene({
   const [selectedEntityIds, setSelectedEntityIds] = useState<string[]>([]);
   const [brushSettingsByTool, setBrushSettingsByTool] = useState<Partial<Record<EditorTool, TerrainBrushSettings>>>(() => createDefaultToolBrushSettings());
   const [primitiveType, setPrimitiveType] = useState<PrimitiveType>("box");
-  const [activePrefabId, setActivePrefabId] = useState(BUILT_IN_PREFABS[0]?.id ?? "");
-  const [activePrefabVariantId, setActivePrefabVariantId] = useState(BUILT_IN_PREFABS[0]?.defaultVariantId ?? "");
+  // Starts unarmed (no prefab loaded) so the Place tool never places
+  // something the user never picked. See handleToolChange for how it stays
+  // unarmed whenever the Place tool isn't active.
+  const [activePrefabId, setActivePrefabId] = useState("");
+  const [activePrefabVariantId, setActivePrefabVariantId] = useState("");
   const [prefabSearch, setPrefabSearch] = useState("");
   const [entityTransformMode, setEntityTransformMode] = useState<EntityTransformMode>("translate");
   const [entityTransformDragging, setEntityTransformDragging] = useState(false);
+  const [entityPopPreviewCount, setEntityPopPreviewCount] = useState(0);
+  const [entityPopAnimationId, setEntityPopAnimationId] = useState<string | null>(null);
   const [collisionMode, setCollisionMode] = useState<CollisionMode>("blocking");
   const [entityColor, setEntityColor] = useState("#9ca3af");
   const [entityName, setEntityName] = useState("Placeholder");
@@ -1460,6 +1465,17 @@ function ExperienceScene({
     if (nextTool !== "zone") {
       setZoneId(0);
     }
+    // Leaving the Place tool (via the tool rail, a workspace switch, or the
+    // "deselect" command) un-arms whatever prefab/primitive was loaded, so
+    // reactivating Place later starts empty instead of silently placing the
+    // last-picked object again. The auto-revert-to-select that happens right
+    // after a successful placement (placeObjectAtGridColumn) calls setTool
+    // directly and skips this, so quick repeat placement of the same object
+    // still works.
+    if (nextTool !== "entity") {
+      setActivePrefabId("");
+      setActivePrefabVariantId("");
+    }
   };
 
   const handleCreateZone = () => {
@@ -1797,6 +1813,7 @@ function ExperienceScene({
 
     commitMapDefinitionChange(addEntity(currentMap, entity), `Placed ${entity.name}.`);
     setSelectedEntityIds([entity.id]);
+    setEntityPopAnimationId(entity.id);
     setSelectedCell(null);
     setSelectedMarkerId(null);
     setTool("select");
@@ -1845,6 +1862,7 @@ function ExperienceScene({
 
     commitMapDefinitionChange(addEntity(currentMap, grounded.entity), `Placed ${prefab.name}.`);
     setSelectedEntityIds([grounded.entity.id]);
+    setEntityPopAnimationId(grounded.entity.id);
     setSelectedCell(null);
     setSelectedMarkerId(null);
   };
@@ -2218,6 +2236,14 @@ function ExperienceScene({
       onEntityColorChange: setEntityColor,
       onEntityNameChange: setEntityName,
       onPlaceEntity: handlePlaceEntity,
+      onPreviewEntityPopAnimation: () => {
+        if (!activePrefabId) {
+          setEditorMessage({ type: "error", text: "Select a prefab to preview its pop animation." });
+          return;
+        }
+        setEntityPopPreviewCount((count) => count + 1);
+        setEditorMessage({ type: "info", text: "Previewing object pop animation." });
+      },
       onDuplicateEntity: handleDuplicateEntity,
       onDeleteEntity: handleDeleteEntity,
       onGroupEntity: handleGroupEntity,
@@ -2247,6 +2273,7 @@ function ExperienceScene({
     entityColor,
     entityName,
     entityTransformMode,
+    entityPopPreviewCount,
     editorAvailable,
     editorMessage,
     editorRevision,
@@ -2658,6 +2685,14 @@ function ExperienceScene({
         color={entityColor}
         visible={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "entities") && !isLayerLocked(layerStates, "entities")}
       />
+      <ObjectPopAnimationPreview
+        requestCount={entityPopPreviewCount}
+        coordinate={hoveredCell ?? selectedCell}
+        world={editorSession.world}
+        prefabId={activePrefabId}
+        variantId={activePrefabVariantId}
+        visible={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "entities")}
+      />
       <EditorMarkers
         editorEnabled={editorAvailable && !cleanPreview && isLayerVisible(layerStates, "markers")}
         entities={editorSession.entities}
@@ -2692,6 +2727,8 @@ function ExperienceScene({
         selectedEntityIds={selectedEntityIds}
         transformMode={entityTransformMode}
         transformEnabled={editorAvailable && !cleanPreview && selectedEntityIds.length === 1}
+        popAnimationEntityId={entityPopAnimationId}
+        onPopAnimationComplete={() => setEntityPopAnimationId(null)}
         onSelectEntity={(id, additive) => {
           setSelectedEntityIds((ids) => additive ? [...new Set([...ids, id])] : [id]);
           setSelectedCell(null);
@@ -4217,6 +4254,110 @@ function ObjectPlacementPreview({
   );
 }
 
+function ObjectPopAnimationPreview({
+  requestCount,
+  coordinate,
+  world,
+  prefabId,
+  variantId,
+  visible,
+}: {
+  requestCount: number;
+  coordinate: GridCoordinate | null;
+  world: MapEditorSession["world"];
+  prefabId: string;
+  variantId: string;
+  visible: boolean;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const geometries = useMemo(() => createEntityPrimitiveGeometries(), []);
+  const preview = useMemo(() => {
+    if (requestCount <= 0 || !visible || !prefabId) return null;
+    const target = coordinate ?? { x: Math.floor(WORLD_CONFIG.width / 2) - 1, y: 0, z: Math.floor(WORLD_CONFIG.depth / 2) - 1 };
+    const surface = getTerrainSurfaceAt(world, target.x, target.z);
+    if (!surface.valid) return null;
+    const prefab = getPrefabDefinition(prefabId);
+    if (!prefab) return null;
+    const entity = createPrefabEntityFromDraft({
+      name: prefab.name,
+      prefabId: prefab.id,
+      variantId: variantId || prefab.defaultVariantId,
+      transform: {
+        position: { x: surface.worldPosition.x, y: surface.worldPosition.y, z: surface.worldPosition.z },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+    }, new Set());
+    const grounded = groundEntityOnTerrain(world, entity, { supportMode: "single-cell" });
+    if (!grounded.ok) return null;
+    const resolved = resolvePrefabInstance(grounded.entity);
+    const anchor = grounded.entity.transform.position;
+    return {
+      anchor,
+      parts: resolved.parts.map((part) => ({
+        ...part,
+        transform: {
+          ...part.transform,
+          position: {
+            x: part.transform.position.x - anchor.x,
+            y: part.transform.position.y - anchor.y,
+            z: part.transform.position.z - anchor.z,
+          },
+        },
+      })),
+    };
+  }, [coordinate, prefabId, requestCount, variantId, visible, world]);
+
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+    if (!group || !preview) return;
+    group.visible = true;
+    group.position.set(preview.anchor.x, preview.anchor.y - 0.34, preview.anchor.z);
+    group.rotation.set(-0.16, 0, 0.08);
+    group.scale.set(0.18, 0.18, 0.18);
+
+    const timeline = gsap.timeline();
+    timeline
+      .to(group.position, { y: preview.anchor.y + 0.12, duration: 0.34, ease: "back.out(2.1)" }, 0)
+      .to(group.scale, { x: 1.08, y: 1.08, z: 1.08, duration: 0.34, ease: "back.out(2.35)" }, 0)
+      .to(group.rotation, { x: 0.04, z: -0.035, duration: 0.28, ease: "power2.out" }, 0.04)
+      .to(group.position, { y: preview.anchor.y, duration: 0.18, ease: "power2.inOut" }, 0.34)
+      .to(group.scale, { x: 1, y: 1, z: 1, duration: 0.18, ease: "power2.inOut" }, 0.34)
+      .to(group.rotation, { x: 0, z: 0, duration: 0.2, ease: "power2.inOut" }, 0.32);
+
+    return () => {
+      timeline.kill();
+    };
+  }, [preview, requestCount]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(geometries).forEach((geometry) => geometry.dispose());
+    };
+  }, [geometries]);
+
+  if (!preview) {
+    return null;
+  }
+
+  return (
+    <group ref={groupRef}>
+      {preview.parts.map((part) => (
+        <mesh
+          key={`${requestCount}-${part.partId}`}
+          geometry={geometries[part.primitive]}
+          position={[part.transform.position.x, part.transform.position.y, part.transform.position.z]}
+          rotation={[part.transform.rotation.x, part.transform.rotation.y, part.transform.rotation.z]}
+          scale={[part.transform.scale.x, part.transform.scale.y, part.transform.scale.z]}
+          renderOrder={12}
+        >
+          <meshBasicMaterial color={part.color} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 type PrefabBatch = {
   key: string;
   primitive: PrimitiveType;
@@ -4231,6 +4372,8 @@ function EditorPrefabEntities({
   selectedEntityIds,
   transformMode,
   transformEnabled,
+  popAnimationEntityId,
+  onPopAnimationComplete,
   onSelectEntity,
   onTransformDraggingChange,
   onTransformEntity,
@@ -4241,6 +4384,8 @@ function EditorPrefabEntities({
   selectedEntityIds: string[];
   transformMode: EntityTransformMode;
   transformEnabled: boolean;
+  popAnimationEntityId: string | null;
+  onPopAnimationComplete: () => void;
   onSelectEntity: (id: string, additive: boolean) => void;
   onTransformDraggingChange: (dragging: boolean) => void;
   onTransformEntity: (id: string, transform: Pick<PlacedMapEntity["transform"], "position" | "rotation">) => boolean;
@@ -4278,6 +4423,8 @@ function EditorPrefabEntities({
           selectedMaterial={selectedMaterial}
           transformMode={transformMode}
           transformEnabled={transformEnabled}
+          popAnimationActive={popAnimationEntityId === selectedEntity.id}
+          onPopAnimationComplete={onPopAnimationComplete}
           onSelectEntity={onSelectEntity}
           onTransformDraggingChange={onTransformDraggingChange}
           onTransformEntity={onTransformEntity}
@@ -4342,6 +4489,8 @@ function EditablePrefabEntity({
   selectedMaterial,
   transformMode,
   transformEnabled,
+  popAnimationActive,
+  onPopAnimationComplete,
   onSelectEntity,
   onTransformDraggingChange,
   onTransformEntity,
@@ -4351,6 +4500,8 @@ function EditablePrefabEntity({
   selectedMaterial: THREE.Material;
   transformMode: EntityTransformMode;
   transformEnabled: boolean;
+  popAnimationActive: boolean;
+  onPopAnimationComplete: () => void;
   onSelectEntity: (id: string, additive: boolean) => void;
   onTransformDraggingChange: (dragging: boolean) => void;
   onTransformEntity: (id: string, transform: Pick<PlacedMapEntity["transform"], "position" | "rotation">) => boolean;
@@ -4372,6 +4523,37 @@ function EditablePrefabEntity({
     group.rotation.set(entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z);
     group.scale.set(1, 1, 1);
   }, [entity.transform.position.x, entity.transform.position.y, entity.transform.position.z, entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z]);
+
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+    if (!group || !popAnimationActive || transformActive.current) return;
+
+    group.position.set(entity.transform.position.x, entity.transform.position.y - 0.36, entity.transform.position.z);
+    group.rotation.set(entity.transform.rotation.x - 0.14, entity.transform.rotation.y, entity.transform.rotation.z + 0.08);
+    group.scale.set(0.16, 0.16, 0.16);
+
+    const timeline = gsap.timeline({ onComplete: onPopAnimationComplete });
+    timeline
+      .to(group.position, { y: entity.transform.position.y + 0.14, duration: 0.34, ease: "back.out(2.1)" }, 0)
+      .to(group.scale, { x: 1.08, y: 1.08, z: 1.08, duration: 0.34, ease: "back.out(2.35)" }, 0)
+      .to(group.rotation, { x: entity.transform.rotation.x + 0.03, z: entity.transform.rotation.z - 0.03, duration: 0.28, ease: "power2.out" }, 0.04)
+      .to(group.position, { y: entity.transform.position.y, duration: 0.2, ease: "power2.inOut" }, 0.34)
+      .to(group.scale, { x: 1, y: 1, z: 1, duration: 0.2, ease: "power2.inOut" }, 0.34)
+      .to(group.rotation, { x: entity.transform.rotation.x, z: entity.transform.rotation.z, duration: 0.22, ease: "power2.inOut" }, 0.32);
+
+    return () => {
+      timeline.kill();
+    };
+  }, [
+    entity.transform.position.x,
+    entity.transform.position.y,
+    entity.transform.position.z,
+    entity.transform.rotation.x,
+    entity.transform.rotation.y,
+    entity.transform.rotation.z,
+    onPopAnimationComplete,
+    popAnimationActive,
+  ]);
 
   const restoreTransform = () => {
     const group = groupRef.current;

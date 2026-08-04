@@ -65,6 +65,7 @@ type PrefabArchetype =
   | "skill-garden-landmark"
   | "person-scale-marker"
   | "navigation-anchor"
+  | "enter-signpost"
   // Converted from voxel terrain shapes (see docs/world-registry-refactor-audit.md
   // section "Shapes that must become placeable objects"). Each preserves the
   // original shape's approximate bounds as a box/cylinder-primitive
@@ -519,6 +520,22 @@ function createArchetypeParts(archetype: PrefabArchetype): PrefabPartDefinition[
         part("base", "cylinder", { x: 0, y: 0.04, z: 0 }, { x: 0.55, y: 0.08, z: 0.55 }, "accent-blue"),
         part("marker", "sphere", { x: 0, y: 0.38, z: 0 }, { x: 0.35, y: 0.35, z: 0.35 }, "selection-validation"),
       ];
+    case "enter-signpost":
+      return [
+        part("stone-foot", "cylinder", { x: 0, y: 0.08, z: 0 }, { x: 0.62, y: 0.16, z: 0.62 }, "structure-dark"),
+        part("pole", "cylinder", { x: 0, y: 0.96, z: 0 }, { x: 0.14, y: 1.78, z: 0.14 }, "wood-proxy"),
+        {
+          ...part("tilted-enter-board", "sign", { x: 0.18, y: 1.62, z: -0.06 }, { x: 1.42, y: 0.44, z: 1 }, "sign-board"),
+          transform: {
+            position: { x: 0.18, y: 1.62, z: -0.06 },
+            rotation: { x: 0, y: -0.139626, z: -0.174533 },
+            scale: { x: 1.42, y: 0.44, z: 1 },
+          },
+        },
+        part("enter-highlight", "box", { x: -0.12, y: 1.64, z: -0.12 }, { x: 0.78, y: 0.08, z: 0.04 }, "accent-yellow"),
+        part("arrow-notch", "box", { x: 0.52, y: 1.63, z: -0.125 }, { x: 0.18, y: 0.18, z: 0.04 }, "accent-yellow"),
+        part("top-peg", "sphere", { x: 0, y: 1.94, z: 0 }, { x: 0.2, y: 0.2, z: 0.2 }, "wood-proxy"),
+      ];
 
     // --- Converted from voxel terrain shapes. Bounds mirror the original
     // ShapeDefinition bounds in lib/voxel-shapes/shape-registry.ts as closely
@@ -757,6 +774,7 @@ function inferFootprint(archetype: PrefabArchetype): EntityFootprint {
   if (archetype === "skill-garden-landmark") return { width: 2.8, depth: 2.8, height: 3.2 };
   if (archetype === "person-scale-marker") return { width: 0.8, depth: 0.8, height: 1.9 };
   if (archetype === "navigation-anchor") return { width: 0.45, depth: 0.45, height: 0.45 };
+  if (archetype === "enter-signpost") return { width: 1.6, depth: 0.7, height: 2.05 };
   if (archetype === "fallen-log") return { width: 1.5, depth: 0.4, height: 0.5 };
   if (archetype === "tree-stump") return { width: 0.55, depth: 0.55, height: 0.42 };
   if (archetype === "crate-stack") return { width: 0.75, depth: 0.75, height: 1.15 };
@@ -816,6 +834,7 @@ const shortMediumLong = [
 ];
 
 const CATALOG_SEEDS: CatalogSeed[] = [
+  { name: "Enter Signpost", category: "portfolio", archetype: "enter-signpost", collisionMode: "trigger", tags: ["portfolio", "entry", "object-0", "signpost"] },
   { name: "Portfolio V2 Scale Reference", category: "navigation", archetype: "person-scale-marker", collisionMode: "none", tags: ["portfolio-v2", "editor-helper", "scale-reference"] },
   { name: "Portfolio V2 Foundation Square", category: "architecture", archetype: "platform", variants: sizeVariants, tags: ["portfolio-v2", "architecture", "foundation"] },
   { name: "Portfolio V2 Foundation Rectangle", category: "architecture", archetype: "platform", variants: [{ id: "standard", label: "Standard", size: "standard", scale: { x: 1.6, y: 1, z: 0.9 }, footprint: { width: 3.2, depth: 1.8, height: 0.25 } }, { id: "large", label: "Large", size: "large", scale: { x: 2.5, y: 1, z: 1.35 }, footprint: { width: 5, depth: 2.7, height: 0.25 } }], tags: ["portfolio-v2", "architecture", "foundation"] },
