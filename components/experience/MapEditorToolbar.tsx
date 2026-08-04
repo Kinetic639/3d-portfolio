@@ -304,11 +304,10 @@ const PRIMITIVES: PrimitiveType[] = ["box", "cylinder", "sphere", "plane", "plat
 const COLLISION_MODES: CollisionMode[] = ["none", "blocking", "walkable", "trigger"];
 const NODE_TYPES: NavigationNodeType[] = ["walk", "route-junction", "wait-point", "look-at", "character-spawn", "bird-perch"];
 type ShapePickerCategory = ShapeCategory | "all";
-// "structure", "roof", "utility" and "fluid" are omitted: every shape in
-// those categories is now a placeable object (or, for water, the dedicated
-// water tool below) rather than a terrain-palette entry — see
-// docs/world-registry-refactor-audit.md.
-const SHAPE_CATEGORIES: ShapePickerCategory[] = ["all", "terrain", "transition"];
+// "fluid" is omitted: its only member is water, which is exposed through the
+// dedicated water tool below rather than as an ordinary terrain-palette
+// entry — see PALETTE_HIDDEN_SHAPE_IDS in shape-registry.ts.
+const SHAPE_CATEGORIES: ShapePickerCategory[] = ["all", "terrain", "transition", "structure", "roof", "utility"];
 const TERRAIN_MATERIAL_OPTIONS = [
   {
     id: BLOCK_IDS.Ground,
