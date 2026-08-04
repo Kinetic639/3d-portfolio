@@ -62,10 +62,10 @@ import type { MapZoneDefinition, MapZoneFocusDirection } from "@/lib/maps/map-de
 import type { CollisionMode, PlacedMapEntity, PrimitiveType } from "@/lib/maps/map-entities";
 import type { NavigationNodeType } from "@/lib/maps/map-navigation";
 import { BUILT_IN_PREFABS, listPrefabCategories } from "@/lib/prefabs/prefab-library";
-import type { PrefabCategory } from "@/lib/prefabs/prefab-types";
+import type { PrefabCategory, PrefabDefinition, PrefabVariantDefinition } from "@/lib/prefabs/prefab-types";
 import { BLOCK_IDS, RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
-import { getShapeDefinition, getShapePitch, getShapeStateValue, setShapePitch, TERRAIN_PALETTE_SHAPE_DEFINITIONS, type ShapeCategory, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
+import { getShapeDefinition, getShapePitch, getShapeStateValue, setShapePitch, TERRAIN_PALETTE_SHAPE_DEFINITIONS, type ShapeCategory } from "@/lib/voxel-shapes/shape-registry";
 import { SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 
 export type TerrainRenderMode = "instanced" | "surface";
@@ -740,10 +740,15 @@ function ZoneRailTools({ props }: { props: MapEditorToolbarProps }) {
   );
 }
 
+type PrefabPickerCategory = PrefabCategory | "all";
+
 function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapEditorToolbarProps; workspace: EditorWorkspace; fileInputRef: React.RefObject<HTMLInputElement | null>; setBottomTab: (tab: BottomDockTab) => void }) {
   const activePrefab = BUILT_IN_PREFABS.find((prefab) => prefab.id === props.activePrefabId) ?? null;
   const categories = useMemo(() => listPrefabCategories(), []);
-  const [activeCategory, setActiveCategory] = useState<PrefabCategory>(activePrefab?.category ?? "architecture");
+  const prefabCategories = useMemo<PrefabPickerCategory[]>(() => ["all", ...categories], [categories]);
+  const [activeCategory, setActiveCategory] = useState<PrefabPickerCategory>(activePrefab?.category ?? "all");
+  const [prefabPreviewYaw, setPrefabPreviewYaw] = useState(0);
+  const prefabPreviewDrag = useRef<{ x: number; yaw: number } | null>(null);
 
   if (workspace === "objects") {
     const selectPrimitive = (primitive: PrimitiveType) => {
@@ -752,23 +757,21 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
       props.onToolChange("entity");
     };
 
-    const prefabs = BUILT_IN_PREFABS.filter((prefab) => {
-      const query = props.prefabSearch.trim().toLowerCase();
-      return prefab.category === activeCategory &&
-        (!query || prefab.name.toLowerCase().includes(query) || prefab.tags.some((tag) => tag.includes(query)));
-    });
+    const query = props.prefabSearch.trim().toLowerCase();
+    const categoryPrefabs = activeCategory === "all" ? BUILT_IN_PREFABS : BUILT_IN_PREFABS.filter((prefab) => prefab.category === activeCategory);
+    const prefabs = query
+      ? categoryPrefabs.filter((prefab) => prefab.name.toLowerCase().includes(query) || prefab.tags.some((tag) => tag.includes(query)))
+      : categoryPrefabs;
 
     return (
       <Panel title="Primitive Palette">
         <Section title="Prefab Library">
+          <label>Category<select value={activeCategory} onChange={(event) => setActiveCategory(event.target.value as PrefabPickerCategory)}>{prefabCategories.map((category) => <option key={category} value={category}>{category === "all" ? "all" : category.replace(/-/g, " ")}</option>)}</select></label>
           <input aria-label="Search prefabs" placeholder="Search prefabs" value={props.prefabSearch} onChange={(event) => props.onPrefabSearchChange(event.target.value)} />
-          <div className="editor-category-row">
-            {categories.map((category) => <button key={category} type="button" className={activeCategory === category ? "active" : ""} onClick={() => setActiveCategory(category)}>{category.replace(/-/g, " ")}</button>)}
-          </div>
-          <div className="editor-thumb-grid editor-thumb-grid--prefabs">
-            {prefabs.slice(0, 24).map((prefab) => (
-              <button key={prefab.id} type="button" className={props.activePrefabId === prefab.id ? "active" : ""} title={`${prefab.name}: ${prefab.description}`} onClick={() => props.onActivePrefabChange(prefab.id)}>
-                <span className="editor-prefab-icon">{prefab.name.slice(0, 2).toUpperCase()}</span>
+          <div className="editor-shape-list" role="listbox" aria-label="Prefab selector">
+            {prefabs.map((prefab) => (
+              <button key={prefab.id} type="button" role="option" aria-selected={props.activePrefabId === prefab.id} className={props.activePrefabId === prefab.id ? "active" : ""} title={prefab.description} onClick={() => props.onActivePrefabChange(prefab.id)}>
+                <PrefabPreview prefab={prefab} variantId={prefab.id === props.activePrefabId ? props.activePrefabVariantId : undefined} viewYaw={prefabPreviewYaw} onViewYawChange={setPrefabPreviewYaw} dragRef={prefabPreviewDrag} compact />
                 <span>{prefab.name}</span>
               </button>
             ))}
@@ -776,7 +779,12 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
           {activePrefab ? (
             <label>Variant<select value={props.activePrefabVariantId || activePrefab.defaultVariantId} onChange={(event) => props.onActivePrefabVariantChange(event.target.value)}>{activePrefab.variants.map((variant) => <option key={variant.id} value={variant.id}>{variant.label}</option>)}</select></label>
           ) : null}
-          {activePrefab ? <span className="editor-muted">{activePrefab.category} · {activePrefab.collisionMode} · {activePrefab.footprint.width}x{activePrefab.footprint.depth}</span> : null}
+          {activePrefab ? (
+            <>
+              <PrefabPreview prefab={activePrefab} variantId={props.activePrefabVariantId || activePrefab.defaultVariantId} viewYaw={prefabPreviewYaw} onViewYawChange={setPrefabPreviewYaw} dragRef={prefabPreviewDrag} />
+              <span className="editor-muted">{activePrefab.category} · {activePrefab.collisionMode} · {activePrefab.footprint.width}x{activePrefab.footprint.depth}</span>
+            </>
+          ) : null}
         </Section>
         <Section title="Primitive Fallback">
           <div className="editor-thumb-grid">
@@ -1110,7 +1118,9 @@ function ShapePreview({
   );
 }
 
-function buildShapePreviewPolygons(faces: ShapeFace[], viewYaw = 0) {
+type PreviewFace = { normal: [number, number, number]; corners: Array<[number, number, number]> };
+
+function buildShapePreviewPolygons(faces: PreviewFace[], viewYaw = 0) {
   const cos = Math.cos(viewYaw);
   const sin = Math.sin(viewYaw);
   const projected = faces.map((face) => {
@@ -1132,6 +1142,123 @@ function buildShapePreviewPolygons(faces: ShapeFace[], viewYaw = 0) {
   });
 
   return projected.sort((a, b) => a.depth - b.depth);
+}
+
+const UNIT_BOX_FACES: PreviewFace[] = [
+  { normal: [1, 0, 0], corners: [[0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [0.5, 0.5, 0.5], [0.5, -0.5, 0.5]] },
+  { normal: [-1, 0, 0], corners: [[-0.5, -0.5, 0.5], [-0.5, 0.5, 0.5], [-0.5, 0.5, -0.5], [-0.5, -0.5, -0.5]] },
+  { normal: [0, 1, 0], corners: [[-0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5]] },
+  { normal: [0, -1, 0], corners: [[-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [-0.5, -0.5, 0.5]] },
+  { normal: [0, 0, 1], corners: [[-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5]] },
+  { normal: [0, 0, -1], corners: [[0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, 0.5, -0.5], [0.5, 0.5, -0.5]] },
+];
+
+// Rotates a point by an XYZ Euler triple (radians), applied X then Y then Z —
+// matching the rotation order prefab transforms are resolved with elsewhere
+// (prefab-resolver.ts, via THREE.Euler's default 'XYZ' order).
+function rotatePreviewPoint([x, y, z]: [number, number, number], rotation: { x: number; y: number; z: number }): [number, number, number] {
+  if (rotation.x) {
+    const c = Math.cos(rotation.x), s = Math.sin(rotation.x);
+    [y, z] = [y * c - z * s, y * s + z * c];
+  }
+  if (rotation.y) {
+    const c = Math.cos(rotation.y), s = Math.sin(rotation.y);
+    [x, z] = [x * c + z * s, -x * s + z * c];
+  }
+  if (rotation.z) {
+    const c = Math.cos(rotation.z), s = Math.sin(rotation.z);
+    [x, y] = [x * c - y * s, x * s + y * c];
+  }
+  return [x, y, z];
+}
+
+function boxFacesFromPartTransform(transform: { position: { x: number; y: number; z: number }; rotation: { x: number; y: number; z: number }; scale: { x: number; y: number; z: number } }): PreviewFace[] {
+  return UNIT_BOX_FACES.map((face) => ({
+    normal: rotatePreviewPoint(face.normal, transform.rotation),
+    corners: face.corners.map(([x, y, z]) => {
+      const [rx, ry, rz] = rotatePreviewPoint([x * transform.scale.x, y * transform.scale.y, z * transform.scale.z], transform.rotation);
+      return [rx + transform.position.x, ry + transform.position.y, rz + transform.position.z] as [number, number, number];
+    }),
+  }));
+}
+
+// Approximates a resolved prefab (all parts, with the given variant's scale
+// and part overrides applied — mirroring prefab-resolver.ts's
+// scalePartTransform) as a composite of box faces, then normalizes it so its
+// largest extent matches the ~unit scale ShapePreview's projection is tuned
+// for. Every prefab primitive (box/cylinder/sphere/platform/plane/sign) is
+// rendered as its bounding box for preview purposes, same fidelity as the
+// prefab geometry itself (there is no wedge/round preview either).
+function buildPrefabPreviewFaces(prefab: PrefabDefinition, variant: PrefabVariantDefinition): PreviewFace[] {
+  const variantScale = variant.scale ?? { x: 1, y: 1, z: 1 };
+  const faces = prefab.parts.flatMap((part) => {
+    const override = variant.partOverrides?.[part.id];
+    const base = override?.transform ?? part.transform;
+    return boxFacesFromPartTransform({
+      position: { x: base.position.x * variantScale.x, y: base.position.y * variantScale.y, z: base.position.z * variantScale.z },
+      rotation: base.rotation,
+      scale: { x: base.scale.x * variantScale.x, y: base.scale.y * variantScale.y, z: base.scale.z * variantScale.z },
+    });
+  });
+
+  let maxExtent = 0;
+  for (const face of faces) {
+    for (const [x, y, z] of face.corners) maxExtent = Math.max(maxExtent, Math.abs(x), Math.abs(y), Math.abs(z));
+  }
+  const normalizeScale = maxExtent > 0 ? 0.5 / maxExtent : 1;
+  return faces.map((face) => ({ normal: face.normal, corners: face.corners.map(([x, y, z]) => [x * normalizeScale, y * normalizeScale, z * normalizeScale] as [number, number, number]) }));
+}
+
+function PrefabPreview({
+  prefab,
+  variantId,
+  viewYaw = 0,
+  onViewYawChange,
+  dragRef,
+  compact = false,
+}: {
+  prefab: PrefabDefinition;
+  variantId?: string;
+  viewYaw?: number;
+  onViewYawChange?: (yaw: number) => void;
+  dragRef?: React.MutableRefObject<{ x: number; yaw: number } | null>;
+  compact?: boolean;
+}) {
+  const variant = prefab.variants.find((candidate) => candidate.id === variantId) ?? prefab.variants.find((candidate) => candidate.id === prefab.defaultVariantId) ?? prefab.variants[0];
+  const polygons = buildShapePreviewPolygons(buildPrefabPreviewFaces(prefab, variant), viewYaw);
+
+  const startPreviewDrag = (event: React.PointerEvent<HTMLSpanElement>) => {
+    if (!dragRef || !onViewYawChange) return;
+    event.stopPropagation();
+    dragRef.current = { x: event.clientX, yaw: viewYaw };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const dragPreview = (event: React.PointerEvent<HTMLSpanElement>) => {
+    if (!dragRef?.current || !onViewYawChange) return;
+    event.stopPropagation();
+    onViewYawChange(dragRef.current.yaw + (event.clientX - dragRef.current.x) * 0.018);
+  };
+  const endPreviewDrag = (event: React.PointerEvent<HTMLSpanElement>) => {
+    if (!dragRef) return;
+    event.stopPropagation();
+    dragRef.current = null;
+  };
+
+  return (
+    <span
+      className={`editor-shape-preview ${compact ? "editor-shape-preview--compact" : ""}`}
+      aria-label={`${prefab.name} preview`}
+      onPointerDown={startPreviewDrag}
+      onPointerMove={dragPreview}
+      onPointerUp={endPreviewDrag}
+      onPointerCancel={endPreviewDrag}
+    >
+      <svg viewBox="0 0 120 92" role="img" aria-label={prefab.name}>
+        {polygons.map((polygon, index) => <polygon key={`${polygon.points}-${index}`} points={polygon.points} fill={polygon.fill} />)}
+      </svg>
+      {!compact ? <span>{prefab.name}</span> : null}
+    </span>
+  );
 }
 
 function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspace: EditorWorkspace }) {
