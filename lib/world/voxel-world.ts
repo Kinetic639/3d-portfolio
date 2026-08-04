@@ -617,6 +617,12 @@ export function createFlatVoxelWorld() {
     }
   }
 
+  for (let z = CENTER_MIN; z <= CENTER_MAX; z += 1) {
+    for (let x = CENTER_MIN; x <= CENTER_MAX; x += 1) {
+      world.setBlock(x, 0, z, BLOCK_IDS.LoaderOrigin);
+    }
+  }
+
   world.clearDirtyChunks();
 
   return world;

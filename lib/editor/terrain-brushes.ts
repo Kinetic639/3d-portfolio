@@ -99,6 +99,45 @@ export function createTerrainMutations(input: {
   const seen = new Set<string>();
   const mutations: TerrainCellMutation[] = [];
 
+  if (input.operation === "flatten") {
+    const desiredY = Math.max(0, Math.min(WORLD_CONFIG.height - 1, Math.floor(input.center.y)));
+    for (const cell of footprint) {
+      const topY = input.world.getHighestNonAirY(cell.x, cell.z);
+      if (topY === desiredY) continue;
+
+      if (topY !== null && topY > desiredY) {
+        for (let y = desiredY + 1; y <= topY; y += 1) {
+          const mutation = createDirectCellMutation(input.world, { x: cell.x, y, z: cell.z }, BLOCK_IDS.Air, DEFAULT_SHAPE_ID, DEFAULT_ROTATION, DEFAULT_STATE);
+          if (!mutation) continue;
+          const key = `${mutation.coordinate.x},${mutation.coordinate.y},${mutation.coordinate.z}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          mutations.push(mutation);
+        }
+        continue;
+      }
+
+      const startY = topY === null ? 0 : topY + 1;
+      for (let y = startY; y <= desiredY; y += 1) {
+        const mutation = createDirectCellMutation(
+          input.world,
+          { x: cell.x, y, z: cell.z },
+          input.blockId === BLOCK_IDS.Air ? BLOCK_IDS.Ground : input.blockId,
+          input.shapeId ?? DEFAULT_SHAPE_ID,
+          input.rotation ?? DEFAULT_ROTATION,
+          input.state ?? DEFAULT_STATE,
+        );
+        if (!mutation) continue;
+        const key = `${mutation.coordinate.x},${mutation.coordinate.y},${mutation.coordinate.z}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        mutations.push(mutation);
+      }
+    }
+
+    return mutations;
+  }
+
   for (const cell of footprint) {
     const mutation = createCellMutation(input.world, input.operation, cell, settings, input.blockId, input.shapeId ?? DEFAULT_SHAPE_ID, input.rotation ?? DEFAULT_ROTATION, input.state ?? DEFAULT_STATE, input.zoneId);
     if (!mutation) continue;
@@ -109,6 +148,47 @@ export function createTerrainMutations(input: {
   }
 
   return mutations;
+}
+
+function createDirectCellMutation(
+  world: VoxelWorld,
+  coordinate: GridCoordinate,
+  afterBlock: BlockId,
+  afterShape: ShapeId,
+  afterRotation: CellRotation,
+  afterState: number,
+): TerrainCellMutation | null {
+  if (!world.isInsideWorld(coordinate.x, coordinate.y, coordinate.z)) return null;
+
+  const beforeBlock = world.getBlock(coordinate.x, coordinate.y, coordinate.z);
+  const beforeShape = world.getShape(coordinate.x, coordinate.y, coordinate.z);
+  const beforeRotation = world.getRotation(coordinate.x, coordinate.y, coordinate.z);
+  const beforeState = world.getState(coordinate.x, coordinate.y, coordinate.z);
+  const beforeZone = world.getColumnZone(coordinate.x, coordinate.z);
+  const normalizedShape = afterBlock === BLOCK_IDS.Air ? DEFAULT_SHAPE_ID : afterShape;
+  const normalizedRotation = afterBlock === BLOCK_IDS.Air ? DEFAULT_ROTATION : afterRotation;
+  const normalizedState = afterBlock === BLOCK_IDS.Air ? DEFAULT_STATE : afterState;
+
+  if (
+    beforeBlock === afterBlock &&
+    beforeShape === normalizedShape &&
+    beforeRotation === normalizedRotation &&
+    beforeState === normalizedState
+  ) return null;
+
+  return {
+    coordinate,
+    beforeBlock,
+    afterBlock,
+    beforeShape,
+    afterShape: normalizedShape,
+    beforeRotation,
+    afterRotation: normalizedRotation,
+    beforeState,
+    afterState: normalizedState,
+    beforeZone,
+    afterZone: beforeZone,
+  };
 }
 
 export function getDirtyChunkIdsForMutations(world: VoxelWorld, mutations: TerrainCellMutation[]) {
@@ -154,9 +234,6 @@ function createCellMutation(
     case "paint":
       if (afterBlock === BLOCK_IDS.Air && operation === "paint") return null;
       afterBlock = blockId;
-      afterShape = shapeId;
-      afterRotation = rotation;
-      afterState = state;
       break;
     case "fill":
       afterBlock = blockId;

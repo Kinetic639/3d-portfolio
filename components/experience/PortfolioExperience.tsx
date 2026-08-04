@@ -227,6 +227,8 @@ type TerrainUniforms = {
   uLoaderMotion: { value: number };
 };
 
+const LOADER_ORIGIN_WORLD = new THREE.Vector3(0, 0, 0);
+
 const BLOCK_VERTEX_SHADER = `
   uniform float uExpansionProgress;
   uniform float uTime;
@@ -420,7 +422,7 @@ export default function PortfolioExperience({
         <>
           <div className="map-canvas-layer">
             <Canvas
-              camera={{ position: [0, 20, 54], fov: 32, near: 0.1, far: 220 }}
+              camera={{ position: [-18, 20, 54], fov: 32, near: 0.1, far: 220 }}
               dpr={[1, 1.5]}
               flat
               gl={{ antialias: true, powerPreference: "high-performance", alpha: false }}
@@ -937,6 +939,7 @@ function ExperienceScene({
   const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities));
   const [tool, setTool] = useState<EditorTool>("select");
   const [paintBlockId, setPaintBlockId] = useState<BlockId>(BLOCK_IDS.Ground);
+  const [applyMaterialToAddedBlocks, setApplyMaterialToAddedBlocks] = useState(false);
   const [activeShapeCategory, setActiveShapeCategory] = useState<ShapeCategory>("terrain");
   const [activeShapeId, setActiveShapeId] = useState<ShapeId>(SHAPE_IDS.CUBE);
   const [activeRotation, setActiveRotation] = useState<CellRotation>(DEFAULT_ROTATION);
@@ -1050,9 +1053,9 @@ function ExperienceScene({
         return 0;
       }
       void previewRevision;
-      return hoveredCell ? getToolPreviewFootprint(hoveredCell, tool, effectiveBrushSettings, editorSession.world, getActiveTerrainBlockId(paintBlockId, activeShapeId), zoneId).length : 0;
+      return hoveredCell ? getToolPreviewFootprint(hoveredCell, tool, effectiveBrushSettings, editorSession.world, getTerrainMutationBlockId(tool, getTerrainBrushOperation(tool)!, paintBlockId, activeShapeId, applyMaterialToAddedBlocks), zoneId).length : 0;
     },
-    [activeShapeId, editorSession.world, effectiveBrushSettings, hoveredCell, paintBlockId, previewRevision, tool, zoneId, zoneRectangleAnchor, zoneSelectionMode],
+    [activeShapeId, applyMaterialToAddedBlocks, editorSession.world, effectiveBrushSettings, hoveredCell, paintBlockId, previewRevision, tool, zoneId, zoneRectangleAnchor, zoneSelectionMode],
   );
   const editorPanelSignature = useMemo(() => JSON.stringify({
     available: editorAvailable,
@@ -1061,6 +1064,7 @@ function ExperienceScene({
     mapDescription: currentMap.description ?? "",
     tool,
     paintBlockId,
+    applyMaterialToAddedBlocks,
     activeShapeCategory,
     activeShapeId,
     activeRotation,
@@ -1143,6 +1147,7 @@ function ExperienceScene({
     activeShapeCategory,
     activeShapeId,
     activeShapeState,
+    applyMaterialToAddedBlocks,
     paintBlockId,
     presetId,
     primitiveType,
@@ -1356,7 +1361,7 @@ function ExperienceScene({
           operation: brushOperation,
           center: editCoordinate,
           settings: effectiveBrushSettings,
-          blockId: getTerrainMutationBlockId(tool, brushOperation, paintBlockId, activeShapeId),
+          blockId: getTerrainMutationBlockId(tool, brushOperation, paintBlockId, activeShapeId, applyMaterialToAddedBlocks),
           shapeId: brushOperation === "paint-path" || brushOperation === "remove-path" ? undefined : activeShapeId,
           rotation: activeRotation,
           state: activeShapeState,
@@ -1401,7 +1406,7 @@ function ExperienceScene({
         operation: brushOperation,
         center: editCoordinate,
         settings: effectiveBrushSettings,
-        blockId: getTerrainMutationBlockId(tool, brushOperation, paintBlockId, activeShapeId),
+        blockId: getTerrainMutationBlockId(tool, brushOperation, paintBlockId, activeShapeId, applyMaterialToAddedBlocks),
         shapeId: brushOperation === "paint-path" || brushOperation === "remove-path" ? undefined : activeShapeId,
         rotation: activeRotation,
         state: activeShapeState,
@@ -2011,6 +2016,7 @@ function ExperienceScene({
       availableMaps,
       tool,
       paintBlockId,
+      applyMaterialToAddedBlocks,
       activeShapeCategory,
       activeShapeId,
       activeRotation,
@@ -2070,6 +2076,7 @@ function ExperienceScene({
       validationSummary,
       onToolChange: handleToolChange,
       onPaintBlockChange: setPaintBlockId,
+      onApplyMaterialToAddedBlocksChange: setApplyMaterialToAddedBlocks,
       onShapeCategoryChange: (category) => {
         setActiveShapeCategory(category);
         const nextShape = getShapeDefinition(activeShapeId).category === category
@@ -2247,6 +2254,7 @@ function ExperienceScene({
     lastRebuiltChunks,
     onCloseEditor,
     onEditorStateChange,
+    applyMaterialToAddedBlocks,
     paintBlockId,
     presetId,
     primitiveType,
@@ -2465,13 +2473,12 @@ function ExperienceScene({
       value: 1,
       duration: reducedMotion ? 0.45 : 2,
       ease: "none",
-      onComplete: markExplore,
     });
 
     return () => {
       tween.kill();
     };
-  }, [markExplore, phase, reducedMotion, uniforms.uExpansionProgress]);
+  }, [phase, reducedMotion, uniforms.uExpansionProgress]);
 
   useEffect(() => {
     if (!benchmarkMode) {
@@ -2593,7 +2600,7 @@ function ExperienceScene({
         gridLinesVisible={editorAvailable && zoneGridLinesVisible}
         gridLineColor={zoneGridLineColor}
       />
-      <WorldEntryItem visible={phase === "ready"} onActivate={startExpansion} />
+      <WorldEntryItem visible={phase === "ready"} position={LOADER_ORIGIN_WORLD} onActivate={startExpansion} />
       <ConstrainedMapControls
         enabled={benchmarkMode ? benchmarkInputEnabled : isInteractivePhase(phase) && !entityTransformDragging}
         phase={phase}
@@ -2601,6 +2608,7 @@ function ExperienceScene({
         focusPreset={activeCameraPreset}
         reducedMotion={reducedMotion}
         onFocusComplete={markExpanding}
+        onExpansionComplete={markExplore}
       />
       <RenderInvalidator phase={phase} />
       <EditorInteractionOverlay
@@ -2635,7 +2643,7 @@ function ExperienceScene({
       <BlockPlacementGhost
         coordinate={hoveredCell}
         visible={editorAvailable && tool === "add" && !cleanPreview && isLayerVisible(layerStates, "developmentHelpers")}
-        blockId={getActiveTerrainBlockId(paintBlockId, activeShapeId)}
+        blockId={getTerrainMutationBlockId(tool, "fill", paintBlockId, activeShapeId, applyMaterialToAddedBlocks)}
         shapeId={activeShapeId}
         rotation={activeRotation}
         state={activeShapeState}
@@ -2941,9 +2949,11 @@ function SurfaceTerrainChunkMesh({
 
 function WorldEntryItem({
   visible,
+  position,
   onActivate,
 }: {
   visible: boolean;
+  position: THREE.Vector3;
   onActivate: () => void;
 }) {
   const groupRef = useRef<THREE.Group>(null);
@@ -3059,7 +3069,7 @@ function WorldEntryItem({
     <group
       ref={groupRef}
       visible={visible}
-      position={[0, 0.76, 0]}
+      position={[position.x, 0.76, position.z]}
       onClick={handlePointer}
       onPointerOver={handlePointerOver}
       onPointerOut={handlePointerOut}
@@ -3182,7 +3192,8 @@ function EditorInteractionOverlay({
   const brushActive = useRef(false);
   const brushedCellKeys = useRef(new Set<string>());
   const brushedCells = useRef<GridCoordinate[]>([]);
-  const lastBrushedCell = useRef<GridCoordinate | null>(null);
+  const continuousStrokeTool = useRef<EditorTool | null>(null);
+  const lastStrokePointerPosition = useRef<{ x: number; y: number } | null>(null);
   const groundPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const planeIntersection = useRef(new THREE.Vector3());
   const shouldRaycast = useRef(true);
@@ -3244,10 +3255,6 @@ function EditorInteractionOverlay({
         return null;
       }
 
-      if (tool === "add" && lastBrushedCell.current && !isNearbyAddStrokeCell(lastBrushedCell.current, currentHover)) {
-        return null;
-      }
-
       const key = getStrokeBrushKey(tool, currentHover);
       if (brushedCellKeys.current.has(key)) {
         return null;
@@ -3255,7 +3262,6 @@ function EditorInteractionOverlay({
 
       brushedCellKeys.current.add(key);
       brushedCells.current.push(currentHover);
-      lastBrushedCell.current = currentHover;
       return currentHover;
     };
 
@@ -3276,14 +3282,16 @@ function EditorInteractionOverlay({
         const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
         zoneRectangleAnchorRef.current = currentHover;
         onZoneRectangleAnchor(currentHover);
-      } else if (isStrokeBrushTool(tool)) {
+      } else if (shouldStartContinuousTerrainStroke(tool, event)) {
         brushActive.current = true;
+        continuousStrokeTool.current = tool;
         brushedCellKeys.current.clear();
         brushedCells.current = [];
-        lastBrushedCell.current = null;
+        lastStrokePointerPosition.current = null;
         const paintedHover = paintCurrentHover();
         if (paintedHover && shouldApplyStrokeImmediately(tool, zoneSelectionMode)) {
           onEditCell(paintedHover);
+          lastStrokePointerPosition.current = { x: event.clientX, y: event.clientY };
         }
       }
 
@@ -3295,7 +3303,11 @@ function EditorInteractionOverlay({
         return;
       }
 
-      if (!brushActive.current || !isStrokeBrushTool(tool) || (event.buttons & 1) !== 1 || isEditorUiEvent(event)) {
+      if (!brushActive.current || !shouldContinueContinuousTerrainStroke(continuousStrokeTool.current, event) || (event.buttons & 1) !== 1 || isEditorUiEvent(event)) {
+        return;
+      }
+
+      if (!shouldAdvanceContinuousStroke(continuousStrokeTool.current, lastStrokePointerPosition.current, event)) {
         return;
       }
 
@@ -3303,6 +3315,7 @@ function EditorInteractionOverlay({
       if (paintedHover) {
         if (shouldApplyStrokeImmediately(tool, zoneSelectionMode)) {
           onEditCell(paintedHover);
+          lastStrokePointerPosition.current = { x: event.clientX, y: event.clientY };
         }
         event.preventDefault();
       }
@@ -3331,7 +3344,8 @@ function EditorInteractionOverlay({
         }
         brushedCellKeys.current.clear();
         brushedCells.current = [];
-        lastBrushedCell.current = null;
+        continuousStrokeTool.current = null;
+        lastStrokePointerPosition.current = null;
         pointerDownPosition.current = null;
         event.preventDefault();
         return;
@@ -3342,20 +3356,17 @@ function EditorInteractionOverlay({
         return;
       }
 
-      const moved = Math.hypot(
-        event.clientX - pointerDownPosition.current.x,
-        event.clientY - pointerDownPosition.current.y,
-      );
+      const moved = getPointerGestureDistance(pointerDownPosition.current, event);
       pointerDownPosition.current = null;
 
-      if (moved <= 5) {
+      if (moved <= POINTER_CLICK_MAX_DISTANCE_PX) {
         raycaster.setFromCamera(mousePosition.current, camera);
         incrementEditorPerfCounter("raycasts");
         if ((tool === "entity" || tool === "select") && hasHoveredEditorEntity(editorTargets.current.entities, raycastHits.current, raycaster)) {
           return;
         }
         const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
-        if (currentHover) {
+        if (currentHover && shouldApplySingleShotEditOnPointerUp(tool)) {
           event.preventDefault();
           onEditCell(currentHover);
         }
@@ -3368,7 +3379,8 @@ function EditorInteractionOverlay({
       onZoneRectangleAnchor(null);
       brushedCellKeys.current.clear();
       brushedCells.current = [];
-      lastBrushedCell.current = null;
+      continuousStrokeTool.current = null;
+      lastStrokePointerPosition.current = null;
       pointerDownPosition.current = null;
     };
 
@@ -3666,9 +3678,21 @@ function BrushFootprintIndicator({
   visible: boolean;
   color: string;
 }) {
+  const flattenCells = useMemo(
+    () => {
+      void revision;
+      return tool === "flatten" && coordinate
+        ? getFlattenPreviewCells(coordinate, settings, world)
+        : [];
+    },
+    [coordinate, revision, settings, tool, world],
+  );
   const cells = useMemo(
     () => {
       void revision;
+      if (tool === "flatten") {
+        return [];
+      }
       if (tool === "zone" && coordinate) {
         return zoneSelectionMode === "rectangle" && zoneRectangleAnchor
           ? getZoneRectangleFootprint(zoneRectangleAnchor, coordinate)
@@ -3682,6 +3706,25 @@ function BrushFootprintIndicator({
   const zonePreviewColor = zoneEditMode === "erase" ? "#facc15" : color;
   return (
     <>
+      {flattenCells.map((cell) => (
+        cell.hasSurface ? (
+          <SurfaceBrushCellIndicator
+            key={`${cell.coordinate.x}-${cell.coordinate.y}-${cell.coordinate.z}-${cell.action}`}
+            coordinate={cell.coordinate}
+            world={world}
+            visible={visible}
+            color={FLATTEN_PREVIEW_COLORS[cell.action]}
+          />
+        ) : (
+          <SelectionIndicator
+            key={`${cell.coordinate.x}-${cell.coordinate.y}-${cell.coordinate.z}-${cell.action}`}
+            coordinate={cell.coordinate}
+            visible={visible}
+            color={FLATTEN_PREVIEW_COLORS[cell.action]}
+            filled
+          />
+        )
+      ))}
       {cells.map((cell) => (
         previewStyle === "cube" ? (
           <SelectionIndicator
@@ -4813,6 +4856,10 @@ function getToolPreviewFootprint(
     });
   }
 
+  if (operation === "flatten") {
+    return getFlattenPreviewCells(coordinate, settings, world).map((cell) => cell.coordinate);
+  }
+
   const mutations = createTerrainMutations({
     world,
     operation,
@@ -4826,6 +4873,35 @@ function getToolPreviewFootprint(
   }
 
   return getTerrainOperationFootprint(coordinate, operation, settings);
+}
+
+type FlattenPreviewAction = "raise" | "lower" | "unchanged";
+
+const FLATTEN_PREVIEW_COLORS: Record<FlattenPreviewAction, string> = {
+  raise: "#22c55e",
+  lower: "#ef4444",
+  unchanged: "#94a3b8",
+};
+
+function getFlattenPreviewCells(
+  coordinate: GridCoordinate,
+  settings: TerrainBrushSettings,
+  world: MapEditorSession["world"],
+): Array<{ coordinate: GridCoordinate; action: FlattenPreviewAction; hasSurface: boolean }> {
+  const desiredY = Math.max(0, Math.min(world.config.height - 1, coordinate.y));
+  return getTerrainOperationFootprint(coordinate, "flatten", settings).map((cell) => {
+    const topY = world.getHighestNonAirY(cell.x, cell.z);
+    const action: FlattenPreviewAction = topY === null || topY < desiredY
+      ? "raise"
+      : topY > desiredY
+        ? "lower"
+        : "unchanged";
+    return {
+      coordinate: { x: cell.x, y: topY ?? desiredY, z: cell.z },
+      action,
+      hasSurface: topY !== null,
+    };
+  });
 }
 
 function getBrushPreviewStyle(tool: EditorTool): "surface" | "cube" {
@@ -4863,14 +4939,49 @@ function getActiveTerrainBlockId(blockId: BlockId, shapeId: ShapeId): BlockId {
   return shapeId === SHAPE_IDS.WATER ? BLOCK_IDS.Water : blockId === BLOCK_IDS.Water ? BLOCK_IDS.Ground : blockId;
 }
 
-function getTerrainMutationBlockId(tool: EditorTool, operation: TerrainBrushOperation, blockId: BlockId, shapeId: ShapeId): BlockId {
+function getTerrainMutationBlockId(tool: EditorTool, operation: TerrainBrushOperation, blockId: BlockId, shapeId: ShapeId, applyMaterialToAddedBlocks = true): BlockId {
   if (operation === "paint-path") return BLOCK_IDS.Path;
-  if (tool === "add") return shapeId === SHAPE_IDS.WATER ? BLOCK_IDS.Water : BLOCK_IDS.Ground;
+  if (tool === "add") {
+    if (shapeId === SHAPE_IDS.WATER) return BLOCK_IDS.Water;
+    return applyMaterialToAddedBlocks ? getActiveTerrainBlockId(blockId, shapeId) : BLOCK_IDS.Ground;
+  }
   return getActiveTerrainBlockId(blockId, shapeId);
 }
 
-function isStrokeBrushTool(tool: EditorTool) {
-  return tool === "zone" || getTerrainBrushOperation(tool) !== null;
+const POINTER_CLICK_MAX_DISTANCE_PX = 5;
+const CONTINUOUS_SINGLE_SHOT_STEP_DISTANCE_PX = 14;
+
+function isContinuousTerrainStrokeTool(tool: EditorTool) {
+  return tool === "zone" || (
+    getTerrainBrushOperation(tool) !== null &&
+    !shouldApplySingleShotEditOnPointerUp(tool)
+  );
+}
+
+function shouldStartContinuousTerrainStroke(tool: EditorTool, event: PointerEvent) {
+  return isContinuousTerrainStrokeTool(tool) || (isModifierContinuousSingleShotTool(tool) && event.ctrlKey);
+}
+
+function shouldContinueContinuousTerrainStroke(tool: EditorTool | null, event: PointerEvent) {
+  if (!tool) return false;
+  return isContinuousTerrainStrokeTool(tool) || (isModifierContinuousSingleShotTool(tool) && event.ctrlKey);
+}
+
+function shouldAdvanceContinuousStroke(tool: EditorTool | null, lastPosition: { x: number; y: number } | null, event: PointerEvent) {
+  if (!tool || !lastPosition || !isModifierContinuousSingleShotTool(tool)) return true;
+  return getPointerGestureDistance(lastPosition, event) >= CONTINUOUS_SINGLE_SHOT_STEP_DISTANCE_PX;
+}
+
+function isModifierContinuousSingleShotTool(tool: EditorTool) {
+  return tool === "add" || tool === "erase";
+}
+
+function shouldApplySingleShotEditOnPointerUp(tool: EditorTool) {
+  return tool === "add" || tool === "erase" || tool === "select" || tool === "entity" || tool === "marker";
+}
+
+function getPointerGestureDistance(start: { x: number; y: number }, event: PointerEvent) {
+  return Math.hypot(event.clientX - start.x, event.clientY - start.y);
 }
 
 function shouldApplyStrokeImmediately(tool: EditorTool, zoneSelectionMode: ZoneSelectionMode) {
@@ -4881,10 +4992,6 @@ function getStrokeBrushKey(tool: EditorTool, coordinate: GridCoordinate) {
   return tool === "add"
     ? `${coordinate.x},${coordinate.z}`
     : editorCoordinateKey(coordinate);
-}
-
-function isNearbyAddStrokeCell(previous: GridCoordinate, next: GridCoordinate) {
-  return Math.max(Math.abs(previous.x - next.x), Math.abs(previous.z - next.z)) <= 2;
 }
 
 function isLayerVisible(layers: EditorLayerState[], id: EditorLayerId) {
@@ -5126,6 +5233,7 @@ function ConstrainedMapControls({
   focusPreset,
   reducedMotion,
   onFocusComplete,
+  onExpansionComplete,
 }: {
   enabled: boolean;
   phase: ExperiencePhase;
@@ -5133,6 +5241,7 @@ function ConstrainedMapControls({
   focusPreset: MapCameraPreset | null;
   reducedMotion: boolean;
   onFocusComplete: () => void;
+  onExpansionComplete: () => void;
 }) {
   const controlsRef = useRef<React.ElementRef<typeof MapControls>>(null);
   const { camera } = useThree();
@@ -5158,17 +5267,22 @@ function ConstrainedMapControls({
   const focusProgress = useRef(0);
   const focusStartCamera = useRef(new THREE.Vector3());
   const focusStartTarget = useRef(new THREE.Vector3());
+  const cinematicCameraPosition = useRef(new THREE.Vector3());
   const activeFocusPresetId = useRef<string | null>(null);
   const focusTween = useRef<gsap.core.Tween | null>(null);
   const compassSnapTween = useRef<gsap.core.Tween | null>(null);
   const previousCompassSnapCount = useRef(compassSnapCount);
-  const loaderCameraPosition = useMemo(() => new THREE.Vector3(0, 20, 54), []);
-  const loaderTargetPosition = useMemo(() => new THREE.Vector3(0, 13.5, 0), []);
-  const startCameraPosition = useMemo(() => new THREE.Vector3(12, 15, 18), []);
-  const fullCameraPosition = useMemo(() => new THREE.Vector3(42, 52, 62), []);
-  const targetPosition = useMemo(() => new THREE.Vector3(0, 0, 0), []);
+  const loaderCameraPosition = useMemo(() => new THREE.Vector3(-18, 20, 54), []);
+  const loaderTargetPosition = useMemo(() => new THREE.Vector3(LOADER_ORIGIN_WORLD.x, 13.5, LOADER_ORIGIN_WORLD.z), []);
+  const startCameraPosition = useMemo(() => new THREE.Vector3(43, 32, 43), []);
+  const revealCameraPosition = useMemo(() => new THREE.Vector3(58, 31, 58), []);
+  const revealCameraControlPosition = useMemo(() => new THREE.Vector3(51, 43, 62), []);
+  const fullCameraPosition = useMemo(() => new THREE.Vector3(16, 8.6, 16), []);
+  const fullCameraControlPosition = useMemo(() => new THREE.Vector3(48, 14, 55), []);
+  const targetPosition = useMemo(() => LOADER_ORIGIN_WORLD.clone(), []);
+  const signFocusTargetPosition = useMemo(() => new THREE.Vector3(LOADER_ORIGIN_WORLD.x, 2.8, LOADER_ORIGIN_WORLD.z), []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const controls = controlsRef.current;
 
     camera.position.copy(loaderCameraPosition);
@@ -5382,15 +5496,47 @@ function ConstrainedMapControls({
       return;
     }
 
+    if ((phase === "loading" || phase === "ready") && !enabled && !transitioning.current && !focusing.current) {
+      camera.position.copy(loaderCameraPosition);
+      controls.target.copy(loaderTargetPosition);
+      controls.update();
+    }
+
     if (transitioning.current && !enabled) {
-      transitionProgress.current = Math.min(1, transitionProgress.current + delta * 0.6);
-      const eased = THREE.MathUtils.smoothstep(transitionProgress.current, 0, 1);
-      camera.position.lerpVectors(startCameraPosition, fullCameraPosition, eased);
-      controls.target.copy(targetPosition);
+      transitionProgress.current = Math.min(1, transitionProgress.current + delta * (reducedMotion ? 2.2 : 0.25));
+      const progress = transitionProgress.current;
+      if (progress < 0.2) {
+        const easedReveal = easeInOutCinematic(progress / 0.2);
+        setQuadraticBezierVector(
+          cinematicCameraPosition.current,
+          startCameraPosition,
+          revealCameraControlPosition,
+          revealCameraPosition,
+          easedReveal,
+        );
+        camera.position.copy(cinematicCameraPosition.current);
+        controls.target.copy(signFocusTargetPosition);
+      } else {
+        const settleProgress = (progress - 0.2) / 0.8;
+        const easedSettle = easeInOutCinematic(settleProgress);
+        setQuadraticBezierVector(
+          cinematicCameraPosition.current,
+          revealCameraPosition,
+          fullCameraControlPosition,
+          fullCameraPosition,
+          easedSettle,
+        );
+        camera.position.copy(cinematicCameraPosition.current);
+        controls.target.copy(signFocusTargetPosition);
+      }
       controls.update();
 
       if (transitionProgress.current >= 1) {
         transitioning.current = false;
+        camera.position.copy(fullCameraPosition);
+        controls.target.copy(signFocusTargetPosition);
+        controls.update();
+        onExpansionComplete();
       }
     }
 
@@ -5398,13 +5544,13 @@ function ConstrainedMapControls({
       focusProgress.current = Math.min(1, focusProgress.current + delta * 0.7);
       const eased = easeInOutCinematic(focusProgress.current);
       camera.position.lerpVectors(focusStartCamera.current, startCameraPosition, eased);
-      controls.target.lerpVectors(focusStartTarget.current, targetPosition, eased);
+      controls.target.lerpVectors(focusStartTarget.current, signFocusTargetPosition, eased);
       controls.update();
 
       if (focusProgress.current >= 1) {
         focusing.current = false;
         camera.position.copy(startCameraPosition);
-        controls.target.copy(targetPosition);
+        controls.target.copy(signFocusTargetPosition);
         controls.update();
         onFocusComplete();
       }
@@ -5461,7 +5607,6 @@ function ConstrainedMapControls({
         ONE: THREE.TOUCH.PAN,
         TWO: THREE.TOUCH.DOLLY_ROTATE,
       }}
-      target={[0, 13.5, 0]}
     />
   );
 }
@@ -5515,6 +5660,22 @@ function easeInOutCinematic(progress: number) {
   return clamped < 0.5
     ? 4 * clamped * clamped * clamped
     : 1 - Math.pow(-2 * clamped + 2, 3) / 2;
+}
+
+function setQuadraticBezierVector(
+  out: THREE.Vector3,
+  start: THREE.Vector3,
+  control: THREE.Vector3,
+  end: THREE.Vector3,
+  progress: number,
+) {
+  const t = THREE.MathUtils.clamp(progress, 0, 1);
+  const invT = 1 - t;
+  out.set(
+    invT * invT * start.x + 2 * invT * t * control.x + t * t * end.x,
+    invT * invT * start.y + 2 * invT * t * control.y + t * t * end.y,
+    invT * invT * start.z + 2 * invT * t * control.z + t * t * end.z,
+  );
 }
 
 function RenderInvalidator({ phase }: { phase: ExperiencePhase }) {

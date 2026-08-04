@@ -54,7 +54,7 @@ import {
 } from "@/lib/editor/editor-layout-store";
 import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
 import type { EditorMessage, EditorTool } from "@/lib/editor/map-editor";
-import { MAP_PRESETS, type MapPresetId } from "@/lib/editor/map-presets";
+import type { MapPresetId } from "@/lib/editor/map-presets";
 import type { BrushShape, TerrainBrushSettings } from "@/lib/editor/terrain-brushes";
 import type { ZoneEditMode, ZoneSelectionMode } from "@/lib/editor/zone-tools";
 import type { MapRegistryEntry } from "@/lib/maps/map-registry";
@@ -116,6 +116,7 @@ export type EditorInspectorState = {
   availableMaps: MapRegistryEntry[];
   tool: EditorTool;
   paintBlockId: BlockId;
+  applyMaterialToAddedBlocks: boolean;
   presetId: MapPresetId;
   renderMode: TerrainRenderMode;
   zoneId: number;
@@ -181,6 +182,7 @@ export type MapEditorToolbarProps = EditorInspectorState & {
   onLayoutChange?: (layout: EditorViewportLayoutState) => void;
   onToolChange: (tool: EditorTool) => void;
   onPaintBlockChange: (blockId: BlockId) => void;
+  onApplyMaterialToAddedBlocksChange: (apply: boolean) => void;
   onShapeCategoryChange: (category: ShapeCategory) => void;
   onShapeChange: (shapeId: ShapeId) => void;
   onCellRotationChange: (rotation: CellRotation) => void;
@@ -267,7 +269,7 @@ const WORKSPACES: Array<{ id: EditorWorkspace; label: string }> = [
 
 const WORKSPACE_TOOLS: Record<EditorWorkspace, EditorTool[]> = {
   map: ["select", "marker"],
-  terrain: ["select", "paint", "add", "erase", "raise", "lower", "flatten", "fill", "clear", "path"],
+  terrain: ["select", "paint", "add", "erase", "raise", "lower", "flatten", "clear"],
   objects: ["select", "entity"],
   zones: ["select"],
   navigation: ["select", "navigation"],
@@ -314,7 +316,6 @@ const TERRAIN_MATERIAL_OPTIONS = [
   ...RENDERABLE_BLOCK_DEFINITIONS.filter((block) => block.id !== BLOCK_IDS.Ground && block.id !== BLOCK_IDS.Water),
 ];
 const MENU_GROUPS = ["file", "edit", "view", "map", "help"] as const;
-const MAP_PRESET_OPTIONS = MAP_PRESETS;
 const COLLAPSED_SIDE_DOCK_WIDTH = 32;
 const COLLAPSED_BOTTOM_DOCK_HEIGHT = 30;
 
@@ -508,7 +509,7 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
       <ToolRail workspace={layout.activeWorkspace} activeTool={props.tool} props={props} onToolChange={props.onToolChange} />
       {!layout.maximizedViewport ? (
         <aside className={`editor-left-dock ${layout.collapsed.left ? "editor-dock--collapsed" : ""}`} aria-label="Contextual palette" onPointerDown={(event) => event.stopPropagation()}>
-          <DockHeader title="Tool Settings" side="left" collapsed={layout.collapsed.left} onToggle={() => setLayout((current) => ({ ...current, collapsed: { ...current.collapsed, left: !current.collapsed.left } }))} />
+          <DockHeader title={leftDockTitle(layout.activeWorkspace, props.tool)} side="left" collapsed={layout.collapsed.left} onToggle={() => setLayout((current) => ({ ...current, collapsed: { ...current.collapsed, left: !current.collapsed.left } }))} />
           {!layout.collapsed.left ? <Palette props={props} workspace={layout.activeWorkspace} fileInputRef={fileInputRef} setBottomTab={(tab) => patchLayout({ activeBottomTab: tab })} /> : null}
           {!layout.collapsed.left ? <ResizeHandle axis="x" side="left" onResize={(value) => setLayout((current) => resizeEditorPanel(current, "leftWidth", value, getViewport()))} onReset={() => setLayout((current) => resizeEditorPanel(current, "leftWidth", 244, getViewport()))} /> : null}
         </aside>
@@ -871,9 +872,51 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
   }
 
   return (
-    <Panel title="Terrain Palette" className="editor-panel--terrain-palette">
-      <MaterialControls props={props} />
-      <ShapeControls props={props} />
+    <TerrainPalette props={props} />
+  );
+}
+
+function TerrainPalette({ props }: { props: MapEditorToolbarProps }) {
+  if (props.tool === "paint") {
+    return (
+      <Panel title="Paint Terrain" className="editor-panel--terrain-palette">
+        <MaterialControls props={props} />
+        <TerrainBrushControls props={props} />
+      </Panel>
+    );
+  }
+
+  if (props.tool === "add") {
+    return (
+      <Panel title="Add Blocks" className="editor-panel--terrain-palette">
+        <MaterialControls props={props} />
+        <label><input type="checkbox" checked={props.applyMaterialToAddedBlocks} onChange={(event) => props.onApplyMaterialToAddedBlocksChange(event.target.checked)} /> Apply material</label>
+        <ShapeControls props={props} />
+        <TerrainPlacementSettings props={props} />
+      </Panel>
+    );
+  }
+
+  if (props.tool === "raise" || props.tool === "lower" || props.tool === "flatten") {
+    return (
+      <Panel title={`${TOOL_LABELS[props.tool]} Terrain`} className="editor-panel--terrain-palette">
+        <TerrainBrushControls props={props} />
+        {props.tool === "flatten" ? <span className="editor-muted">Flattens the brush area to the height of the clicked block.</span> : null}
+      </Panel>
+    );
+  }
+
+  if (props.tool === "erase" || props.tool === "clear") {
+    return (
+      <Panel title={`${TOOL_LABELS[props.tool]} Terrain`} className="editor-panel--terrain-palette">
+        <span className="editor-muted">No terrain palette settings for this tool.</span>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title="Terrain" className="editor-panel--terrain-palette">
+      <span className="editor-muted">Select a terrain tool to edit its settings.</span>
     </Panel>
   );
 }
@@ -905,27 +948,11 @@ function TerrainSelectionDetails({ props }: { props: MapEditorToolbarProps }) {
   );
 }
 
-function TerrainToolSettings({ props }: { props: MapEditorToolbarProps }) {
-  const showsBlockPicker = ["paint", "add", "raise", "fill"].includes(props.tool);
-  const showsShapePicker = ["add", "raise", "fill"].includes(props.tool);
-  const showsBrushShape = ["paint", "erase", "raise", "lower", "flatten", "fill", "clear"].includes(props.tool);
-  const showsBrushSize = showsBrushShape;
-  const showsPathWidth = props.tool === "path" || props.tool === "removePath";
-  const showsFlattenHeight = props.tool === "flatten";
-
+function TerrainBrushControls({ props }: { props: MapEditorToolbarProps }) {
   return (
-    <Section title="Terrain Tool">
-      <label>Preset<select value={props.presetId} onChange={(event) => props.onPresetChange(event.target.value as MapPresetId)}>{MAP_PRESET_OPTIONS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>
-      {!showsBlockPicker ? <span className="editor-muted">Selected material is used by paint, add, raise and fill tools.</span> : null}
-      {!showsShapePicker ? <span className="editor-muted">Selected shape is used by paint, add, raise and fill tools.</span> : null}
-      {showsBrushShape ? <label>Brush<select value={props.brushSettings.shape} onChange={(event) => props.onBrushShapeChange(event.target.value as BrushShape)}><option value="single">Single</option><option value="square">Square</option><option value="circle">Circle</option></select></label> : null}
-      {(showsBrushSize || showsPathWidth) ? (
-        <div className="editor-field-row">
-          {showsBrushSize ? <label>Size<input type="number" min={1} max={9} value={props.brushSettings.size} onChange={(event) => props.onBrushSizeChange(Number(event.target.value))} /></label> : null}
-          {showsPathWidth ? <label>Path<input type="number" min={1} max={9} value={props.brushSettings.pathWidth} onChange={(event) => props.onPathWidthChange(Number(event.target.value))} /></label> : null}
-        </div>
-      ) : null}
-      {showsFlattenHeight ? <label>Flatten Y<input type="number" min={0} max={11} value={props.brushSettings.flattenHeight} onChange={(event) => props.onFlattenHeightChange(Number(event.target.value))} /></label> : null}
+    <Section title="Brush">
+      <label>Shape<select value={props.brushSettings.shape} onChange={(event) => props.onBrushShapeChange(event.target.value as BrushShape)}><option value="single">Single</option><option value="square">Square</option><option value="circle">Circle</option></select></label>
+      <label>Size<input type="number" min={1} max={9} value={props.brushSettings.size} onChange={(event) => props.onBrushSizeChange(Number(event.target.value))} /></label>
       <KeyValue label="Affected" value={String(props.brushAffectedCellCount)} mono />
     </Section>
   );
@@ -1292,8 +1319,6 @@ function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspa
   if (props.selected && workspace === "terrain") {
     return (
       <Panel title="Inspector">
-        <TerrainPlacementSettings props={props} />
-        <TerrainToolSettings props={props} />
         <TerrainSelectionDetails props={props} />
       </Panel>
     );
@@ -1302,8 +1327,9 @@ function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspa
   if (workspace === "terrain") {
     return (
       <Panel title="Inspector">
-        <TerrainPlacementSettings props={props} />
-        <TerrainToolSettings props={props} />
+        <Section title="Terrain Selection">
+          <p className="editor-muted">Select or hover terrain to inspect coordinates, material, shape and chunk data.</p>
+        </Section>
       </Panel>
     );
   }
@@ -1686,6 +1712,21 @@ function bottomTabsForWorkspace(workspace: EditorWorkspace): BottomDockTab[] {
   if (workspace === "navigation") return ["overview", "validation"];
   if (workspace === "zones") return ["overview", "validation"];
   return ["overview", "validation", "history"];
+}
+
+function leftDockTitle(workspace: EditorWorkspace, tool: EditorTool) {
+  if (workspace === "terrain") {
+    if (tool === "paint") return "Paint Terrain";
+    if (tool === "add") return "Add Blocks";
+    if (tool === "raise" || tool === "lower" || tool === "flatten" || tool === "erase" || tool === "clear") return `${TOOL_LABELS[tool]} Terrain`;
+    return "Terrain";
+  }
+  if (workspace === "objects") return "Primitive Palette";
+  if (workspace === "map") return "Map Library";
+  if (workspace === "zones") return "Zones";
+  if (workspace === "navigation") return "Navigation";
+  if (workspace === "review") return "Review";
+  return title(workspace);
 }
 
 function workspaceDefaultTab(workspace: EditorWorkspace): BottomDockTab {

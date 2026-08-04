@@ -18,13 +18,13 @@ describe("terrain brushes", () => {
     expect(getTerrainOperationFootprint({ x: 10, y: 0, z: 10 }, "paint-path", settings)).toHaveLength(9);
   });
 
-  it("paints the selected shape onto existing terrain cells", () => {
+  it("paints only the selected material onto existing terrain cells", () => {
     const world = createFlatVoxelWorld();
     const [mutation] = createTerrainMutations({
       world,
       operation: "paint",
       center: { x: 10, y: 0, z: 10 },
-      blockId: BLOCK_IDS.Ground,
+      blockId: BLOCK_IDS.Special,
       shapeId: SHAPE_IDS.CRYSTAL_MEDIUM,
       rotation: ROTATIONS.EAST,
       state: 0,
@@ -34,8 +34,9 @@ describe("terrain brushes", () => {
     expect(mutation).toMatchObject({
       coordinate: { x: 10, y: 0, z: 10 },
       beforeShape: SHAPE_IDS.CUBE,
-      afterShape: SHAPE_IDS.CRYSTAL_MEDIUM,
-      afterRotation: ROTATIONS.EAST,
+      afterBlock: BLOCK_IDS.Special,
+      afterShape: SHAPE_IDS.CUBE,
+      afterRotation: ROTATIONS.NORTH,
     });
   });
 
@@ -127,6 +128,34 @@ describe("terrain brushes", () => {
     });
     expect(lower.find((mutation) => mutation.coordinate.x === 12 && mutation.coordinate.z === 12)?.coordinate.y).toBe(1);
     expect(lower.find((mutation) => mutation.coordinate.x === 13 && mutation.coordinate.z === 12)?.coordinate.y).toBe(2);
+  });
+
+  it("flattens the brush footprint to the clicked block height", () => {
+    const world = createFlatVoxelWorld();
+    world.setBlock(12, 1, 12, BLOCK_IDS.Ground);
+    world.setBlock(12, 2, 12, BLOCK_IDS.Ground);
+    const settings = { shape: "square" as const, size: 3, pathWidth: 1, pathEnds: "square" as const, flattenHeight: 0 };
+
+    const flatten = createTerrainMutations({
+      world,
+      operation: "flatten",
+      center: { x: 12, y: 1, z: 12 },
+      settings,
+      blockId: BLOCK_IDS.Ground,
+      shapeId: SHAPE_IDS.CUBE,
+      zoneId: 0,
+    });
+
+    expect(flatten).toContainEqual(expect.objectContaining({
+      coordinate: { x: 12, y: 2, z: 12 },
+      afterBlock: BLOCK_IDS.Air,
+    }));
+    expect(flatten).toContainEqual(expect.objectContaining({
+      coordinate: { x: 11, y: 1, z: 11 },
+      beforeBlock: BLOCK_IDS.Air,
+      afterBlock: BLOCK_IDS.Ground,
+    }));
+    expect(flatten.some((mutation) => mutation.coordinate.y === 0 && mutation.afterBlock === BLOCK_IDS.Air)).toBe(false);
   });
 
   it("reports only affected dirty chunks including boundary neighbours", () => {

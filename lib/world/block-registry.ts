@@ -6,6 +6,7 @@ export const BLOCK_IDS = {
   Boundary: 4,
   Special: 5,
   Water: 6,
+  LoaderOrigin: 7,
 } as const;
 
 export type BlockId = (typeof BLOCK_IDS)[keyof typeof BLOCK_IDS];
@@ -75,6 +76,14 @@ export const BLOCK_REGISTRY = {
     renderable: true,
     solid: false,
     developmentColor: "#5f9fb8",
+  },
+  [BLOCK_IDS.LoaderOrigin]: {
+    id: BLOCK_IDS.LoaderOrigin,
+    key: "loader-origin",
+    displayName: "Loader Origin",
+    renderable: true,
+    solid: true,
+    developmentColor: "#d8b45a",
   },
 } satisfies Record<BlockId, BlockDefinition>;
 

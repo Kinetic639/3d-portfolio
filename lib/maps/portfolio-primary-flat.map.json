@@ -16,6 +16,54 @@
     "generator": "flat-v1",
     "edits": [
       {
+        "x": 31,
+        "y": 0,
+        "z": 31,
+        "blockId": 7
+      },
+      {
+        "x": 32,
+        "y": 0,
+        "z": 31,
+        "blockId": 7
+      },
+      {
+        "x": 31,
+        "y": 0,
+        "z": 32,
+        "blockId": 7
+      },
+      {
+        "x": 32,
+        "y": 0,
+        "z": 32,
+        "blockId": 7
+      },
+      {
+        "x": 38,
+        "y": 0,
+        "z": 38,
+        "blockId": 1
+      },
+      {
+        "x": 39,
+        "y": 0,
+        "z": 38,
+        "blockId": 1
+      },
+      {
+        "x": 38,
+        "y": 0,
+        "z": 39,
+        "blockId": 1
+      },
+      {
+        "x": 39,
+        "y": 0,
+        "z": 39,
+        "blockId": 1
+      },
+      {
         "x": 5,
         "y": 1,
         "z": 0,
@@ -11443,13 +11491,13 @@
         "x": 31,
         "y": 1,
         "z": 31,
-        "blockId": 1
+        "blockId": 7
       },
       {
         "x": 32,
         "y": 1,
         "z": 31,
-        "blockId": 1
+        "blockId": 7
       },
       {
         "x": 33,
@@ -11815,13 +11863,13 @@
         "x": 31,
         "y": 1,
         "z": 32,
-        "blockId": 1
+        "blockId": 7
       },
       {
         "x": 32,
         "y": 1,
         "z": 32,
-        "blockId": 1
+        "blockId": 7
       },
       {
         "x": 33,
@@ -58501,8 +58549,8 @@
     "backgroundId": "neutral-day"
   },
   "metadata": {
-    "createdAt": "2026-08-03T00:00:00.000Z",
-    "updatedAt": "2026-08-03T19:40:28.861Z",
+    "createdAt": "2026-08-03T00:00:00Z",
+    "updatedAt": "2026-08-04T00:00:00.000Z",
     "authoringVersion": "primary-terrain-v2"
   }
 }

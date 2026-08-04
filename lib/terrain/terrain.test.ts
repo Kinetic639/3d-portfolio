@@ -6,6 +6,7 @@ import {
   createTerrainData,
   distanceFromCenterPlatform,
 } from "./terrain";
+import { BLOCK_IDS } from "@/lib/world/block-registry";
 
 describe("createTerrainData", () => {
   it("creates 16 chunks with 256 surface instances each", () => {
@@ -19,7 +20,7 @@ describe("createTerrainData", () => {
     expect(terrain.chunks.every((chunk) => chunk.cells.length === CHUNK_INSTANCE_COUNT)).toBe(true);
   });
 
-  it("marks exactly the compact 2 x 2 center platform as loader blocks", () => {
+  it("marks exactly the compact 2 x 2 center loader platform as loader blocks", () => {
     const terrain = createTerrainData();
 
     expect(terrain.centerCells).toHaveLength(4);
@@ -29,6 +30,7 @@ describe("createTerrainData", () => {
       "32,31",
       "32,32",
     ]);
+    expect(terrain.centerCells.every((cell) => cell.blockId === BLOCK_IDS.LoaderOrigin)).toBe(true);
   });
 
   it("assigns zero delay to center cells and larger delays toward corners", () => {

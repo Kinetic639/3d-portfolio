@@ -1568,7 +1568,11 @@ body {
 }
 
 .editor-panel--terrain-palette {
-  grid-template-rows: 24px auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.editor-left-dock .editor-panel > header {
+  display: none;
 }
 
 .editor-panel--terrain-palette .editor-inspector-section:last-child {
