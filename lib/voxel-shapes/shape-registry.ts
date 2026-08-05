@@ -104,6 +104,15 @@ function slabBounds(_rotation: CellRotation, state: number): ShapeBounds {
   return { ...FULL_BOUNDS, maxY: 0 };
 }
 
+// A thinner slab (0.25 tall instead of Slab's 0.5) for subtler height
+// changes — clearing edges, landings, small elevation nudges between
+// full-height cells.
+function quarterSlabBounds(_rotation: CellRotation, state: number): ShapeBounds {
+  state = getShapeStateValue(state);
+  if (state === 1) return { ...FULL_BOUNDS, minY: 0.25 };
+  return { ...FULL_BOUNDS, maxY: -0.25 };
+}
+
 function flatSurface(height: number, solidSupport = true, walkable = true, fluid = false): ShapeSurfaceSample {
   return { valid: true, height, normal: [0, 1, 0], solidSupport, walkable, fluid };
 }
@@ -130,8 +139,11 @@ function slopeHeight(localX: number, localZ: number, rotation: CellRotation, ste
   return min + (max - min) * t;
 }
 
-function wedgeFaces(rotation: CellRotation, steep: boolean): ShapeFace[] {
-  const high = steep ? 0.5 : 0.12;
+// A wedge/ramp: flat bottom, vertical riser at +z, sloped top rising from
+// y=-0.5 at z=-0.5 up to y=high at z=0.5. Shared by every fixed-steepness
+// wedge (wedgeFaces) and by Low Ramp, whose rise is chosen per-state instead
+// of hardcoded.
+function wedgeFacesAt(rotation: CellRotation, high: number): ShapeFace[] {
   const verts: Array<[number, number, number]> = [
     [-0.5, -0.5, -0.5],
     [0.5, -0.5, -0.5],
@@ -145,7 +157,145 @@ function wedgeFaces(rotation: CellRotation, steep: boolean): ShapeFace[] {
     { direction: "pz", normal: FACE_NORMALS.pz, occlusion: "partial", corners: [verts[3], verts[2], verts[5], verts[4]] },
     { direction: "nx", normal: FACE_NORMALS.nx, occlusion: "partial", corners: [verts[0], verts[3], verts[4], verts[0]] },
     { direction: "px", normal: FACE_NORMALS.px, occlusion: "partial", corners: [verts[1], verts[5], verts[2], verts[1]] },
-    { direction: "py", normal: [0, 1, steep ? -1 : -0.55], occlusion: "partial", corners: [verts[0], verts[4], verts[5], verts[1]] },
+    { direction: "py", normal: [0, 1, high > 0.3 ? -1 : -0.55], occlusion: "partial", corners: [verts[0], verts[4], verts[5], verts[1]] },
+  ], rotation);
+}
+
+function wedgeFaces(rotation: CellRotation, steep: boolean): ShapeFace[] {
+  return wedgeFacesAt(rotation, steep ? 0.5 : 0.12);
+}
+
+// Low Ramp: same wedge shape as wedgeFaces, but the rise is picked from the
+// cell's state instead of a fixed steep/shallow flag — quarter/half/three-
+// quarter of a block, filling the gap between Shallow Slope (0.12 rise) and
+// Steep Slope (1.0 rise).
+function lowRampHigh(state: number): number {
+  const value = getShapeStateValue(state);
+  if (value === 1) return 0; // half rise
+  if (value === 2) return 0.25; // three-quarter rise
+  return -0.25; // quarter rise (default)
+}
+
+function lowRampSurfaceHeight(localX: number, localZ: number, rotation: CellRotation, state: number) {
+  const rotated = rotateLocal(localX, localZ, rotation);
+  const t = Math.max(0, Math.min(1, rotated.z + 0.5));
+  const high = lowRampHigh(state);
+  return -0.5 + (high + 0.5) * t;
+}
+
+// Diagonal Ramp: rises from the (-x,-z) corner (height -0.5) to the
+// opposite (+x,+z) corner (height 0.5), with the other two corners at the
+// midpoint height — a bilinear/twisted top surface rather than a single
+// tilted plane, so both diagonal corners read correctly.
+function diagonalRampFaces(rotation: CellRotation): ShapeFace[] {
+  const low = -0.5;
+  const high = 0.5;
+  const mid = 0;
+  const bottomNN: [number, number, number] = [-0.5, -0.5, -0.5];
+  const bottomPN: [number, number, number] = [0.5, -0.5, -0.5];
+  const bottomPP: [number, number, number] = [0.5, -0.5, 0.5];
+  const bottomNP: [number, number, number] = [-0.5, -0.5, 0.5];
+  const topNN: [number, number, number] = [-0.5, low, -0.5];
+  const topPN: [number, number, number] = [0.5, mid, -0.5];
+  const topPP: [number, number, number] = [0.5, high, 0.5];
+  const topNP: [number, number, number] = [-0.5, mid, 0.5];
+  return rotateFaces([
+    { direction: "ny", normal: FACE_NORMALS.ny, occlusion: "partial", corners: [bottomNN, bottomPN, bottomPP, bottomNP] },
+    { direction: "py", normal: [-0.5, 0.8, -0.5], occlusion: "partial", corners: [topNP, topPP, topPN, topNN] },
+    { direction: "nx", normal: FACE_NORMALS.nx, occlusion: "partial", corners: [bottomNN, bottomNP, topNP, topNN] },
+    // px/nz corner order is reversed relative to ny/py/nx/pz above (rather
+    // than the same [bottom-near, bottom-far, top-far, top-near] pattern) —
+    // both faces need the OPPOSITE cyclic order from their nx/pz neighbors
+    // to keep every face wound consistently outward; getting this wrong is
+    // exactly what silently flipped these two faces backwards before.
+    { direction: "px", normal: FACE_NORMALS.px, occlusion: "partial", corners: [topPN, topPP, bottomPP, bottomPN] },
+    { direction: "nz", normal: FACE_NORMALS.nz, occlusion: "partial", corners: [topNN, topPN, bottomPN, bottomNN] },
+    { direction: "pz", normal: FACE_NORMALS.pz, occlusion: "partial", corners: [bottomNP, bottomPP, topPP, topNP] },
+  ], rotation);
+}
+
+function diagonalRampHeight(localX: number, localZ: number, rotation: CellRotation) {
+  const rotated = rotateLocal(localX, localZ, rotation);
+  const tx = Math.max(0, Math.min(1, rotated.x + 0.5));
+  const tz = Math.max(0, Math.min(1, rotated.z + 0.5));
+  const bottom = -0.5 + (0 - -0.5) * tx; // interpolate nn -> pn along x at z=-0.5
+  const top = 0 + (0.5 - 0) * tx; // interpolate np -> pp along x at z=0.5
+  return bottom + (top - bottom) * tz;
+}
+
+// Shared by the modular Inset Trail and Curb families. Each is a set of
+// tileable pieces — full-height interior, straight-edge boundary, and two
+// corner variants — built so any number of them placed edge-to-edge form a
+// path/plaza of arbitrary width and shape, the same way FENCE_*/
+// WOODEN_WALL_* already tile into runs of arbitrary length. A single-cell
+// "straight/corner/T/cross" channel (the previous approach here) can only
+// ever be exactly one cell wide; these compose instead of dictating a fixed
+// width.
+function regionBox(minX: number, maxX: number, minZ: number, maxZ: number, top: number): ShapeFace[] {
+  return boxFaces({ minX, maxX, maxY: top, minY: -0.5, minZ, maxZ }, "partial");
+}
+
+// Straight boundary: -z half at `nearTop`, +z half at `farTop`. Rotate to
+// put the boundary on whichever side of the run it needs to face.
+function splitEdgeFaces(rotation: CellRotation, nearTop: number, farTop: number): ShapeFace[] {
+  return rotateFaces([
+    ...regionBox(-0.5, 0.5, -0.5, 0, nearTop),
+    ...regionBox(-0.5, 0.5, 0, 0.5, farTop),
+  ], rotation);
+}
+
+function splitEdgeSurface(localX: number, localZ: number, rotation: CellRotation, nearTop: number, farTop: number) {
+  return rotateLocal(localX, localZ, rotation).z < 0 ? nearTop : farTop;
+}
+
+// Corner boundary: the (+x,+z) quadrant is `nookTop`, the L-shaped
+// remaining three quadrants are `restTop`. A small nook + large rest turns
+// a convex corner; a large nook (i.e. `restTop`/`nookTop` swapped by the
+// caller) turns a concave one.
+function splitCornerFaces(rotation: CellRotation, nookTop: number, restTop: number): ShapeFace[] {
+  return rotateFaces([
+    ...regionBox(0, 0.5, 0, 0.5, nookTop),
+    ...regionBox(-0.5, 0, -0.5, 0.5, restTop),
+    ...regionBox(0, 0.5, -0.5, 0, restTop),
+  ], rotation);
+}
+
+function splitCornerSurface(localX: number, localZ: number, rotation: CellRotation, nookTop: number, restTop: number) {
+  const { x, z } = rotateLocal(localX, localZ, rotation);
+  return x >= 0 && z >= 0 ? nookTop : restTop;
+}
+
+// Inset Trail: recessed walking surface (CHANNEL_TOP) bounded by full-
+// height terrain (BANK_TOP). Center = all channel (interior of a wide
+// path); Edge = the straight boundary; Outer/Inner Corner = the two ways a
+// boundary can turn.
+const TRAIL_BANK_TOP = 0.5;
+const TRAIL_CHANNEL_TOP = 0.22;
+
+// Curb line: same Center/Edge/Outer Corner/Inner Corner structure as Inset
+// Trail, but the low side sits exactly one Quarter Slab below full height
+// (0.5 - 0.25 = 0.25) instead of Inset Trail's 0.22 — so the low side of a
+// curb-bounded area can be left as a visible step, or any of its cells can
+// be individually swapped for Quarter Slab (top/state-1 variant, which
+// spans 0.25..0.5) to flush it back up to full height with no seam.
+const CURB_HIGH = 0.5;
+const CURB_LOW = 0.25;
+
+// Terrace Ledge: a straight two-tier step, low half at z<0 (height picked
+// per-state), high half at z>0 (full height) — the same touching-box
+// composition Stair already uses for its own two-tier step.
+function terraceLedgeLowHeight(state: number) {
+  const value = getShapeStateValue(state);
+  if (value === 1) return 0; // half-block difference
+  if (value === 2) return -0.5; // full-block difference (flush with the ground below)
+  return 0.25; // quarter-block difference (default)
+}
+
+function terraceLedgeFaces(rotation: CellRotation, state: number): ShapeFace[] {
+  const low = terraceLedgeLowHeight(state);
+  return rotateFaces([
+    ...boxFaces({ minX: -0.5, maxX: 0.5, minY: -0.5, maxY: low, minZ: -0.5, maxZ: 0 }, "partial"),
+    ...boxFaces({ minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5, minZ: 0, maxZ: 0.5 }, "partial"),
   ], rotation);
 }
 
@@ -698,6 +848,20 @@ const BASE_SHAPE_REGISTRY = {
   [SHAPE_IDS.SOLID_WOODEN_WALL_T]: { ...makeBoxShape({ id: SHAPE_IDS.SOLID_WOODEN_WALL_T, key: "solid-wooden-wall-t", name: "Solid Wooden Wall - T Junction", category: "structure", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: FULL_BOUNDS }), faces: (rotation) => solidWoodenWallFaces(rotation, "t") },
   [SHAPE_IDS.SOLID_WOODEN_WALL_CROSS]: { ...makeBoxShape({ id: SHAPE_IDS.SOLID_WOODEN_WALL_CROSS, key: "solid-wooden-wall-cross", name: "Solid Wooden Wall - Cross Junction", category: "structure", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: FULL_BOUNDS }), faces: (rotation) => solidWoodenWallFaces(rotation, "cross") },
   [SHAPE_IDS.SOLID_WOODEN_WALL_GATE]: { ...makeBoxShape({ id: SHAPE_IDS.SOLID_WOODEN_WALL_GATE, key: "solid-wooden-wall-gate", name: "Solid Wooden Wall - Gate", category: "structure", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5, minZ: -0.12, maxZ: 0.12 } }), faces: (rotation) => solidWoodenWallFaces(rotation, "gate") },
+
+  // --- Route-building blocks for the central hub zone. ---
+  [SHAPE_IDS.QUARTER_SLAB]: makeBoxShape({ id: SHAPE_IDS.QUARTER_SLAB, key: "quarter-slab", name: "Quarter Slab", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: true, walkable: true, fluid: false, bounds: quarterSlabBounds }),
+  [SHAPE_IDS.LOW_RAMP]: { id: SHAPE_IDS.LOW_RAMP, key: "low-ramp", name: "Low Ramp", category: "transition", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation, state) => wedgeFacesAt(rotation, lowRampHigh(state)), surfaceAt: (x, z, rotation, state) => ({ ...flatSurface(lowRampSurfaceHeight(x, z, rotation, state), false, true), normal: rotateVector([0, 0.9, -0.35], rotation) }) },
+  [SHAPE_IDS.DIAGONAL_RAMP]: { id: SHAPE_IDS.DIAGONAL_RAMP, key: "diagonal-ramp", name: "Diagonal Ramp", category: "transition", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => diagonalRampFaces(rotation), surfaceAt: (x, z, rotation) => ({ ...flatSurface(diagonalRampHeight(x, z, rotation), false, true), normal: rotateVector([-0.5, 0.8, -0.5], rotation) }) },
+  [SHAPE_IDS.INSET_TRAIL_CENTER]: makeBoxShape({ id: SHAPE_IDS.INSET_TRAIL_CENTER, key: "inset-trail-center", name: "Inset Trail - Center", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, bounds: { ...FULL_BOUNDS, maxY: TRAIL_CHANNEL_TOP } }),
+  [SHAPE_IDS.INSET_TRAIL_EDGE]: { id: SHAPE_IDS.INSET_TRAIL_EDGE, key: "inset-trail-edge", name: "Inset Trail - Edge", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitEdgeFaces(rotation, TRAIL_CHANNEL_TOP, TRAIL_BANK_TOP), surfaceAt: (x, z, rotation) => flatSurface(splitEdgeSurface(x, z, rotation, TRAIL_CHANNEL_TOP, TRAIL_BANK_TOP), true, true) },
+  [SHAPE_IDS.INSET_TRAIL_OUTER_CORNER]: { id: SHAPE_IDS.INSET_TRAIL_OUTER_CORNER, key: "inset-trail-outer-corner", name: "Inset Trail - Outer Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitCornerFaces(rotation, TRAIL_BANK_TOP, TRAIL_CHANNEL_TOP), surfaceAt: (x, z, rotation) => flatSurface(splitCornerSurface(x, z, rotation, TRAIL_BANK_TOP, TRAIL_CHANNEL_TOP), true, true) },
+  [SHAPE_IDS.INSET_TRAIL_INNER_CORNER]: { id: SHAPE_IDS.INSET_TRAIL_INNER_CORNER, key: "inset-trail-inner-corner", name: "Inset Trail - Inner Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitCornerFaces(rotation, TRAIL_CHANNEL_TOP, TRAIL_BANK_TOP), surfaceAt: (x, z, rotation) => flatSurface(splitCornerSurface(x, z, rotation, TRAIL_CHANNEL_TOP, TRAIL_BANK_TOP), true, true) },
+  [SHAPE_IDS.CURB_CENTER]: makeBoxShape({ id: SHAPE_IDS.CURB_CENTER, key: "curb-center", name: "Curb - Center", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, bounds: { ...FULL_BOUNDS, maxY: CURB_LOW } }),
+  [SHAPE_IDS.CURB_EDGE]: { id: SHAPE_IDS.CURB_EDGE, key: "curb-edge", name: "Curb - Edge", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitEdgeFaces(rotation, CURB_LOW, CURB_HIGH), surfaceAt: (x, z, rotation) => flatSurface(splitEdgeSurface(x, z, rotation, CURB_LOW, CURB_HIGH), true, true) },
+  [SHAPE_IDS.CURB_OUTER_CORNER]: { id: SHAPE_IDS.CURB_OUTER_CORNER, key: "curb-outer-corner", name: "Curb - Outer Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitCornerFaces(rotation, CURB_HIGH, CURB_LOW), surfaceAt: (x, z, rotation) => flatSurface(splitCornerSurface(x, z, rotation, CURB_HIGH, CURB_LOW), true, true) },
+  [SHAPE_IDS.CURB_INNER_CORNER]: { id: SHAPE_IDS.CURB_INNER_CORNER, key: "curb-inner-corner", name: "Curb - Inner Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitCornerFaces(rotation, CURB_LOW, CURB_HIGH), surfaceAt: (x, z, rotation) => flatSurface(splitCornerSurface(x, z, rotation, CURB_LOW, CURB_HIGH), true, true) },
+  [SHAPE_IDS.TERRACE_LEDGE]: { id: SHAPE_IDS.TERRACE_LEDGE, key: "terrace-ledge", name: "Terrace Ledge", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation, state) => terraceLedgeFaces(rotation, state), surfaceAt: (x, z, rotation, state) => flatSurface(rotateLocal(x, z, rotation).z < 0 ? terraceLedgeLowHeight(state) : 0.5, false, true) },
 } satisfies Record<ShapeId, ShapeDefinition>;
 
 export const SHAPE_REGISTRY = Object.fromEntries(
@@ -713,66 +877,23 @@ export const SHAPE_REGISTRY = Object.fromEntries(
 
 export const SHAPE_DEFINITIONS = Object.values(SHAPE_REGISTRY);
 
-// Shapes that are the legacy terrain-shape representation of pieces which
-// are now independently placeable objects (walls, roofs, fences, pipes,
-// wooden walls, retaining walls, and natural cave-formation dressing), plus
-// water (now exposed through a single dedicated water tool instead of also
-// appearing as an ordinary terrain shape). See
-// docs/world-registry-refactor-audit.md, "Shapes that must become placeable
-// objects" and "Water".
+// An earlier pass moved walls/roofs/fences/pipes/wooden walls/retaining
+// walls/cave-formation dressing out of the terrain shape picker into
+// placeable-object prefabs, but those prefabs were only ever built as crude
+// single-box bounding-volume approximations (losing every shape's real
+// silhouette — sloped roofs, stepped pillars, board-and-brace fences, rock
+// clusters, all rendered as plain cubes) and the split itself needs more
+// thought before it's reintroduced. That prefab conversion has been backed
+// out; these are terrain shapes again. Water is the one deliberate keeper
+// from that pass — it stays hidden here because it's exposed through a
+// single dedicated water tool instead of appearing as an ordinary terrain
+// shape (see the "Water" control in ShapeControls).
 //
-// These remain fully defined in SHAPE_REGISTRY/getShapeDefinition — a saved
-// map that still references one of these shape ids continues to load and
-// render correctly. They are excluded only from the terrain editor's shape
-// picker via TERRAIN_PALETTE_SHAPE_DEFINITIONS below, so new placements can
-// no longer be made with them.
+// These remain fully defined in SHAPE_REGISTRY/getShapeDefinition regardless
+// of membership here — hiding a shape from the terrain editor's picker via
+// TERRAIN_PALETTE_SHAPE_DEFINITIONS below never affects loading/rendering
+// existing map data that references it.
 export const PALETTE_HIDDEN_SHAPE_IDS: ReadonlySet<ShapeId> = new Set([
-  SHAPE_IDS.WALL,
-  SHAPE_IDS.BEAM,
-  SHAPE_IDS.PILLAR_BASE,
-  SHAPE_IDS.PILLAR_MIDDLE,
-  SHAPE_IDS.PILLAR_CAP,
-  SHAPE_IDS.ROOF_FLAT,
-  SHAPE_IDS.ROOF_SHALLOW,
-  SHAPE_IDS.ROOF_STEEP,
-  SHAPE_IDS.ROOF_OUTER_CORNER,
-  SHAPE_IDS.ROOF_INNER_CORNER,
-  SHAPE_IDS.ROOF_HOLLOW,
-  SHAPE_IDS.ROOF,
-  SHAPE_IDS.FENCE,
-  SHAPE_IDS.FENCE_POST,
-  SHAPE_IDS.FENCE_CORNER,
-  SHAPE_IDS.FENCE_T,
-  SHAPE_IDS.FENCE_CROSS,
-  SHAPE_IDS.FENCE_GATE,
-  SHAPE_IDS.PIPE,
-  SHAPE_IDS.PIPE_SHORT,
-  SHAPE_IDS.PIPE_LONG,
-  SHAPE_IDS.PIPE_CORNER,
-  SHAPE_IDS.WOODEN_WALL_FULL,
-  SHAPE_IDS.WOODEN_WALL_END,
-  SHAPE_IDS.WOODEN_WALL_CORNER,
-  SHAPE_IDS.WOODEN_WALL_T,
-  SHAPE_IDS.WOODEN_WALL_CROSS,
-  SHAPE_IDS.WOODEN_WALL_GATE,
-  SHAPE_IDS.SOLID_WOODEN_WALL_FULL,
-  SHAPE_IDS.SOLID_WOODEN_WALL_END,
-  SHAPE_IDS.SOLID_WOODEN_WALL_CORNER,
-  SHAPE_IDS.SOLID_WOODEN_WALL_T,
-  SHAPE_IDS.SOLID_WOODEN_WALL_CROSS,
-  SHAPE_IDS.SOLID_WOODEN_WALL_GATE,
-  SHAPE_IDS.RETAINING_WALL_LOW,
-  SHAPE_IDS.RUBBLE_SMALL,
-  SHAPE_IDS.RUBBLE_MEDIUM,
-  SHAPE_IDS.STALACTITE_SMALL,
-  SHAPE_IDS.STALACTITE_LARGE,
-  SHAPE_IDS.CRYSTAL_SMALL,
-  SHAPE_IDS.CRYSTAL_MEDIUM,
-  SHAPE_IDS.CRYSTAL_LARGE,
-  SHAPE_IDS.ICE_CHUNKS,
-  SHAPE_IDS.ICE_CHUNKS_MEDIUM,
-  SHAPE_IDS.ICICLES,
-  SHAPE_IDS.ICICLES_LARGE,
   SHAPE_IDS.WATER,
 ]);
 

@@ -63,6 +63,29 @@ export const SHAPE_IDS = {
   SOLID_WOODEN_WALL_T: 61,
   SOLID_WOODEN_WALL_CROSS: 62,
   SOLID_WOODEN_WALL_GATE: 63,
+  QUARTER_SLAB: 64,
+  LOW_RAMP: 65,
+  DIAGONAL_RAMP: 66,
+  TERRACE_LEDGE: 73,
+  // Modular, tileable route-building set: each piece is either fully one
+  // height or split between two heights along a straight/corner boundary,
+  // so any number of them can be placed edge-to-edge to build a path of
+  // arbitrary width and shape (interior tiles + boundary tiles + corner
+  // tiles), the same way FENCE_*/WOODEN_WALL_* are already modular.
+  INSET_TRAIL_CENTER: 74,
+  INSET_TRAIL_EDGE: 75,
+  INSET_TRAIL_OUTER_CORNER: 76,
+  INSET_TRAIL_INNER_CORNER: 77,
+  // Curb line set: the same tileable Center/Edge/Outer Corner/Inner Corner
+  // structure as INSET_TRAIL_*, but the low side sits exactly one Quarter
+  // Slab (0.25) below full height instead of Inset Trail's deeper 0.28 —
+  // so a curb-bounded area can be left as a visible step down, or that low
+  // area's cells can be individually replaced with Quarter Slab (top
+  // variant) to flush it back up to full height with no seam.
+  CURB_CENTER: 81,
+  CURB_EDGE: 82,
+  CURB_OUTER_CORNER: 83,
+  CURB_INNER_CORNER: 84,
 } as const;
 
 export type ShapeId = (typeof SHAPE_IDS)[keyof typeof SHAPE_IDS];

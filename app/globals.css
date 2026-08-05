@@ -80,11 +80,18 @@ body {
 }
 
 .experience-shell--editor .map-canvas-layer {
-  grid-column: 2 / 4;
+  /* Previously spanned columns 2/4 with padding-left:42px to fake reserving
+     space for the tool rail, which actually lives in a separate overlaid
+     grid (.editor-shell, position:fixed). That's two independently rounded
+     column widths that are only supposed to line up — any subpixel mismatch
+     between them let this layer's own light --background color peek through
+     as a thin vertical stripe right at the tool-rail/viewport seam. Just
+     occupy column 3 directly, matching the maximized/clean-preview case
+     below, so there's nothing left to misalign. */
+  grid-column: 3;
   grid-row: 3;
   min-width: 0;
   min-height: 0;
-  padding-left: 42px;
   border: 1px solid #111111;
   border-top: 0;
   position: relative;
@@ -1690,6 +1697,84 @@ body {
 .editor-shape-preview--compact svg {
   width: 50px;
   height: 38px;
+}
+
+.editor-asset-preview-dialog {
+  width: min(28rem, calc(100vw - 2rem));
+}
+
+.editor-asset-preview-stage {
+  display: grid;
+  place-items: center;
+  min-height: 250px;
+  border: 1px solid #151515;
+  border-radius: 4px;
+  padding: 1rem;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    #202020;
+  background-size: 16px 16px;
+  overflow: hidden;
+}
+
+.editor-asset-preview-stage .editor-shape-preview {
+  width: min(20rem, 100%);
+  grid-template-columns: 1fr;
+  justify-items: center;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.editor-asset-preview-stage .editor-shape-preview svg {
+  width: 220px;
+  height: 170px;
+}
+
+.editor-asset-preview-empty {
+  display: grid;
+  justify-items: center;
+  gap: 0.6rem;
+  color: var(--editor-muted);
+  text-align: center;
+}
+
+.editor-asset-preview-empty svg {
+  width: 34px;
+  height: 34px;
+}
+
+.editor-asset-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.editor-asset-preview-pop {
+  transform-origin: 50% 92%;
+  animation: editor-asset-preview-pop 640ms cubic-bezier(0.16, 1.08, 0.32, 1);
+}
+
+@keyframes editor-asset-preview-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(34px) rotate(-8deg) scale(0.18);
+  }
+
+  56% {
+    opacity: 1;
+    transform: translateY(-8px) rotate(2deg) scale(1.08);
+  }
+
+  76% {
+    transform: translateY(2px) rotate(-1deg) scale(0.98);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
 }
 
 .editor-shape-list {

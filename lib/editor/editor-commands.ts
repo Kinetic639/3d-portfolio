@@ -1,4 +1,4 @@
-export type EditorCommandCategory = "file" | "edit" | "view" | "map" | "tool" | "help";
+export type EditorCommandCategory = "file" | "edit" | "view" | "map" | "tool" | "settings" | "help";
 export type EditorIconName =
   | "new"
   | "open"
