@@ -23,6 +23,15 @@ import { getTerrainSurfaceAt } from "@/lib/world/surface-query";
 import { MapEditorSession, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
 import { createMapPresetWorld, type MapPresetId } from "@/lib/editor/map-presets";
 import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
+import { EDITOR_MIN_ZOOM_DISTANCE_FLOOR } from "@/lib/editor/editor-layout-store";
+import {
+  applyPersistedLayerStates,
+  collectLayerPreferences,
+  DEFAULT_EDITOR_VIEW_PREFERENCES,
+  loadEditorViewPreferences,
+  saveEditorViewPreferences,
+  type EditorViewPreferences,
+} from "@/lib/editor/editor-view-preferences";
 import {
   addEntity,
   createPrefabEntityFromDraft,
@@ -653,7 +662,7 @@ function getEffectiveViewportLayout(layout: EditorViewportLayoutState): EditorVi
     leftWidth: hideSideDocks ? 0 : layout.leftCollapsed ? COLLAPSED_SIDE_DOCK_WIDTH : layout.leftWidth,
     rightWidth: hideSideDocks ? 0 : layout.rightCollapsed ? COLLAPSED_SIDE_DOCK_WIDTH : layout.rightWidth,
     bottomHeight: layout.cleanPreview || layout.maximizedViewport ? 0 : layout.bottomCollapsed ? COLLAPSED_BOTTOM_DOCK_HEIGHT : layout.bottomHeight,
-    editorMinZoomDistance: THREE.MathUtils.clamp(layout.editorMinZoomDistance, 4, 22),
+    editorMinZoomDistance: THREE.MathUtils.clamp(layout.editorMinZoomDistance, EDITOR_MIN_ZOOM_DISTANCE_FLOOR, 22),
   };
 }
 
@@ -974,13 +983,28 @@ function ExperienceScene({
   const [entityColor, setEntityColor] = useState("#9ca3af");
   const [entityName, setEntityName] = useState("Placeholder");
   const [navigationNodeType, setNavigationNodeType] = useState<NavigationNodeType>("walk");
-  const [layerStates, setLayerStates] = useState<EditorLayerState[]>(DEFAULT_EDITOR_LAYERS);
+  const [viewPreferences] = useState<EditorViewPreferences>(() => (
+    typeof window === "undefined" ? DEFAULT_EDITOR_VIEW_PREFERENCES : loadEditorViewPreferences(window.localStorage)
+  ));
+  const [layerStates, setLayerStates] = useState<EditorLayerState[]>(() => applyPersistedLayerStates(DEFAULT_EDITOR_LAYERS, viewPreferences));
   const [cleanPreview, setCleanPreview] = useState(false);
-  const [zoneNeutralTerrain, setZoneNeutralTerrain] = useState(false);
-  const [zoneNeutralTerrainColor, setZoneNeutralTerrainColor] = useState("#f7f7f2");
-  const [zoneGridLinesVisible, setZoneGridLinesVisible] = useState(true);
-  const [zoneGridLineColor, setZoneGridLineColor] = useState("#9a9f98");
-  const [mapBackgroundColor, setMapBackgroundColor] = useState("#edf1ed");
+  const [zoneNeutralTerrain, setZoneNeutralTerrain] = useState(viewPreferences.zoneNeutralTerrain);
+  const [zoneNeutralTerrainColor, setZoneNeutralTerrainColor] = useState(viewPreferences.zoneNeutralTerrainColor);
+  const [zoneGridLinesVisible, setZoneGridLinesVisible] = useState(viewPreferences.zoneGridLinesVisible);
+  const [zoneGridLineColor, setZoneGridLineColor] = useState(viewPreferences.zoneGridLineColor);
+  const [mapBackgroundColor, setMapBackgroundColor] = useState(viewPreferences.mapBackgroundColor);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    saveEditorViewPreferences(window.localStorage, {
+      version: 1,
+      zoneNeutralTerrain,
+      zoneNeutralTerrainColor,
+      zoneGridLinesVisible,
+      zoneGridLineColor,
+      mapBackgroundColor,
+      ...collectLayerPreferences(layerStates),
+    });
+  }, [zoneNeutralTerrain, zoneNeutralTerrainColor, zoneGridLinesVisible, zoneGridLineColor, mapBackgroundColor, layerStates]);
   const [validationSummary, setValidationSummary] = useState<string[]>([]);
   const [editorMessage, setEditorMessage] = useState<EditorMessage | null>(
     initialState.error ? { type: "error", text: initialState.error } : null,

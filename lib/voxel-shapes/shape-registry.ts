@@ -203,8 +203,13 @@ function diagonalRampFaces(rotation: CellRotation): ShapeFace[] {
     { direction: "ny", normal: FACE_NORMALS.ny, occlusion: "partial", corners: [bottomNN, bottomPN, bottomPP, bottomNP] },
     { direction: "py", normal: [-0.5, 0.8, -0.5], occlusion: "partial", corners: [topNP, topPP, topPN, topNN] },
     { direction: "nx", normal: FACE_NORMALS.nx, occlusion: "partial", corners: [bottomNN, bottomNP, topNP, topNN] },
-    { direction: "px", normal: FACE_NORMALS.px, occlusion: "partial", corners: [bottomPN, bottomPP, topPP, topPN] },
-    { direction: "nz", normal: FACE_NORMALS.nz, occlusion: "partial", corners: [bottomNN, bottomPN, topPN, topNN] },
+    // px/nz corner order is reversed relative to ny/py/nx/pz above (rather
+    // than the same [bottom-near, bottom-far, top-far, top-near] pattern) —
+    // both faces need the OPPOSITE cyclic order from their nx/pz neighbors
+    // to keep every face wound consistently outward; getting this wrong is
+    // exactly what silently flipped these two faces backwards before.
+    { direction: "px", normal: FACE_NORMALS.px, occlusion: "partial", corners: [topPN, topPP, bottomPP, bottomPN] },
+    { direction: "nz", normal: FACE_NORMALS.nz, occlusion: "partial", corners: [topNN, topPN, bottomPN, bottomNN] },
     { direction: "pz", normal: FACE_NORMALS.pz, occlusion: "partial", corners: [bottomNP, bottomPP, topPP, topNP] },
   ], rotation);
 }
@@ -218,93 +223,63 @@ function diagonalRampHeight(localX: number, localZ: number, rotation: CellRotati
   return bottom + (top - bottom) * tz;
 }
 
-// Shared by the Inset Trail family and Trail Widening: a recessed walking
-// channel (top at CHANNEL_TOP) cut between raised terrain "banks" (full
-// height, top at BANK_TOP), built entirely from touching, non-overlapping
-// boxes — the same composition style as fenceFaces/woodenWallFaces.
-const BANK_TOP = 0.5;
-const CHANNEL_TOP = 0.22;
-const TRAIL_HALF_WIDTH = 0.2;
-
-function trailBox(minX: number, maxX: number, minZ: number, maxZ: number, top: number): ShapeFace[] {
+// Shared by the modular Inset Trail and Curb families. Each is a set of
+// tileable pieces — full-height interior, straight-edge boundary, and two
+// corner variants — built so any number of them placed edge-to-edge form a
+// path/plaza of arbitrary width and shape, the same way FENCE_*/
+// WOODEN_WALL_* already tile into runs of arbitrary length. A single-cell
+// "straight/corner/T/cross" channel (the previous approach here) can only
+// ever be exactly one cell wide; these compose instead of dictating a fixed
+// width.
+function regionBox(minX: number, maxX: number, minZ: number, maxZ: number, top: number): ShapeFace[] {
   return boxFaces({ minX, maxX, maxY: top, minY: -0.5, minZ, maxZ }, "partial");
 }
 
-function insetTrailFaces(rotation: CellRotation, kind: "straight" | "end" | "corner" | "t" | "cross"): ShapeFace[] {
-  const w = TRAIL_HALF_WIDTH;
-  let faces: ShapeFace[] = [];
-  if (kind === "straight") {
-    faces = [
-      ...trailBox(-0.5, -w, -0.5, 0.5, BANK_TOP),
-      ...trailBox(w, 0.5, -0.5, 0.5, BANK_TOP),
-      ...trailBox(-w, w, -0.5, 0.5, CHANNEL_TOP),
-    ];
-  } else if (kind === "end") {
-    faces = [
-      ...trailBox(-0.5, -w, -0.5, 0.5, BANK_TOP),
-      ...trailBox(w, 0.5, -0.5, 0.5, BANK_TOP),
-      ...trailBox(-w, w, 0, 0.5, BANK_TOP),
-      ...trailBox(-w, w, -0.5, 0, CHANNEL_TOP),
-    ];
-  } else if (kind === "corner") {
-    faces = [
-      ...trailBox(-0.5, -w, -0.5, 0.5, BANK_TOP),
-      ...trailBox(-w, 0.5, w, 0.5, BANK_TOP),
-      ...trailBox(-w, 0.5, -0.5, w, CHANNEL_TOP),
-    ];
-  } else if (kind === "t") {
-    faces = [
-      ...trailBox(-0.5, 0.5, -w, w, CHANNEL_TOP),
-      ...trailBox(-w, w, -0.5, -w, CHANNEL_TOP),
-      ...trailBox(-0.5, -w, w, 0.5, BANK_TOP),
-      ...trailBox(w, 0.5, w, 0.5, BANK_TOP),
-    ];
-  } else {
-    faces = [
-      ...trailBox(-0.5, 0.5, -w, w, CHANNEL_TOP),
-      ...trailBox(-w, w, w, 0.5, CHANNEL_TOP),
-      ...trailBox(-w, w, -0.5, -w, CHANNEL_TOP),
-      ...trailBox(-0.5, -w, w, 0.5, BANK_TOP),
-      ...trailBox(w, 0.5, w, 0.5, BANK_TOP),
-      ...trailBox(-0.5, -w, -0.5, -w, BANK_TOP),
-      ...trailBox(w, 0.5, -0.5, -w, BANK_TOP),
-    ];
-  }
-  return rotateFaces(faces, rotation);
-}
-
-function insetTrailInChannel(kind: "straight" | "end" | "corner" | "t" | "cross", x: number, z: number): boolean {
-  const w = TRAIL_HALF_WIDTH;
-  if (kind === "straight") return x >= -w && x <= w;
-  if (kind === "end") return x >= -w && x <= w && z <= 0;
-  if (kind === "corner") return (x >= -w && x <= w && z <= w) || (x >= w && z >= -w && z <= w);
-  if (kind === "t") return (z >= -w && z <= w) || (x >= -w && x <= w && z <= -w);
-  return (z >= -w && z <= w) || (x >= -w && x <= w);
-}
-
-function insetTrailSurface(kind: "straight" | "end" | "corner" | "t" | "cross", localX: number, localZ: number, rotation: CellRotation) {
-  const { x, z } = rotateLocal(localX, localZ, rotation);
-  return insetTrailInChannel(kind, x, z) ? CHANNEL_TOP : BANK_TOP;
-}
-
-function trailWideningFaces(rotation: CellRotation): ShapeFace[] {
-  const narrow = TRAIL_HALF_WIDTH;
-  const wide = 0.4;
+// Straight boundary: -z half at `nearTop`, +z half at `farTop`. Rotate to
+// put the boundary on whichever side of the run it needs to face.
+function splitEdgeFaces(rotation: CellRotation, nearTop: number, farTop: number): ShapeFace[] {
   return rotateFaces([
-    ...trailBox(-narrow, narrow, -0.5, 0, CHANNEL_TOP),
-    ...trailBox(-wide, wide, 0, 0.5, CHANNEL_TOP),
-    ...trailBox(-0.5, -narrow, -0.5, 0, BANK_TOP),
-    ...trailBox(narrow, 0.5, -0.5, 0, BANK_TOP),
-    ...trailBox(-0.5, -wide, 0, 0.5, BANK_TOP),
-    ...trailBox(wide, 0.5, 0, 0.5, BANK_TOP),
+    ...regionBox(-0.5, 0.5, -0.5, 0, nearTop),
+    ...regionBox(-0.5, 0.5, 0, 0.5, farTop),
   ], rotation);
 }
 
-function trailWideningSurface(localX: number, localZ: number, rotation: CellRotation) {
-  const { x, z } = rotateLocal(localX, localZ, rotation);
-  const halfWidth = z <= 0 ? TRAIL_HALF_WIDTH : 0.4;
-  return x >= -halfWidth && x <= halfWidth ? CHANNEL_TOP : BANK_TOP;
+function splitEdgeSurface(localX: number, localZ: number, rotation: CellRotation, nearTop: number, farTop: number) {
+  return rotateLocal(localX, localZ, rotation).z < 0 ? nearTop : farTop;
 }
+
+// Corner boundary: the (+x,+z) quadrant is `nookTop`, the L-shaped
+// remaining three quadrants are `restTop`. A small nook + large rest turns
+// a convex corner; a large nook (i.e. `restTop`/`nookTop` swapped by the
+// caller) turns a concave one.
+function splitCornerFaces(rotation: CellRotation, nookTop: number, restTop: number): ShapeFace[] {
+  return rotateFaces([
+    ...regionBox(0, 0.5, 0, 0.5, nookTop),
+    ...regionBox(-0.5, 0, -0.5, 0.5, restTop),
+    ...regionBox(0, 0.5, -0.5, 0, restTop),
+  ], rotation);
+}
+
+function splitCornerSurface(localX: number, localZ: number, rotation: CellRotation, nookTop: number, restTop: number) {
+  const { x, z } = rotateLocal(localX, localZ, rotation);
+  return x >= 0 && z >= 0 ? nookTop : restTop;
+}
+
+// Inset Trail: recessed walking surface (CHANNEL_TOP) bounded by full-
+// height terrain (BANK_TOP). Center = all channel (interior of a wide
+// path); Edge = the straight boundary; Outer/Inner Corner = the two ways a
+// boundary can turn.
+const TRAIL_BANK_TOP = 0.5;
+const TRAIL_CHANNEL_TOP = 0.22;
+
+// Curb line: same Center/Edge/Outer Corner/Inner Corner structure as Inset
+// Trail, but the low side sits exactly one Quarter Slab below full height
+// (0.5 - 0.25 = 0.25) instead of Inset Trail's 0.22 — so the low side of a
+// curb-bounded area can be left as a visible step, or any of its cells can
+// be individually swapped for Quarter Slab (top/state-1 variant, which
+// spans 0.25..0.5) to flush it back up to full height with no seam.
+const CURB_HIGH = 0.5;
+const CURB_LOW = 0.25;
 
 // Terrace Ledge: a straight two-tier step, low half at z<0 (height picked
 // per-state), high half at z>0 (full height) — the same touching-box
@@ -878,12 +853,14 @@ const BASE_SHAPE_REGISTRY = {
   [SHAPE_IDS.QUARTER_SLAB]: makeBoxShape({ id: SHAPE_IDS.QUARTER_SLAB, key: "quarter-slab", name: "Quarter Slab", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: true, walkable: true, fluid: false, bounds: quarterSlabBounds }),
   [SHAPE_IDS.LOW_RAMP]: { id: SHAPE_IDS.LOW_RAMP, key: "low-ramp", name: "Low Ramp", category: "transition", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation, state) => wedgeFacesAt(rotation, lowRampHigh(state)), surfaceAt: (x, z, rotation, state) => ({ ...flatSurface(lowRampSurfaceHeight(x, z, rotation, state), false, true), normal: rotateVector([0, 0.9, -0.35], rotation) }) },
   [SHAPE_IDS.DIAGONAL_RAMP]: { id: SHAPE_IDS.DIAGONAL_RAMP, key: "diagonal-ramp", name: "Diagonal Ramp", category: "transition", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => diagonalRampFaces(rotation), surfaceAt: (x, z, rotation) => ({ ...flatSurface(diagonalRampHeight(x, z, rotation), false, true), normal: rotateVector([-0.5, 0.8, -0.5], rotation) }) },
-  [SHAPE_IDS.INSET_TRAIL_STRAIGHT]: { id: SHAPE_IDS.INSET_TRAIL_STRAIGHT, key: "inset-trail-straight", name: "Inset Trail - Straight", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => insetTrailFaces(rotation, "straight"), surfaceAt: (x, z, rotation) => flatSurface(insetTrailSurface("straight", x, z, rotation), true, true) },
-  [SHAPE_IDS.INSET_TRAIL_END]: { id: SHAPE_IDS.INSET_TRAIL_END, key: "inset-trail-end", name: "Inset Trail - End", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => insetTrailFaces(rotation, "end"), surfaceAt: (x, z, rotation) => flatSurface(insetTrailSurface("end", x, z, rotation), true, true) },
-  [SHAPE_IDS.INSET_TRAIL_CORNER]: { id: SHAPE_IDS.INSET_TRAIL_CORNER, key: "inset-trail-corner", name: "Inset Trail - Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => insetTrailFaces(rotation, "corner"), surfaceAt: (x, z, rotation) => flatSurface(insetTrailSurface("corner", x, z, rotation), true, true) },
-  [SHAPE_IDS.INSET_TRAIL_T]: { id: SHAPE_IDS.INSET_TRAIL_T, key: "inset-trail-t", name: "Inset Trail - T Junction", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => insetTrailFaces(rotation, "t"), surfaceAt: (x, z, rotation) => flatSurface(insetTrailSurface("t", x, z, rotation), true, true) },
-  [SHAPE_IDS.INSET_TRAIL_CROSS]: { id: SHAPE_IDS.INSET_TRAIL_CROSS, key: "inset-trail-cross", name: "Inset Trail - Cross Junction", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => insetTrailFaces(rotation, "cross"), surfaceAt: (x, z, rotation) => flatSurface(insetTrailSurface("cross", x, z, rotation), true, true) },
-  [SHAPE_IDS.TRAIL_WIDENING]: { id: SHAPE_IDS.TRAIL_WIDENING, key: "trail-widening", name: "Trail Widening", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => trailWideningFaces(rotation), surfaceAt: (x, z, rotation) => flatSurface(trailWideningSurface(x, z, rotation), true, true) },
+  [SHAPE_IDS.INSET_TRAIL_CENTER]: makeBoxShape({ id: SHAPE_IDS.INSET_TRAIL_CENTER, key: "inset-trail-center", name: "Inset Trail - Center", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, bounds: { ...FULL_BOUNDS, maxY: TRAIL_CHANNEL_TOP } }),
+  [SHAPE_IDS.INSET_TRAIL_EDGE]: { id: SHAPE_IDS.INSET_TRAIL_EDGE, key: "inset-trail-edge", name: "Inset Trail - Edge", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitEdgeFaces(rotation, TRAIL_CHANNEL_TOP, TRAIL_BANK_TOP), surfaceAt: (x, z, rotation) => flatSurface(splitEdgeSurface(x, z, rotation, TRAIL_CHANNEL_TOP, TRAIL_BANK_TOP), true, true) },
+  [SHAPE_IDS.INSET_TRAIL_OUTER_CORNER]: { id: SHAPE_IDS.INSET_TRAIL_OUTER_CORNER, key: "inset-trail-outer-corner", name: "Inset Trail - Outer Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitCornerFaces(rotation, TRAIL_BANK_TOP, TRAIL_CHANNEL_TOP), surfaceAt: (x, z, rotation) => flatSurface(splitCornerSurface(x, z, rotation, TRAIL_BANK_TOP, TRAIL_CHANNEL_TOP), true, true) },
+  [SHAPE_IDS.INSET_TRAIL_INNER_CORNER]: { id: SHAPE_IDS.INSET_TRAIL_INNER_CORNER, key: "inset-trail-inner-corner", name: "Inset Trail - Inner Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitCornerFaces(rotation, TRAIL_CHANNEL_TOP, TRAIL_BANK_TOP), surfaceAt: (x, z, rotation) => flatSurface(splitCornerSurface(x, z, rotation, TRAIL_CHANNEL_TOP, TRAIL_BANK_TOP), true, true) },
+  [SHAPE_IDS.CURB_CENTER]: makeBoxShape({ id: SHAPE_IDS.CURB_CENTER, key: "curb-center", name: "Curb - Center", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, bounds: { ...FULL_BOUNDS, maxY: CURB_LOW } }),
+  [SHAPE_IDS.CURB_EDGE]: { id: SHAPE_IDS.CURB_EDGE, key: "curb-edge", name: "Curb - Edge", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitEdgeFaces(rotation, CURB_LOW, CURB_HIGH), surfaceAt: (x, z, rotation) => flatSurface(splitEdgeSurface(x, z, rotation, CURB_LOW, CURB_HIGH), true, true) },
+  [SHAPE_IDS.CURB_OUTER_CORNER]: { id: SHAPE_IDS.CURB_OUTER_CORNER, key: "curb-outer-corner", name: "Curb - Outer Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitCornerFaces(rotation, CURB_HIGH, CURB_LOW), surfaceAt: (x, z, rotation) => flatSurface(splitCornerSurface(x, z, rotation, CURB_HIGH, CURB_LOW), true, true) },
+  [SHAPE_IDS.CURB_INNER_CORNER]: { id: SHAPE_IDS.CURB_INNER_CORNER, key: "curb-inner-corner", name: "Curb - Inner Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitCornerFaces(rotation, CURB_LOW, CURB_HIGH), surfaceAt: (x, z, rotation) => flatSurface(splitCornerSurface(x, z, rotation, CURB_LOW, CURB_HIGH), true, true) },
   [SHAPE_IDS.TERRACE_LEDGE]: { id: SHAPE_IDS.TERRACE_LEDGE, key: "terrace-ledge", name: "Terrace Ledge", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation, state) => terraceLedgeFaces(rotation, state), surfaceAt: (x, z, rotation, state) => flatSurface(rotateLocal(x, z, rotation).z < 0 ? terraceLedgeLowHeight(state) : 0.5, false, true) },
 } satisfies Record<ShapeId, ShapeDefinition>;
 

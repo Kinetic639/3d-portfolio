@@ -46,6 +46,8 @@ import { createEditorCommands, findEditorCommands, type EditorCommand, type Edit
 import { useExperienceStore } from "@/lib/experience/experience-store";
 import {
   createDefaultEditorLayout,
+  EDITOR_MIN_ZOOM_DISTANCE_CEILING,
+  EDITOR_MIN_ZOOM_DISTANCE_FLOOR,
   loadEditorLayout,
   resetEditorLayout,
   resizeEditorPanel,
@@ -506,7 +508,7 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
         editorMinZoomDistance={layout.editorMinZoomDistance}
         onEditorMinZoomDistanceChange={(distance) => setLayout((current) => ({
           ...current,
-          editorMinZoomDistance: Math.max(4, Math.min(22, Math.floor(distance) || 4)),
+          editorMinZoomDistance: Math.max(EDITOR_MIN_ZOOM_DISTANCE_FLOOR, Math.min(EDITOR_MIN_ZOOM_DISTANCE_CEILING, Math.round(distance * 2) / 2 || EDITOR_MIN_ZOOM_DISTANCE_FLOOR)),
         }))}
         onCloseEditor={props.onClose}
       />
@@ -659,20 +661,21 @@ function ViewMenuSettings({
         <input type="color" value={props.mapBackgroundColor} onChange={(event) => props.onMapBackgroundColorChange(event.target.value)} />
       </label>
       <label className="editor-menu-settings__range">
-        <span>Max zoom in</span>
+        <span>Closest zoom-in distance</span>
         <input
           type="range"
-          min={4}
-          max={22}
-          step={1}
+          min={EDITOR_MIN_ZOOM_DISTANCE_FLOOR}
+          max={EDITOR_MIN_ZOOM_DISTANCE_CEILING}
+          step={0.5}
           value={editorMinZoomDistance}
           onChange={(event) => onEditorMinZoomDistanceChange(Number(event.target.value))}
         />
         <input
-          aria-label="Maximum zoom in distance"
+          aria-label="Closest zoom-in distance"
           type="number"
-          min={4}
-          max={22}
+          min={EDITOR_MIN_ZOOM_DISTANCE_FLOOR}
+          max={EDITOR_MIN_ZOOM_DISTANCE_CEILING}
+          step={0.5}
           value={editorMinZoomDistance}
           onChange={(event) => onEditorMinZoomDistanceChange(Number(event.target.value))}
         />
