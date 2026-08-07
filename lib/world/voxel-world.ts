@@ -22,6 +22,7 @@ import {
   type WorldConfig,
   type WorldPosition,
 } from "./world-config";
+import { computeExpansionDelay, isLoaderOriginBlock } from "./reveal";
 
 export type ChunkCoordinate = {
   chunkX: number;
@@ -81,7 +82,6 @@ export type WorldStats = {
 
 const CENTER_MIN = WORLD_CONFIG.width / 2 - 1;
 const CENTER_MAX = WORLD_CONFIG.width / 2;
-const MAX_WAVE_DELAY = 0.74;
 
 export class VoxelWorld {
   readonly config: WorldConfig;
@@ -539,11 +539,9 @@ export class VoxelWorld {
             worldX: worldPosition.x,
             worldY: worldPosition.y,
             worldZ: worldPosition.z,
-            expansionDelay: this.isCenterLoaderCell(x, y, z)
-              ? 0
-              : (this.distanceFromCenterPlatform(x, z) / this.distanceFromCenterPlatform(0, 0)) * MAX_WAVE_DELAY,
+            expansionDelay: computeExpansionDelay(blockId, x, z),
             variation: ((x * 37 + z * 17 + y * 11) % 100) / 100,
-            isCenterLoaderBlock: this.isCenterLoaderCell(x, y, z),
+            isCenterLoaderBlock: isLoaderOriginBlock(blockId),
           });
         }
       }
@@ -570,17 +568,6 @@ export class VoxelWorld {
         max: this.gridToWorld(maxGridX, this.config.height - 1, maxGridZ),
       },
     };
-  }
-
-  private isCenterLoaderCell(x: number, y: number, z: number) {
-    return y === 0 && x >= CENTER_MIN && x <= CENTER_MAX && z >= CENTER_MIN && z <= CENTER_MAX;
-  }
-
-  private distanceFromCenterPlatform(x: number, z: number) {
-    const dx = x < CENTER_MIN ? CENTER_MIN - x : x > CENTER_MAX ? x - CENTER_MAX : 0;
-    const dz = z < CENTER_MIN ? CENTER_MIN - z : z > CENTER_MAX ? z - CENTER_MAX : 0;
-
-    return Math.hypot(dx, dz);
   }
 
   private getCoordinatesForChunkId(chunkId: string): ChunkCoordinate | null {

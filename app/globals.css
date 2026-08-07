@@ -6,6 +6,24 @@
   --muted: #52615c;
   --panel: rgba(247, 249, 246, 0.9);
   --border: rgba(24, 34, 31, 0.18);
+
+  /* Design-system tokens — shared by the reusable DOM UI primitives in
+     components/ui/*. Existing one-off classes above still hardcode these
+     same values; new web UI work should read from the tokens instead. */
+  --accent: #24785e;
+  --accent-strong: #3c9c78;
+  --accent-soft: rgba(36, 120, 94, 0.12);
+  --danger: #b5453b;
+  --danger-soft: rgba(181, 69, 59, 0.12);
+  --warning: #a5752c;
+  --warning-soft: rgba(165, 117, 44, 0.14);
+  --surface: #ffffff;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 8px 22px rgba(24, 34, 31, 0.12);
+  --shadow-md: 0 12px 34px rgba(24, 34, 31, 0.16);
+  --shadow-lg: 0 24px 54px rgba(24, 34, 31, 0.22);
 }
 
 @theme inline {
@@ -2693,4 +2711,392 @@ body {
     right: 0.75rem;
     bottom: 0.75rem;
   }
+}
+
+/* ==========================================================================
+   Design system — reusable DOM UI primitives (components/ui/*)
+   Light "website" visual language: welcome screen, dialogs, panels, forms.
+   Not used by the 3D scene or the map editor's dark Blender-style tool UI.
+   Showcased at /design-system.
+   ========================================================================== */
+
+.ds-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ds-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ds-button--md {
+  min-height: 2.5rem;
+  padding: 0 1.1rem;
+  font-size: 0.9rem;
+}
+
+.ds-button--sm {
+  min-height: 2rem;
+  padding: 0 0.8rem;
+  font-size: 0.8rem;
+}
+
+.ds-button--primary {
+  border-color: var(--accent);
+  color: #f4faf6;
+  background: var(--accent);
+}
+
+.ds-button--primary:hover:not(:disabled),
+.ds-button--primary:focus-visible:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.ds-button--secondary {
+  border-color: var(--border);
+  color: var(--foreground);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(12px);
+}
+
+.ds-button--secondary:hover:not(:disabled),
+.ds-button--secondary:focus-visible:not(:disabled) {
+  background: var(--surface);
+}
+
+.ds-button--ghost {
+  border-color: transparent;
+  color: var(--foreground);
+  background: transparent;
+}
+
+.ds-button--ghost:hover:not(:disabled),
+.ds-button--ghost:focus-visible:not(:disabled) {
+  background: rgba(24, 34, 31, 0.08);
+}
+
+.ds-button--danger {
+  border-color: var(--danger);
+  color: #fdf3f2;
+  background: var(--danger);
+}
+
+.ds-button--danger:hover:not(:disabled),
+.ds-button--danger:focus-visible:not(:disabled) {
+  background: #9c3a31;
+  border-color: #9c3a31;
+}
+
+.ds-button:focus-visible,
+.ds-icon-button:focus-visible {
+  outline: 2px solid rgba(60, 156, 120, 0.45);
+  outline-offset: 2px;
+}
+
+.ds-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.ds-icon-button--secondary {
+  border-color: var(--border);
+  color: var(--foreground);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(12px);
+}
+
+.ds-icon-button--secondary:hover,
+.ds-icon-button--secondary:focus-visible {
+  background: var(--surface);
+}
+
+.ds-icon-button--ghost {
+  color: var(--foreground);
+  background: transparent;
+}
+
+.ds-icon-button--ghost:hover,
+.ds-icon-button--ghost:focus-visible {
+  background: rgba(24, 34, 31, 0.08);
+}
+
+.ds-icon-button--active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ds-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  color: var(--foreground);
+  background: rgba(24, 34, 31, 0.08);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.ds-badge__dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.ds-badge--accent {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ds-badge--success {
+  color: var(--accent-strong);
+  background: rgba(60, 156, 120, 0.14);
+}
+
+.ds-badge--warning {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.ds-badge--danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.ds-panel {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  color: var(--foreground);
+}
+
+.ds-panel--glass {
+  background: var(--panel);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(12px);
+}
+
+.ds-panel--solid {
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.ds-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.ds-panel__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.ds-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.ds-panel__body {
+  display: grid;
+  gap: 0.6rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.ds-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: start center;
+  padding: 12vh 1rem 2rem;
+  background: rgba(15, 22, 19, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.ds-dialog {
+  display: grid;
+  gap: 0.9rem;
+  width: min(30rem, 100%);
+  max-height: calc(100svh - 14vh - 2rem);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.1rem;
+  color: var(--foreground);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.ds-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ds-dialog__title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.ds-dialog__description {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.ds-dialog__body {
+  display: grid;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.ds-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.85rem;
+}
+
+.ds-hero {
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.ds-hero__kicker {
+  margin: 0;
+  color: var(--accent);
+  font-size: clamp(0.78rem, 1.4vw, 0.95rem);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.ds-hero__title {
+  margin: 0;
+  color: var(--foreground);
+  font-size: clamp(2.4rem, 6vw, 5rem);
+  font-weight: 850;
+  line-height: 0.96;
+}
+
+.ds-hero__subtitle {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.ds-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 0.35rem;
+}
+
+.ds-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.ds-field__label {
+  color: var(--foreground);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.ds-field__control {
+  min-height: 2.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 0.75rem;
+  color: var(--foreground);
+  background: var(--surface);
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.ds-field__control:focus-visible {
+  outline: 2px solid rgba(60, 156, 120, 0.45);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.ds-field__control--textarea {
+  min-height: 5.5rem;
+  padding: 0.6rem 0.75rem;
+  resize: vertical;
+}
+
+.ds-field__hint {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.ds-field__hint--error {
+  color: var(--danger);
+}
+
+.ds-key-value {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+}
+
+.ds-key-value dt {
+  margin: 0;
+  color: var(--muted);
+}
+
+.ds-key-value dd {
+  margin: 0;
+  color: var(--foreground);
+  font-weight: 700;
+}
+
+.ds-key-value__value--mono {
+  font-family: var(--font-mono);
 }

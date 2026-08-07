@@ -237,16 +237,6 @@ type TerrainUniforms = {
 };
 
 const LOADER_ORIGIN_WORLD = new THREE.Vector3(0, 0, 0);
-const BEACON_LOCAL_HOVER_Y = 1.72;
-const LOADER_CAMERA_TARGET_Y = 17;
-
-type RuntimeObjectRevealState = "hidden" | "revealing" | "complete";
-
-const RUNTIME_OBJECT_POP_DURATION_SECONDS = 0.62;
-const RUNTIME_OBJECT_REVEAL_STAGGER_SECONDS = 0.9;
-const RUNTIME_OBJECT_POP_DROP = 0.42;
-const RUNTIME_OBJECT_POP_TILT_X = -0.14;
-const RUNTIME_OBJECT_POP_TILT_Z = 0.08;
 
 const BLOCK_VERTEX_SHADER = `
   uniform float uExpansionProgress;
@@ -1019,7 +1009,6 @@ function ExperienceScene({
   const [entityTransformDragging, setEntityTransformDragging] = useState(false);
   const [entityPopPreviewCount, setEntityPopPreviewCount] = useState(0);
   const [entityPopAnimationId, setEntityPopAnimationId] = useState<string | null>(null);
-  const [runtimeObjectReveal, setRuntimeObjectReveal] = useState<RuntimeObjectRevealState>("hidden");
   const [collisionMode, setCollisionMode] = useState<CollisionMode>("blocking");
   const [entityColor, setEntityColor] = useState("#9ca3af");
   const [entityName, setEntityName] = useState("Placeholder");
@@ -2080,13 +2069,9 @@ function ExperienceScene({
     setLayerStates((layers) => layers.map((layer) => layer.id === id ? { ...layer, ...patch } : layer));
   };
 
-  useLayoutEffect(() => {
-    // Enter loading before the first painted WebGL frame so the scene never
-    // briefly renders in the boot phase and then switches materials.
-    uniforms.uExpansionProgress.value = 0;
-    uniforms.uLoaderMotion.value = 1;
+  useEffect(() => {
     markLoading();
-  }, [markLoading, uniforms]);
+  }, [markLoading]);
 
   useEffect(() => {
     if (!editorAvailable) {
@@ -2544,37 +2529,27 @@ function ExperienceScene({
   }, [editorAvailable, onCloseEditor, selectedCell, selectedMarkerId]);
 
   useEffect(() => {
-    // Do not guard this effect with initializedRef. In React Strict Mode the
-    // first setup is cleaned up and run again; a persistent guard would cancel
-    // the timer and prevent the second setup from finishing initialization.
-    initializedRef.current = true;
-    let cancelled = false;
-    let stopMotionTween: gsap.core.Tween | null = null;
-    const startedAt = performance.now();
+    if (initializedRef.current) {
+      return;
+    }
 
+    initializedRef.current = true;
+    const startedAt = performance.now();
     gl.compile(scene, camera);
 
     const minimumLoaderMs = reducedMotion ? 80 : 280;
     const finish = () => {
-      if (cancelled) return;
-      stopMotionTween = gsap.to(uniforms.uLoaderMotion, {
+      gsap.to(uniforms.uLoaderMotion, {
         value: 0,
         duration: reducedMotion ? 0.08 : 0.45,
         ease: "power2.out",
-        onComplete: () => {
-          if (!cancelled) markReady();
-        },
+        onComplete: markReady,
       });
     };
     const remaining = Math.max(0, minimumLoaderMs - (performance.now() - startedAt));
     const timer = window.setTimeout(finish, remaining);
 
-    return () => {
-      cancelled = true;
-      initializedRef.current = false;
-      window.clearTimeout(timer);
-      stopMotionTween?.kill();
-    };
+    return () => window.clearTimeout(timer);
   }, [camera, gl, markReady, reducedMotion, scene, uniforms.uLoaderMotion]);
 
   useEffect(() => {
@@ -2582,56 +2557,16 @@ function ExperienceScene({
       return;
     }
 
-    // Runtime objects stay completely hidden while the terrain grows. The
-    // object reveal starts only after the terrain shader reaches 100%.
-    setRuntimeObjectReveal("hidden");
-
     const tween = gsap.to(uniforms.uExpansionProgress, {
       value: 1,
       duration: reducedMotion ? 0.45 : 2,
       ease: "none",
-      onComplete: () => {
-        setRuntimeObjectReveal("revealing");
-      },
     });
 
     return () => {
       tween.kill();
     };
   }, [phase, reducedMotion, uniforms.uExpansionProgress]);
-
-  useEffect(() => {
-    if (phase === "boot" || phase === "loading" || phase === "ready" || phase === "focusing") {
-      setRuntimeObjectReveal("hidden");
-      return;
-    }
-
-    // Benchmark/direct-entry paths can jump straight to explore without
-    // running the cinematic reveal. In that case objects should be ready in
-    // their authored transforms rather than remaining hidden forever.
-    if (phase === "explore" && runtimeObjectReveal === "hidden") {
-      setRuntimeObjectReveal("complete");
-    }
-  }, [phase, runtimeObjectReveal]);
-
-  useEffect(() => {
-    if (runtimeObjectReveal !== "revealing") {
-      return;
-    }
-
-    const runtimeObjectCount = currentMap.entities.filter((entity) => entity.appearance.visibleAtRuntime).length;
-    if (runtimeObjectCount === 0) {
-      setRuntimeObjectReveal("complete");
-      return;
-    }
-
-    const totalDuration = getRuntimeObjectRevealTotalDuration(reducedMotion);
-    const timer = window.setTimeout(() => {
-      setRuntimeObjectReveal("complete");
-    }, totalDuration * 1000);
-
-    return () => window.clearTimeout(timer);
-  }, [currentMap.entities, reducedMotion, runtimeObjectReveal]);
 
   useEffect(() => {
     if (!benchmarkMode) {
@@ -2747,8 +2682,8 @@ function ExperienceScene({
       <SurfaceTerrainChunks
         chunks={terrain.surfaceChunks}
         uniforms={uniforms}
-        visible={activeRenderMode === "surface" || (phase === "loading" && activeRenderMode !== "surface")}
-        warmup={phase === "loading" && activeRenderMode !== "surface"}
+        visible={activeRenderMode === "surface" || phase === "loading"}
+        warmup={phase === "loading"}
         neutral={editorAvailable && zoneNeutralTerrain}
         neutralColor={zoneNeutralTerrainColor}
         gridLinesVisible={editorAvailable && zoneGridLinesVisible}
@@ -2832,15 +2767,13 @@ function ExperienceScene({
         }}
       />
       <EditorPlacedEntities
-        visible={(editorAvailable || runtimeObjectReveal !== "hidden") && isLayerVisible(layerStates, "entities")}
-        runtimeMode={!editorAvailable}
-        runtimeRevealState={editorAvailable ? "complete" : runtimeObjectReveal}
-        reducedMotion={reducedMotion}
+        editorEnabled={phase === "explore"}
         cleanPreview={cleanPreview}
+        layerVisible={isLayerVisible(layerStates, "entities")}
         entities={currentMap.entities.filter((entity) => entity.entityType !== "prefab")}
         selectedEntityIds={selectedEntityIds}
         transformMode={entityTransformMode}
-        transformEnabled={editorAvailable && !cleanPreview && selectedEntityIds.length === 1}
+        transformEnabled={!cleanPreview && selectedEntityIds.length === 1}
         onSelectEntity={(id, additive) => {
           setSelectedEntityIds((ids) => additive ? [...new Set([...ids, id])] : [id]);
           setSelectedCell(null);
@@ -2850,13 +2783,13 @@ function ExperienceScene({
         onTransformEntity={handleTransformEntity}
       />
       <EditorPrefabEntities
-        // Terrain and runtime objects now reveal in two distinct stages:
-        // objects remain hidden during the terrain expansion, then every
-        // authored object runs its pop animation once the grid is complete.
-        visible={(editorAvailable || runtimeObjectReveal !== "hidden") && isLayerVisible(layerStates, "entities")}
-        runtimeMode={!editorAvailable}
-        runtimeRevealState={editorAvailable ? "complete" : runtimeObjectReveal}
-        reducedMotion={reducedMotion}
+        // Previously gated to phase === "explore" only, so every object
+        // popped into existence all at once the instant the reveal
+        // animation finished instead of being part of the world as it grew
+        // in. Visible from "expanding" (when the reveal itself starts)
+        // onward so objects are already there, alongside the terrain,
+        // rather than snapping in afterward.
+        visible={(phase === "expanding" || phase === "explore") && isLayerVisible(layerStates, "entities")}
         cleanPreview={cleanPreview}
         entities={currentMap.entities.filter((entity) => entity.entityType === "prefab")}
         selectedEntityIds={selectedEntityIds}
@@ -3225,10 +3158,7 @@ function WorldEntryItem({
       return;
     }
 
-    // The four slabs are on grid layer y=2. Their top is at world Y 2.5,
-    // which is +1.5 above the old loader platform. Keep the animation local
-    // to that translated platform instead of overwriting its world Y.
-    group.position.y = BEACON_LOCAL_HOVER_Y + introOffset.current.value + Math.sin(clock.elapsedTime * 2.8) * 0.05;
+    group.position.y = 1.08 + introOffset.current.value + Math.sin(clock.elapsedTime * 2.8) * 0.05;
     group.rotation.y = clock.elapsedTime * 0.85;
   });
 
@@ -3248,23 +3178,27 @@ function WorldEntryItem({
   };
 
   return (
-    <group position={[position.x, position.y + 1.5, position.z]} visible={visible}>
-      <group
-        ref={groupRef}
-        onClick={handlePointer}
-        onPointerOver={handlePointerOver}
-        onPointerOut={handlePointerOut}
-      >
-        <mesh material={ringMaterial} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.28, 0]}>
-          <torusGeometry args={[0.42, 0.035, 8, 24]} />
-        </mesh>
-        <mesh material={crystalMaterial} scale={[0.58, 0.82, 0.58]}>
-          <octahedronGeometry args={[0.42, 0]} />
-        </mesh>
-        <mesh material={hitAreaMaterial}>
-          <sphereGeometry args={[0.95, 12, 8]} />
-        </mesh>
-      </group>
+    <group
+      ref={groupRef}
+      visible={visible}
+      // The loader platform used to be a y=0 cube (top at world Y 1.0); it's
+      // now the y=2 slab (top at world Y 2.5) — same +1.5 offset applied
+      // here so the beacon keeps hovering just above the platform's actual
+      // surface instead of sitting inside/below it.
+      position={[position.x, 2.26, position.z]}
+      onClick={handlePointer}
+      onPointerOver={handlePointerOver}
+      onPointerOut={handlePointerOut}
+    >
+      <mesh material={ringMaterial} rotation={[Math.PI / 2, 0, 0]} position={[0, -0.28, 0]}>
+        <torusGeometry args={[0.42, 0.035, 8, 24]} />
+      </mesh>
+      <mesh material={crystalMaterial} scale={[0.58, 0.82, 0.58]}>
+        <octahedronGeometry args={[0.42, 0]} />
+      </mesh>
+      <mesh material={hitAreaMaterial}>
+        <sphereGeometry args={[0.95, 12, 8]} />
+      </mesh>
     </group>
   );
 }
@@ -4512,9 +4446,6 @@ type PrefabBatch = {
 
 function EditorPrefabEntities({
   visible,
-  runtimeMode,
-  runtimeRevealState,
-  reducedMotion,
   cleanPreview,
   entities,
   selectedEntityIds,
@@ -4527,9 +4458,6 @@ function EditorPrefabEntities({
   onTransformEntity,
 }: {
   visible: boolean;
-  runtimeMode: boolean;
-  runtimeRevealState: RuntimeObjectRevealState;
-  reducedMotion: boolean;
   cleanPreview: boolean;
   entities: PlacedMapEntity[];
   selectedEntityIds: string[];
@@ -4543,23 +4471,8 @@ function EditorPrefabEntities({
 }) {
   const geometries = useMemo(() => createEntityPrimitiveGeometries(), []);
   const selectedMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#ffffff", wireframe: true, depthTest: false }), []);
-  const visibleEntities = useMemo(
-    () => entities.filter((entity) => runtimeMode
-      ? entity.appearance.visibleAtRuntime
-      : entity.appearance.visibleInEditor || cleanPreview),
-    [cleanPreview, entities, runtimeMode],
-  );
-  const selectedEntity = runtimeMode
-    ? null
-    : visibleEntities.find((entity) => selectedEntityIds.includes(entity.id)) ?? null;
-  const revealDelays = useMemo(
-    () => createRuntimeObjectRevealDelays(visibleEntities, reducedMotion),
-    [reducedMotion, visibleEntities],
-  );
-  const batches = useMemo(
-    () => createPrefabBatches(visibleEntities.filter((entity) => runtimeMode || !selectedEntityIds.includes(entity.id))),
-    [runtimeMode, selectedEntityIds, visibleEntities],
-  );
+  const selectedEntity = entities.find((entity) => selectedEntityIds.includes(entity.id)) ?? null;
+  const batches = useMemo(() => createPrefabBatches(entities.filter((entity) => !selectedEntityIds.includes(entity.id) && (entity.appearance.visibleInEditor || cleanPreview))), [cleanPreview, entities, selectedEntityIds]);
 
   useEffect(() => {
     return () => {
@@ -4579,9 +4492,6 @@ function EditorPrefabEntities({
           key={batch.key}
           batch={batch}
           geometry={geometries[batch.primitive]}
-          runtimeRevealState={runtimeMode ? runtimeRevealState : "complete"}
-          revealDelays={revealDelays}
-          reducedMotion={reducedMotion}
           onSelectEntity={onSelectEntity}
         />
       ))}
@@ -4606,106 +4516,34 @@ function EditorPrefabEntities({
 function PrefabInstancedBatch({
   batch,
   geometry,
-  runtimeRevealState,
-  revealDelays,
-  reducedMotion,
   onSelectEntity,
 }: {
   batch: PrefabBatch;
   geometry: THREE.BufferGeometry;
-  runtimeRevealState: RuntimeObjectRevealState;
-  revealDelays: Map<string, number>;
-  reducedMotion: boolean;
   onSelectEntity: (id: string, additive: boolean) => void;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
-  const revealStartedAt = useRef<number | null>(null);
-  const revealFinished = useRef(false);
   const material = useMemo(() => new THREE.MeshBasicMaterial({ color: batch.color }), [batch.color]);
   const instanceToEntityId = useMemo(() => batch.parts.map((part) => part.entityId), [batch.parts]);
-  const maximumDelay = useMemo(
-    () => batch.parts.reduce((maximum, part) => Math.max(maximum, revealDelays.get(part.entityId) ?? 0), 0),
-    [batch.parts, revealDelays],
-  );
-  const scratch = useMemo(() => ({
-    matrix: new THREE.Matrix4(),
-    position: new THREE.Vector3(),
-    quaternion: new THREE.Quaternion(),
-    scale: new THREE.Vector3(),
-    euler: new THREE.Euler(),
-  }), []);
-
-  const applyMatrices = useCallback((elapsedSeconds: number | null) => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
-
-    for (let index = 0; index < batch.parts.length; index += 1) {
-      const part = batch.parts[index];
-      const transform = part.transform;
-      const sample = elapsedSeconds === null
-        ? RUNTIME_OBJECT_POP_COMPLETE
-        : sampleRuntimeObjectPop(
-          elapsedSeconds,
-          revealDelays.get(part.entityId) ?? 0,
-          reducedMotion,
-        );
-
-      scratch.position.set(
-        transform.position.x,
-        transform.position.y + sample.yOffset,
-        transform.position.z,
-      );
-      scratch.euler.set(
-        transform.rotation.x + sample.tiltX,
-        transform.rotation.y,
-        transform.rotation.z + sample.tiltZ,
-      );
-      scratch.quaternion.setFromEuler(scratch.euler);
-      scratch.scale.set(
-        transform.scale.x * sample.scale,
-        transform.scale.y * sample.scale,
-        transform.scale.z * sample.scale,
-      );
-      scratch.matrix.compose(scratch.position, scratch.quaternion, scratch.scale);
-      mesh.setMatrixAt(index, scratch.matrix);
-    }
-
-    mesh.instanceMatrix.needsUpdate = true;
-  }, [batch.parts, reducedMotion, revealDelays, scratch]);
 
   useLayoutEffect(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
-
-    revealStartedAt.current = null;
-    revealFinished.current = false;
-
-    // Calculate culling bounds from the final authored transforms, then put
-    // the instances back into their initial hidden pop positions.
-    applyMatrices(null);
+    const matrix = new THREE.Matrix4();
+    const position = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    for (let index = 0; index < batch.parts.length; index += 1) {
+      const transform = batch.parts[index].transform;
+      position.set(transform.position.x, transform.position.y, transform.position.z);
+      quaternion.setFromEuler(new THREE.Euler(transform.rotation.x, transform.rotation.y, transform.rotation.z));
+      scale.set(transform.scale.x, transform.scale.y, transform.scale.z);
+      matrix.compose(position, quaternion, scale);
+      mesh.setMatrixAt(index, matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
-    if (runtimeRevealState === "revealing") {
-      applyMatrices(0);
-    }
-  }, [applyMatrices, runtimeRevealState]);
-
-  useFrame(({ clock }) => {
-    if (runtimeRevealState !== "revealing" || revealFinished.current) {
-      return;
-    }
-
-    if (revealStartedAt.current === null) {
-      revealStartedAt.current = clock.elapsedTime;
-    }
-
-    const elapsedSeconds = clock.elapsedTime - revealStartedAt.current;
-    applyMatrices(elapsedSeconds);
-
-    if (elapsedSeconds >= maximumDelay + getRuntimeObjectPopDuration(reducedMotion)) {
-      applyMatrices(null);
-      revealFinished.current = true;
-    }
-  });
+  }, [batch.parts]);
 
   useEffect(() => () => material.dispose(), [material]);
 
@@ -4890,84 +4728,10 @@ function createPrefabBatches(entities: PlacedMapEntity[]): PrefabBatch[] {
   return [...batches.values()];
 }
 
-type RuntimeObjectPopSample = {
-  scale: number;
-  yOffset: number;
-  tiltX: number;
-  tiltZ: number;
-};
-
-const RUNTIME_OBJECT_POP_COMPLETE: RuntimeObjectPopSample = {
-  scale: 1,
-  yOffset: 0,
-  tiltX: 0,
-  tiltZ: 0,
-};
-
-function getRuntimeObjectPopDuration(reducedMotion: boolean) {
-  return reducedMotion ? 0.16 : RUNTIME_OBJECT_POP_DURATION_SECONDS;
-}
-
-function getRuntimeObjectRevealStagger(reducedMotion: boolean) {
-  return reducedMotion ? 0.08 : RUNTIME_OBJECT_REVEAL_STAGGER_SECONDS;
-}
-
-function getRuntimeObjectRevealTotalDuration(reducedMotion: boolean) {
-  return getRuntimeObjectRevealStagger(reducedMotion) + getRuntimeObjectPopDuration(reducedMotion) + 0.08;
-}
-
-function createRuntimeObjectRevealDelays(entities: PlacedMapEntity[], reducedMotion: boolean) {
-  const delays = new Map<string, number>();
-  const stagger = getRuntimeObjectRevealStagger(reducedMotion);
-  const maximumRadius = Math.max(1, Math.hypot(WORLD_CONFIG.width, WORLD_CONFIG.depth) * WORLD_CONFIG.blockSize * 0.5);
-
-  for (const entity of entities) {
-    const radialProgress = THREE.MathUtils.clamp(
-      Math.hypot(entity.transform.position.x, entity.transform.position.z) / maximumRadius,
-      0,
-      1,
-    );
-    const variation = stableUnitValue(entity.id);
-    delays.set(entity.id, (radialProgress * 0.78 + variation * 0.22) * stagger);
-  }
-
-  return delays;
-}
-
-function sampleRuntimeObjectPop(
-  elapsedSeconds: number,
-  delaySeconds: number,
-  reducedMotion: boolean,
-): RuntimeObjectPopSample {
-  const duration = getRuntimeObjectPopDuration(reducedMotion);
-  const progress = THREE.MathUtils.clamp((elapsedSeconds - delaySeconds) / duration, 0, 1);
-  const eased = 1 - Math.pow(1 - progress, 3);
-  const bounce = Math.sin(Math.PI * progress) * (1 - progress);
-  const hiddenScale = 0.001;
-
-  return {
-    scale: hiddenScale + (1 - hiddenScale) * eased + bounce * (reducedMotion ? 0.04 : 0.4),
-    yOffset: -RUNTIME_OBJECT_POP_DROP * (1 - eased) + bounce * (reducedMotion ? 0.03 : 0.18),
-    tiltX: RUNTIME_OBJECT_POP_TILT_X * (1 - eased),
-    tiltZ: RUNTIME_OBJECT_POP_TILT_Z * (1 - eased),
-  };
-}
-
-function stableUnitValue(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0) / 4294967295;
-}
-
 function EditorPlacedEntities({
-  visible,
-  runtimeMode,
-  runtimeRevealState,
-  reducedMotion,
+  editorEnabled,
   cleanPreview,
+  layerVisible,
   entities,
   selectedEntityIds,
   transformMode,
@@ -4976,11 +4740,9 @@ function EditorPlacedEntities({
   onTransformDraggingChange,
   onTransformEntity,
 }: {
-  visible: boolean;
-  runtimeMode: boolean;
-  runtimeRevealState: RuntimeObjectRevealState;
-  reducedMotion: boolean;
+  editorEnabled: boolean;
   cleanPreview: boolean;
+  layerVisible: boolean;
   entities: PlacedMapEntity[];
   selectedEntityIds: string[];
   transformMode: EntityTransformMode;
@@ -4991,18 +4753,6 @@ function EditorPlacedEntities({
 }) {
   const geometries = useMemo(() => createEntityPrimitiveGeometries(), []);
   const selectedMaterial = useMemo(() => new THREE.MeshBasicMaterial({ color: "#ffffff", wireframe: true, depthTest: false }), []);
-  const visibleEntities = useMemo(
-    () => entities.filter((entity) => runtimeMode
-      ? entity.appearance.visibleAtRuntime
-      : cleanPreview
-        ? entity.appearance.visibleAtRuntime
-        : entity.appearance.visibleInEditor),
-    [cleanPreview, entities, runtimeMode],
-  );
-  const revealDelays = useMemo(
-    () => createRuntimeObjectRevealDelays(visibleEntities, reducedMotion),
-    [reducedMotion, visibleEntities],
-  );
 
   useEffect(() => {
     return () => {
@@ -5011,14 +4761,15 @@ function EditorPlacedEntities({
     };
   }, [geometries, selectedMaterial]);
 
-  if (!visible) {
+  if (!editorEnabled || !layerVisible) {
     return null;
   }
 
   return (
     <group>
-      {visibleEntities.map((entity) => {
-        const selected = !runtimeMode && selectedEntityIds.includes(entity.id);
+      {entities.filter((entity) => entity.appearance.visibleInEditor || cleanPreview).map((entity) => {
+        if (cleanPreview && !entity.appearance.visibleAtRuntime) return null;
+        const selected = selectedEntityIds.includes(entity.id);
         return (
           <EditorPlacedEntity
             key={entity.id}
@@ -5028,10 +4779,6 @@ function EditorPlacedEntities({
             selectedMaterial={selectedMaterial}
             transformMode={transformMode}
             transformEnabled={transformEnabled && selected}
-            runtimeMode={runtimeMode}
-            runtimeRevealState={runtimeMode ? runtimeRevealState : "complete"}
-            runtimeRevealDelay={revealDelays.get(entity.id) ?? 0}
-            reducedMotion={reducedMotion}
             onSelectEntity={onSelectEntity}
             onTransformDraggingChange={onTransformDraggingChange}
             onTransformEntity={onTransformEntity}
@@ -5049,10 +4796,6 @@ function EditorPlacedEntity({
   selectedMaterial,
   transformMode,
   transformEnabled,
-  runtimeMode,
-  runtimeRevealState,
-  runtimeRevealDelay,
-  reducedMotion,
   onSelectEntity,
   onTransformDraggingChange,
   onTransformEntity,
@@ -5063,90 +4806,26 @@ function EditorPlacedEntity({
   selectedMaterial: THREE.Material;
   transformMode: EntityTransformMode;
   transformEnabled: boolean;
-  runtimeMode: boolean;
-  runtimeRevealState: RuntimeObjectRevealState;
-  runtimeRevealDelay: number;
-  reducedMotion: boolean;
   onSelectEntity: (id: string, additive: boolean) => void;
   onTransformDraggingChange: (dragging: boolean) => void;
   onTransformEntity: (id: string, transform: Pick<PlacedMapEntity["transform"], "position" | "rotation">) => boolean;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const transformActive = useRef(false);
-  const runtimeRevealStartedAt = useRef<number | null>(null);
-  const runtimeRevealFinished = useRef(false);
   const [transformObject, setTransformObject] = useState<THREE.Group | null>(null);
   const setGroupRef = useCallback((node: THREE.Group | null) => {
     groupRef.current = node;
     setTransformObject(node);
   }, []);
 
-  const applyAuthoredTransform = useCallback((sample = RUNTIME_OBJECT_POP_COMPLETE) => {
-    const group = groupRef.current;
-    if (!group) return;
-    group.position.set(
-      entity.transform.position.x,
-      entity.transform.position.y + sample.yOffset,
-      entity.transform.position.z,
-    );
-    group.rotation.set(
-      entity.transform.rotation.x + sample.tiltX,
-      entity.transform.rotation.y,
-      entity.transform.rotation.z + sample.tiltZ,
-    );
-    group.scale.set(
-      entity.transform.scale.x * sample.scale,
-      entity.transform.scale.y * sample.scale,
-      entity.transform.scale.z * sample.scale,
-    );
-  }, [
-    entity.transform.position.x,
-    entity.transform.position.y,
-    entity.transform.position.z,
-    entity.transform.rotation.x,
-    entity.transform.rotation.y,
-    entity.transform.rotation.z,
-    entity.transform.scale.x,
-    entity.transform.scale.y,
-    entity.transform.scale.z,
-  ]);
-
   useLayoutEffect(() => {
     if (transformActive.current) return;
-    runtimeRevealStartedAt.current = null;
-    runtimeRevealFinished.current = false;
-
-    if (runtimeMode && runtimeRevealState === "revealing") {
-      applyAuthoredTransform(sampleRuntimeObjectPop(0, runtimeRevealDelay, reducedMotion));
-      return;
-    }
-
-    applyAuthoredTransform();
-  }, [
-    applyAuthoredTransform,
-    reducedMotion,
-    runtimeMode,
-    runtimeRevealDelay,
-    runtimeRevealState,
-  ]);
-
-  useFrame(({ clock }) => {
-    if (!runtimeMode || runtimeRevealState !== "revealing" || runtimeRevealFinished.current || transformActive.current) {
-      return;
-    }
-
-    if (runtimeRevealStartedAt.current === null) {
-      runtimeRevealStartedAt.current = clock.elapsedTime;
-    }
-
-    const elapsedSeconds = clock.elapsedTime - runtimeRevealStartedAt.current;
-    applyAuthoredTransform(sampleRuntimeObjectPop(elapsedSeconds, runtimeRevealDelay, reducedMotion));
-
-    if (elapsedSeconds >= runtimeRevealDelay + getRuntimeObjectPopDuration(reducedMotion)) {
-      applyAuthoredTransform();
-      runtimeRevealFinished.current = true;
-    }
-  });
+    const group = groupRef.current;
+    if (!group) return;
+    group.position.set(entity.transform.position.x, entity.transform.position.y, entity.transform.position.z);
+    group.rotation.set(entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z);
+    group.scale.set(entity.transform.scale.x, entity.transform.scale.y, entity.transform.scale.z);
+  }, [entity.transform.position.x, entity.transform.position.y, entity.transform.position.z, entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z, entity.transform.scale.x, entity.transform.scale.y, entity.transform.scale.z]);
 
   const commitTransform = () => {
     const group = groupRef.current;
@@ -5171,7 +4850,11 @@ function EditorPlacedEntity({
   };
 
   const restoreTransform = () => {
-    applyAuthoredTransform();
+    const group = groupRef.current;
+    if (!group) return;
+    group.position.set(entity.transform.position.x, entity.transform.position.y, entity.transform.position.z);
+    group.rotation.set(entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z);
+    group.scale.set(entity.transform.scale.x, entity.transform.scale.y, entity.transform.scale.z);
   };
 
   return (
@@ -5851,7 +5534,7 @@ function ConstrainedMapControls({
   const compassSnapTween = useRef<gsap.core.Tween | null>(null);
   const previousCompassSnapCount = useRef(compassSnapCount);
   const loaderCameraPosition = useMemo(() => new THREE.Vector3(-18, 20, 54), []);
-  const loaderTargetPosition = useMemo(() => new THREE.Vector3(LOADER_ORIGIN_WORLD.x, LOADER_CAMERA_TARGET_Y, LOADER_ORIGIN_WORLD.z), []);
+  const loaderTargetPosition = useMemo(() => new THREE.Vector3(LOADER_ORIGIN_WORLD.x, 13.5, LOADER_ORIGIN_WORLD.z), []);
   const startCameraPosition = useMemo(() => new THREE.Vector3(43, 32, 43), []);
   const revealCameraPosition = useMemo(() => new THREE.Vector3(58, 31, 58), []);
   const revealCameraControlPosition = useMemo(() => new THREE.Vector3(51, 43, 62), []);

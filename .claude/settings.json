@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node -e \"require.resolve\\('zustand/middleware'\\)\")"
+      "Bash(node -e \"require.resolve\\('zustand/middleware'\\)\")",
+      "Bash(node -e ' *)"
     ]
   }
 }

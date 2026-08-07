@@ -1,6 +1,7 @@
 import { getBlockDefinition, isRenderableBlock } from "@/lib/world/block-registry";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
+import { computeExpansionDelay, isLoaderOriginBlock } from "@/lib/world/reveal";
 import { FACE_NEIGHBOUR_OFFSETS, getShapeDefinition, type FaceDirection, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
 import { SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 
@@ -22,6 +23,13 @@ export type SurfaceChunkMeshData = {
   normals: Float32Array;
   colors: Float32Array;
   variations: Float32Array;
+  // Per-vertex reveal-animation data, mirroring the instanced cube-reveal
+  // path's per-instance attributes (see voxel-world.ts's RenderableCell) so
+  // this shape-accurate mesh can grow in with the exact same timing instead
+  // of standing in as a plain cube until the reveal finishes.
+  revealDelays: Float32Array;
+  cellOrigins: Float32Array;
+  centerFlags: Float32Array;
   indices: Uint32Array;
   faceMappings: SurfaceFaceMapping[];
   triangleToCell: Uint32Array;
@@ -51,6 +59,9 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
   const normals: number[] = [];
   const colors: number[] = [];
   const variations: number[] = [];
+  const revealDelays: number[] = [];
+  const cellOrigins: number[] = [];
+  const centerFlags: number[] = [];
   const indices: number[] = [];
   const faceMappings: SurfaceFaceMapping[] = [];
   const triangleCells: number[] = [];
@@ -74,9 +85,18 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
         const shape = getShapeDefinition(shapeId);
         const shapeFaces = shape.faces(rotation, state);
 
+        const isLoaderPlatformCell = isLoaderOriginBlock(blockId);
+
         for (const face of shapeFaces) {
           const [dx, dy, dz] = FACE_NEIGHBOUR_OFFSETS[face.direction];
-          if (occludesFace(world, x + dx, y + dy, z + dz, face)) {
+          // The loader-platform cells (the 4 blocks shown during the
+          // boot/loading intro) always draw every face, regardless of
+          // neighbors, the same way the instanced cube-reveal path always
+          // drew a complete cube for them — static occlusion culling is
+          // computed once from the final settled world, so without this
+          // exception these cells would render as if already flush with
+          // their neighbors and the whole intro platform would disappear.
+          if (!isLoaderPlatformCell && occludesFace(world, x + dx, y + dy, z + dz, face)) {
             continue;
           }
 
@@ -84,6 +104,8 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
           const vertexOffset = positions.length / 3;
           const color = hexToRgb(getBlockDefinition(blockId).developmentColor);
           const variation = ((x * 37 + z * 17 + y * 11) % 100) / 100;
+          const revealDelay = computeExpansionDelay(blockId, x, z);
+          const centerFlag = isLoaderPlatformCell ? 1 : 0;
 
           for (const corner of face.corners) {
             positions.push(
@@ -94,6 +116,13 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
             normals.push(...face.normal);
             colors.push(...color);
             variations.push(variation);
+            revealDelays.push(revealDelay);
+            // The point each vertex grows outward from — this cell's own
+            // center, not the corner-offset vertex position — so the reveal
+            // animation scales each shape from its own footprint regardless
+            // of how asymmetric/off-center that shape's geometry is.
+            cellOrigins.push(worldPosition.x, worldPosition.y, worldPosition.z);
+            centerFlags.push(centerFlag);
           }
 
           indices.push(vertexOffset, vertexOffset + 1, vertexOffset + 2, vertexOffset, vertexOffset + 2, vertexOffset + 3);
@@ -121,6 +150,9 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
     normals: new Float32Array(normals),
     colors: new Float32Array(colors),
     variations: new Float32Array(variations),
+    revealDelays: new Float32Array(revealDelays),
+    cellOrigins: new Float32Array(cellOrigins),
+    centerFlags: new Float32Array(centerFlags),
     indices: new Uint32Array(indices),
     faceMappings,
     triangleToCell: new Uint32Array(triangleCells),

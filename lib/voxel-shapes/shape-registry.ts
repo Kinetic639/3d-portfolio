@@ -272,14 +272,15 @@ function splitCornerSurface(localX: number, localZ: number, rotation: CellRotati
 const TRAIL_BANK_TOP = 0.5;
 const TRAIL_CHANNEL_TOP = 0.22;
 
-// Curb line: same Center/Edge/Outer Corner/Inner Corner structure as Inset
-// Trail, but the low side sits exactly one Quarter Slab below full height
-// (0.5 - 0.25 = 0.25) instead of Inset Trail's 0.22 — so the low side of a
-// curb-bounded area can be left as a visible step, or any of its cells can
-// be individually swapped for Quarter Slab (top/state-1 variant, which
-// spans 0.25..0.5) to flush it back up to full height with no seam.
-const CURB_HIGH = 0.5;
-const CURB_LOW = 0.25;
+// Curb line: a thin raised lip hugging one edge of the cell (rotate to pick
+// which edge), plus a small nub that sits in one corner for turning it —
+// both anchored at this cell's own floor (-0.5) the same way Wall/Fence/
+// Pillar are, so they're meant to be placed on TOP of existing flat terrain
+// (a Cube, a Quarter Slab platform, ...) to trace a boundary line, rather
+// than replacing the floor underneath them the way Inset Trail does.
+const CURB_THICKNESS = 0.14;
+const CURB_LIP_TOP = -0.5 + 0.25; // Quarter Slab tall (0.25) above this cell's own floor
+const CURB_LOW_LIP_TOP = -0.5 + 0.125; // half as tall as CURB_LIP_TOP
 
 // Terrace Ledge: a straight two-tier step, low half at z<0 (height picked
 // per-state), high half at z>0 (full height) — the same touching-box
@@ -683,6 +684,93 @@ function rubbleFaces(size: "small" | "medium"): ShapeFace[] {
   ];
 }
 
+// Same jagged-cluster technique as rubbleFaces (overlapping boxes, each
+// anchored at the cell floor with its own footprint/height, no two boxes
+// identical), but every box is defined by explicit corners instead of an
+// offset-from-center + scale — so the whole cluster can be weighted into
+// the (+x, +z) corner (touching both far edges to cap it cleanly) rather
+// than sitting in the middle. Rotate to place it in any of the 4 corners.
+type CornerClusterBox = { minX: number; maxX: number; minZ: number; maxZ: number; top: number };
+
+function cornerClusterFaces(rotation: CellRotation, boxes: CornerClusterBox[]): ShapeFace[] {
+  return rotateFaces(
+    boxes.flatMap((box) => boxFaces({ minX: box.minX, maxX: box.maxX, minY: -0.5, maxY: box.top, minZ: box.minZ, maxZ: box.maxZ }, "partial")),
+    rotation,
+  );
+}
+
+function cornerClusterBounds(boxes: CornerClusterBox[]): ShapeBounds {
+  return {
+    minX: Math.min(...boxes.map((box) => box.minX)),
+    maxX: Math.max(...boxes.map((box) => box.maxX)),
+    minY: -0.5,
+    maxY: Math.max(...boxes.map((box) => box.top)),
+    minZ: Math.min(...boxes.map((box) => box.minZ)),
+    maxZ: Math.max(...boxes.map((box) => box.maxZ)),
+  };
+}
+
+const CORNER_RUBBLE_SMALL_BOXES: CornerClusterBox[] = [
+  { minX: 0.02, maxX: 0.5, minZ: 0.06, maxZ: 0.5, top: -0.14 },
+  { minX: -0.14, maxX: 0.5, minZ: 0.22, maxZ: 0.5, top: -0.26 },
+  { minX: 0.18, maxX: 0.5, minZ: -0.1, maxZ: 0.34, top: -0.34 },
+];
+
+const CORNER_RUBBLE_MEDIUM_BOXES: CornerClusterBox[] = [
+  { minX: -0.06, maxX: 0.5, minZ: -0.02, maxZ: 0.5, top: 0.05 },
+  { minX: -0.28, maxX: 0.5, minZ: 0.12, maxZ: 0.5, top: -0.12 },
+  { minX: 0.1, maxX: 0.5, minZ: -0.28, maxZ: 0.44, top: -0.2 },
+];
+
+const CORNER_RUBBLE_LARGE_BOXES: CornerClusterBox[] = [
+  { minX: -0.18, maxX: 0.5, minZ: -0.14, maxZ: 0.5, top: 0.3 },
+  { minX: -0.4, maxX: 0.5, minZ: 0.02, maxZ: 0.5, top: 0.1 },
+  { minX: 0.02, maxX: 0.5, minZ: -0.42, maxZ: 0.5, top: 0.02 },
+  { minX: 0.2, maxX: 0.5, minZ: 0.2, maxZ: 0.5, top: 0.4 },
+];
+
+// Asymmetrical counterparts to the three above: the "regular" boxes reach
+// roughly the same distance into the cell along both X and Z, which reads
+// as an evenly-tapered, manufactured-looking wedge once several are placed
+// around a map. These instead lean much further down one axis than the
+// other, with an off-center outlier chunk, for a lopsided pile that doesn't
+// look like a mirrored copy of itself when placed in different corners.
+const CORNER_RUBBLE_SMALL_ASYMMETRICAL_BOXES: CornerClusterBox[] = [
+  { minX: -0.3, maxX: 0.5, minZ: 0.2, maxZ: 0.5, top: -0.16 },
+  { minX: -0.46, maxX: -0.02, minZ: 0.3, maxZ: 0.5, top: -0.3 },
+  { minX: 0.12, maxX: 0.5, minZ: -0.2, maxZ: 0.16, top: -0.36 },
+];
+
+const CORNER_RUBBLE_MEDIUM_ASYMMETRICAL_BOXES: CornerClusterBox[] = [
+  { minX: -0.4, maxX: 0.5, minZ: 0.06, maxZ: 0.5, top: 0.1 },
+  { minX: -0.06, maxX: 0.5, minZ: -0.3, maxZ: 0.18, top: -0.08 },
+  { minX: 0.22, maxX: 0.5, minZ: 0.3, maxZ: 0.5, top: 0.28 },
+  { minX: -0.46, maxX: -0.1, minZ: 0.2, maxZ: 0.44, top: -0.22 },
+];
+
+const CORNER_RUBBLE_LARGE_ASYMMETRICAL_BOXES: CornerClusterBox[] = [
+  { minX: -0.44, maxX: 0.5, minZ: 0, maxZ: 0.5, top: 0.36 },
+  { minX: -0.1, maxX: 0.5, minZ: -0.36, maxZ: 0.14, top: 0.08 },
+  { minX: 0.28, maxX: 0.5, minZ: 0.28, maxZ: 0.5, top: 0.46 },
+  { minX: -0.48, maxX: -0.16, minZ: 0.1, maxZ: 0.4, top: -0.06 },
+  { minX: 0.02, maxX: 0.3, minZ: -0.44, maxZ: -0.1, top: -0.14 },
+];
+
+// A taller, spikier variant — a rock spire capping the corner rather than a
+// low pile — for breaking up cliff corners specifically.
+const CORNER_ROCK_OUTCROP_MEDIUM_BOXES: CornerClusterBox[] = [
+  { minX: 0.1, maxX: 0.5, minZ: 0.1, maxZ: 0.5, top: 0.5 },
+  { minX: -0.1, maxX: 0.36, minZ: 0.22, maxZ: 0.5, top: 0.15 },
+  { minX: 0.22, maxX: 0.5, minZ: -0.14, maxZ: 0.3, top: 0.05 },
+];
+
+const CORNER_ROCK_OUTCROP_LARGE_BOXES: CornerClusterBox[] = [
+  { minX: -0.02, maxX: 0.5, minZ: -0.02, maxZ: 0.5, top: 0.5 },
+  { minX: -0.3, maxX: 0.5, minZ: 0.14, maxZ: 0.5, top: 0.32 },
+  { minX: 0.14, maxX: 0.5, minZ: -0.3, maxZ: 0.5, top: 0.22 },
+  { minX: -0.4, maxX: 0.28, minZ: -0.4, maxZ: 0.22, top: -0.1 },
+];
+
 function iceChunkFaces(size: "small" | "medium"): ShapeFace[] {
   const scale = size === "small" ? 0.78 : 1;
   const height = size === "small" ? 0.02 : 0.25;
@@ -811,6 +899,14 @@ const BASE_SHAPE_REGISTRY = {
   [SHAPE_IDS.ROOF_HOLLOW]: { ...makeBoxShape({ id: SHAPE_IDS.ROOF_HOLLOW, key: "roof-hollow", name: "Hollow Roof", category: "roof", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: FULL_BOUNDS }), faces: hollowRoofFaces },
   [SHAPE_IDS.RUBBLE_SMALL]: { ...makeBoxShape({ id: SHAPE_IDS.RUBBLE_SMALL, key: "rubble-small", name: "Small Rubble", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: -0.28, maxX: 0.28, minY: -0.5, maxY: -0.08, minZ: -0.28, maxZ: 0.28 } }), faces: (rotation) => rotateFaces(rubbleFaces("small"), rotation) },
   [SHAPE_IDS.RUBBLE_MEDIUM]: { ...makeBoxShape({ id: SHAPE_IDS.RUBBLE_MEDIUM, key: "rubble-medium", name: "Medium Rubble", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: -0.42, maxX: 0.42, minY: -0.5, maxY: 0.22, minZ: -0.42, maxZ: 0.42 } }), faces: (rotation) => rotateFaces(rubbleFaces("medium"), rotation) },
+  [SHAPE_IDS.CORNER_RUBBLE_SMALL]: { ...makeBoxShape({ id: SHAPE_IDS.CORNER_RUBBLE_SMALL, key: "corner-rubble-small", name: "Corner Rubble - Small", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: false, fluid: false, bounds: cornerClusterBounds(CORNER_RUBBLE_SMALL_BOXES) }), faces: (rotation) => cornerClusterFaces(rotation, CORNER_RUBBLE_SMALL_BOXES) },
+  [SHAPE_IDS.CORNER_RUBBLE_MEDIUM]: { ...makeBoxShape({ id: SHAPE_IDS.CORNER_RUBBLE_MEDIUM, key: "corner-rubble-medium", name: "Corner Rubble - Medium", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: cornerClusterBounds(CORNER_RUBBLE_MEDIUM_BOXES) }), faces: (rotation) => cornerClusterFaces(rotation, CORNER_RUBBLE_MEDIUM_BOXES) },
+  [SHAPE_IDS.CORNER_RUBBLE_LARGE]: { ...makeBoxShape({ id: SHAPE_IDS.CORNER_RUBBLE_LARGE, key: "corner-rubble-large", name: "Corner Rubble - Large", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: cornerClusterBounds(CORNER_RUBBLE_LARGE_BOXES) }), faces: (rotation) => cornerClusterFaces(rotation, CORNER_RUBBLE_LARGE_BOXES) },
+  [SHAPE_IDS.CORNER_RUBBLE_SMALL_ASYMMETRICAL]: { ...makeBoxShape({ id: SHAPE_IDS.CORNER_RUBBLE_SMALL_ASYMMETRICAL, key: "corner-rubble-small-asymmetrical", name: "Corner Rubble - Small (Asymmetrical)", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: false, fluid: false, bounds: cornerClusterBounds(CORNER_RUBBLE_SMALL_ASYMMETRICAL_BOXES) }), faces: (rotation) => cornerClusterFaces(rotation, CORNER_RUBBLE_SMALL_ASYMMETRICAL_BOXES) },
+  [SHAPE_IDS.CORNER_RUBBLE_MEDIUM_ASYMMETRICAL]: { ...makeBoxShape({ id: SHAPE_IDS.CORNER_RUBBLE_MEDIUM_ASYMMETRICAL, key: "corner-rubble-medium-asymmetrical", name: "Corner Rubble - Medium (Asymmetrical)", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: cornerClusterBounds(CORNER_RUBBLE_MEDIUM_ASYMMETRICAL_BOXES) }), faces: (rotation) => cornerClusterFaces(rotation, CORNER_RUBBLE_MEDIUM_ASYMMETRICAL_BOXES) },
+  [SHAPE_IDS.CORNER_RUBBLE_LARGE_ASYMMETRICAL]: { ...makeBoxShape({ id: SHAPE_IDS.CORNER_RUBBLE_LARGE_ASYMMETRICAL, key: "corner-rubble-large-asymmetrical", name: "Corner Rubble - Large (Asymmetrical)", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: cornerClusterBounds(CORNER_RUBBLE_LARGE_ASYMMETRICAL_BOXES) }), faces: (rotation) => cornerClusterFaces(rotation, CORNER_RUBBLE_LARGE_ASYMMETRICAL_BOXES) },
+  [SHAPE_IDS.CORNER_ROCK_OUTCROP_MEDIUM]: { ...makeBoxShape({ id: SHAPE_IDS.CORNER_ROCK_OUTCROP_MEDIUM, key: "corner-rock-outcrop-medium", name: "Corner Rock Outcrop - Medium", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: cornerClusterBounds(CORNER_ROCK_OUTCROP_MEDIUM_BOXES) }), faces: (rotation) => cornerClusterFaces(rotation, CORNER_ROCK_OUTCROP_MEDIUM_BOXES) },
+  [SHAPE_IDS.CORNER_ROCK_OUTCROP_LARGE]: { ...makeBoxShape({ id: SHAPE_IDS.CORNER_ROCK_OUTCROP_LARGE, key: "corner-rock-outcrop-large", name: "Corner Rock Outcrop - Large", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: cornerClusterBounds(CORNER_ROCK_OUTCROP_LARGE_BOXES) }), faces: (rotation) => cornerClusterFaces(rotation, CORNER_ROCK_OUTCROP_LARGE_BOXES) },
   [SHAPE_IDS.STALACTITE_SMALL]: { ...makeBoxShape({ id: SHAPE_IDS.STALACTITE_SMALL, key: "stalactite-small", name: "Small Stalactite", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: -0.16, maxX: 0.16, minY: -0.32, maxY: 0.5, minZ: -0.16, maxZ: 0.16 } }), faces: (rotation) => rotateFaces(hangingSpikeFaces("small"), rotation) },
   [SHAPE_IDS.STALACTITE_LARGE]: { ...makeBoxShape({ id: SHAPE_IDS.STALACTITE_LARGE, key: "stalactite-large", name: "Large Stalactite", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: -0.28, maxX: 0.28, minY: -0.5, maxY: 0.5, minZ: -0.28, maxZ: 0.28 } }), faces: (rotation) => rotateFaces(hangingSpikeFaces("large"), rotation) },
   [SHAPE_IDS.CRYSTAL_SMALL]: { ...makeBoxShape({ id: SHAPE_IDS.CRYSTAL_SMALL, key: "crystal-small", name: "Small Crystal", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: -0.16, maxX: 0.16, minY: -0.5, maxY: 0.5, minZ: -0.16, maxZ: 0.16 } }), faces: (rotation) => rotateFaces(crystalFaces("small"), rotation) },
@@ -857,10 +953,10 @@ const BASE_SHAPE_REGISTRY = {
   [SHAPE_IDS.INSET_TRAIL_EDGE]: { id: SHAPE_IDS.INSET_TRAIL_EDGE, key: "inset-trail-edge", name: "Inset Trail - Edge", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitEdgeFaces(rotation, TRAIL_CHANNEL_TOP, TRAIL_BANK_TOP), surfaceAt: (x, z, rotation) => flatSurface(splitEdgeSurface(x, z, rotation, TRAIL_CHANNEL_TOP, TRAIL_BANK_TOP), true, true) },
   [SHAPE_IDS.INSET_TRAIL_OUTER_CORNER]: { id: SHAPE_IDS.INSET_TRAIL_OUTER_CORNER, key: "inset-trail-outer-corner", name: "Inset Trail - Outer Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitCornerFaces(rotation, TRAIL_BANK_TOP, TRAIL_CHANNEL_TOP), surfaceAt: (x, z, rotation) => flatSurface(splitCornerSurface(x, z, rotation, TRAIL_BANK_TOP, TRAIL_CHANNEL_TOP), true, true) },
   [SHAPE_IDS.INSET_TRAIL_INNER_CORNER]: { id: SHAPE_IDS.INSET_TRAIL_INNER_CORNER, key: "inset-trail-inner-corner", name: "Inset Trail - Inner Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitCornerFaces(rotation, TRAIL_CHANNEL_TOP, TRAIL_BANK_TOP), surfaceAt: (x, z, rotation) => flatSurface(splitCornerSurface(x, z, rotation, TRAIL_CHANNEL_TOP, TRAIL_BANK_TOP), true, true) },
-  [SHAPE_IDS.CURB_CENTER]: makeBoxShape({ id: SHAPE_IDS.CURB_CENTER, key: "curb-center", name: "Curb - Center", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, bounds: { ...FULL_BOUNDS, maxY: CURB_LOW } }),
-  [SHAPE_IDS.CURB_EDGE]: { id: SHAPE_IDS.CURB_EDGE, key: "curb-edge", name: "Curb - Edge", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitEdgeFaces(rotation, CURB_LOW, CURB_HIGH), surfaceAt: (x, z, rotation) => flatSurface(splitEdgeSurface(x, z, rotation, CURB_LOW, CURB_HIGH), true, true) },
-  [SHAPE_IDS.CURB_OUTER_CORNER]: { id: SHAPE_IDS.CURB_OUTER_CORNER, key: "curb-outer-corner", name: "Curb - Outer Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitCornerFaces(rotation, CURB_HIGH, CURB_LOW), surfaceAt: (x, z, rotation) => flatSurface(splitCornerSurface(x, z, rotation, CURB_HIGH, CURB_LOW), true, true) },
-  [SHAPE_IDS.CURB_INNER_CORNER]: { id: SHAPE_IDS.CURB_INNER_CORNER, key: "curb-inner-corner", name: "Curb - Inner Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation) => splitCornerFaces(rotation, CURB_LOW, CURB_HIGH), surfaceAt: (x, z, rotation) => flatSurface(splitCornerSurface(x, z, rotation, CURB_LOW, CURB_HIGH), true, true) },
+  [SHAPE_IDS.CURB_EDGE]: makeBoxShape({ id: SHAPE_IDS.CURB_EDGE, key: "curb-edge", name: "Curb - Edge", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: CURB_LIP_TOP, minZ: 0.5 - CURB_THICKNESS, maxZ: 0.5 } }),
+  [SHAPE_IDS.CURB_CORNER]: makeBoxShape({ id: SHAPE_IDS.CURB_CORNER, key: "curb-corner", name: "Curb - Corner", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: 0.5 - CURB_THICKNESS, maxX: 0.5, minY: -0.5, maxY: CURB_LIP_TOP, minZ: 0.5 - CURB_THICKNESS, maxZ: 0.5 } }),
+  [SHAPE_IDS.CURB_EDGE_LOW]: makeBoxShape({ id: SHAPE_IDS.CURB_EDGE_LOW, key: "curb-edge-low", name: "Curb - Edge (Low)", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: CURB_LOW_LIP_TOP, minZ: 0.5 - CURB_THICKNESS, maxZ: 0.5 } }),
+  [SHAPE_IDS.CURB_CORNER_LOW]: makeBoxShape({ id: SHAPE_IDS.CURB_CORNER_LOW, key: "curb-corner-low", name: "Curb - Corner (Low)", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: 0.5 - CURB_THICKNESS, maxX: 0.5, minY: -0.5, maxY: CURB_LOW_LIP_TOP, minZ: 0.5 - CURB_THICKNESS, maxZ: 0.5 } }),
   [SHAPE_IDS.TERRACE_LEDGE]: { id: SHAPE_IDS.TERRACE_LEDGE, key: "terrace-ledge", name: "Terrace Ledge", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: (rotation, state) => terraceLedgeFaces(rotation, state), surfaceAt: (x, z, rotation, state) => flatSurface(rotateLocal(x, z, rotation).z < 0 ? terraceLedgeLowHeight(state) : 0.5, false, true) },
 } satisfies Record<ShapeId, ShapeDefinition>;
 

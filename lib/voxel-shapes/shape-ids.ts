@@ -76,16 +76,28 @@ export const SHAPE_IDS = {
   INSET_TRAIL_EDGE: 75,
   INSET_TRAIL_OUTER_CORNER: 76,
   INSET_TRAIL_INNER_CORNER: 77,
-  // Curb line set: the same tileable Center/Edge/Outer Corner/Inner Corner
-  // structure as INSET_TRAIL_*, but the low side sits exactly one Quarter
-  // Slab (0.25) below full height instead of Inset Trail's deeper 0.28 —
-  // so a curb-bounded area can be left as a visible step down, or that low
-  // area's cells can be individually replaced with Quarter Slab (top
-  // variant) to flush it back up to full height with no seam.
-  CURB_CENTER: 81,
-  CURB_EDGE: 82,
-  CURB_OUTER_CORNER: 83,
-  CURB_INNER_CORNER: 84,
+  // Curb line: a thin raised lip (Quarter Slab tall, 0.25) hugging one edge
+  // of the cell, plus a small nub for turning a corner — placed on top of
+  // otherwise-flat terrain (a Cube, a Quarter Slab platform, ...) to trace
+  // a boundary line, not a shape that replaces the floor underneath it.
+  CURB_EDGE: 81,
+  CURB_CORNER: 82,
+  // Half-height (0.125) versions of the two above, for a lower lip/step.
+  CURB_EDGE_LOW: 83,
+  CURB_CORNER_LOW: 84,
+  // Rubble/rock clusters weighted into one corner of the cell (rotate to
+  // pick which corner) instead of centered like RUBBLE_SMALL/MEDIUM, so a
+  // sharp terrain corner can be broken up into a jagged rock edge instead.
+  CORNER_RUBBLE_SMALL: 85,
+  CORNER_RUBBLE_MEDIUM: 86,
+  CORNER_RUBBLE_LARGE: 87,
+  CORNER_ROCK_OUTCROP_MEDIUM: 88,
+  CORNER_ROCK_OUTCROP_LARGE: 89,
+  // Lopsided counterparts of the three CORNER_RUBBLE_* above — reach much
+  // further along one axis than the other instead of tapering evenly.
+  CORNER_RUBBLE_SMALL_ASYMMETRICAL: 90,
+  CORNER_RUBBLE_MEDIUM_ASYMMETRICAL: 91,
+  CORNER_RUBBLE_LARGE_ASYMMETRICAL: 92,
 } as const;
 
 export type ShapeId = (typeof SHAPE_IDS)[keyof typeof SHAPE_IDS];
