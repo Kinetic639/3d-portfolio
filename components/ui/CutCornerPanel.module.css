@@ -1,0 +1,18 @@
+.wrap {
+  position: relative;
+  flex: none;
+}
+
+.panel {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--dsd-border, rgba(230, 232, 236, 0.1));
+  background: var(--dsd-panel, #1f2630);
+}
+
+.notch {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: var(--dsd-accent, #2fbfa6);
+}

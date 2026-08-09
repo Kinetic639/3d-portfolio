@@ -1,0 +1,47 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  padding: 22px;
+  color: var(--dsd-text);
+  font-family: var(--dsd-font-body), sans-serif;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--dsd-accent);
+  font-family: var(--dsd-font-display), sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 6px 0 0;
+  color: var(--dsd-text);
+  font-family: var(--dsd-font-display), sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.description {
+  margin: 10px 0 0;
+  color: var(--dsd-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  margin-top: auto;
+  padding-top: 16px;
+  color: var(--dsd-accent);
+  font-family: var(--dsd-font-display), sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}

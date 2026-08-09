@@ -1,0 +1,83 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  padding: 22px 24px;
+  font-family: var(--dsd-font-body), sans-serif;
+}
+
+.headerRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.index {
+  color: var(--dsd-accent);
+  font-family: var(--dsd-font-display), sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.title {
+  margin: 0;
+  color: var(--dsd-text);
+  font-family: var(--dsd-font-display), sans-serif;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.meta {
+  margin-top: 10px;
+}
+
+.meta p {
+  margin: 0;
+  color: var(--dsd-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 16px;
+}
+
+.dots {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--dsd-muted);
+  opacity: 0.5;
+}
+
+.dotActive {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--dsd-accent);
+}
+
+.dotGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.dotGrid span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--dsd-muted);
+  opacity: 0.4;
+}

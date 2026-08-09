@@ -176,3 +176,14 @@
   padding: 3rem 1.5rem;
   background: var(--panel);
 }
+
+.darkStage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  border-radius: var(--radius-lg);
+  padding: 3rem 1.5rem;
+  background: var(--dsd-bg);
+}

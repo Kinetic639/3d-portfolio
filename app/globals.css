@@ -33,6 +33,22 @@
   --font-mono: "Courier New", Courier, monospace;
 }
 
+/* Dark UI concept tokens — scoped to `.dsd-scope` rather than :root so this
+   in-progress redesign doesn't affect the current light experience. Best
+   estimate read off the concept art; expect a follow-up pass once exact
+   hex values are confirmed. "dsd" = dark design system. */
+.dsd-scope {
+  --dsd-bg: #0e1116;
+  --dsd-surface: #161b22;
+  --dsd-panel: #1f2630;
+  --dsd-text: #e6e8ec;
+  --dsd-muted: #a0a7b4;
+  --dsd-accent: #2fbfa6;
+  --dsd-accent-2: #f2a93b;
+  --dsd-accent-3: #e2645a;
+  --dsd-border: rgba(230, 232, 236, 0.1);
+}
+
 * {
   box-sizing: border-box;
 }

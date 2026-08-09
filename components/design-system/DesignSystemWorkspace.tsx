@@ -2,7 +2,19 @@
 
 import { Layers, Sparkles } from "lucide-react";
 import { useState } from "react";
-import { Badge, Button, Dialog, IconButton, KeyValue, Panel, TextAreaField, TextField, WelcomeHero } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Dialog,
+  HoverTooltipCard,
+  IconButton,
+  KeyValue,
+  LocationArrivalOverlay,
+  Panel,
+  TextAreaField,
+  TextField,
+  WelcomeHero,
+} from "@/components/ui";
 import styles from "./DesignSystemWorkspace.module.css";
 
 const COLOR_TOKENS: { name: string; description: string }[] = [
@@ -48,6 +60,25 @@ export default function DesignSystemWorkspace({ enabled }: { enabled: boolean })
           the tokens below.
         </p>
       </header>
+
+      <section className={styles.section} id="dark-concept">
+        <h2>Dark UI concept (in progress)</h2>
+        <p className={styles.sectionLede}>
+          1:1 recreations from the new concept art, both built on the shared <code>CutCornerPanel</code> shape
+          (rounded rect, top-right corner cut and filled with an accent triangle). Colors in <code>.dsd-scope</code>{" "}
+          are a best-effort read of the reference; exact hex values are still to be confirmed against the source
+          file.
+        </p>
+        <div className={`dsd-scope ${styles.darkStage}`}>
+          <HoverTooltipCard
+            eyebrow="Project 03"
+            title="Inventory Platform"
+            description="Warehouse inventory management system"
+            actionLabel="View project"
+          />
+          <LocationArrivalOverlay index="03" title="Projects" metaLines={["Selected work", "2023 – 2026"]} stopCount={5} activeStop={2} />
+        </div>
+      </section>
 
       <section className={styles.section} id="colors">
         <h2>Color tokens</h2>
