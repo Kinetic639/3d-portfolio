@@ -2813,7 +2813,7 @@ function ExperienceScene({
       <SurfaceTerrainChunks
         chunks={terrain.surfaceChunks}
         uniforms={uniforms}
-        visible={activeRenderMode === "surface" || (phase === "loading" && activeRenderMode !== "surface")}
+        visible={activeRenderMode === "surface" || phase === "loading"}
         warmup={phase === "loading" && activeRenderMode !== "surface"}
         neutral={editorAvailable && zoneNeutralTerrain}
         neutralColor={zoneNeutralTerrainColor}
