@@ -1,7 +1,7 @@
-import { getBlockDefinition, isRenderableBlock } from "@/lib/world/block-registry";
+import { BLOCK_IDS, getBlockDefinition, isRenderableBlock } from "@/lib/world/block-registry";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
-import { computeExpansionDelay, isLoaderOriginBlock } from "@/lib/world/reveal";
+import { computeExpansionDelay, isLoaderPlatformTopCell } from "@/lib/world/reveal";
 import { FACE_NEIGHBOUR_OFFSETS, getShapeDefinition, type FaceDirection, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
 import { SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 
@@ -85,7 +85,10 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
         const shape = getShapeDefinition(shapeId);
         const shapeFaces = shape.faces(rotation, state);
 
-        const isLoaderPlatformCell = isLoaderOriginBlock(blockId);
+        // Position-based, not block/material-based — see isLoaderPlatformTopCell.
+        // The loader platform keeps its own fixed look below regardless of
+        // whatever block or material ends up painted onto that cell.
+        const isLoaderPlatformCell = isLoaderPlatformTopCell(world, x, y, z);
 
         for (const face of shapeFaces) {
           const [dx, dy, dz] = FACE_NEIGHBOUR_OFFSETS[face.direction];
@@ -102,9 +105,13 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
 
           const worldPosition = world.gridToWorld(x, y, z);
           const vertexOffset = positions.length / 3;
-          const color = hexToRgb(getBlockDefinition(blockId).developmentColor);
+          const color = hexToRgb(
+            isLoaderPlatformCell
+              ? getBlockDefinition(BLOCK_IDS.LoaderOrigin).developmentColor
+              : getBlockDefinition(blockId).developmentColor,
+          );
           const variation = ((x * 37 + z * 17 + y * 11) % 100) / 100;
-          const revealDelay = computeExpansionDelay(blockId, x, z);
+          const revealDelay = computeExpansionDelay(world, x, y, z);
           const centerFlag = isLoaderPlatformCell ? 1 : 0;
 
           for (const corner of face.corners) {
