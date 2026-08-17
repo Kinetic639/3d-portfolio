@@ -7,6 +7,19 @@ import { SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 
 export type SurfaceMaterialFamily = "opaque" | "water";
 
+export const SURFACE_TEXTURE_KINDS = {
+  None: 0,
+  GrassTop: 1,
+  GrassSide: 2,
+  Dirt: 3,
+  Stone: 4,
+  MossyStone: 5,
+  PathDirt: 6,
+  WoodPlanks: 7,
+  Sand: 8,
+  Riverbed: 9,
+} as const;
+
 export type SurfaceFaceDirection = FaceDirection;
 
 export type SurfaceFaceMapping = {
@@ -21,6 +34,11 @@ export type SurfaceChunkMeshData = {
   materialFamily: SurfaceMaterialFamily;
   positions: Float32Array;
   normals: Float32Array;
+  uvs: Float32Array;
+  textureKinds: Float32Array;
+  textureVariants: Float32Array;
+  uvRotations: Float32Array;
+  uvMirrors: Float32Array;
   colors: Float32Array;
   variations: Float32Array;
   // Per-vertex reveal-animation data, mirroring the instanced cube-reveal
@@ -57,6 +75,11 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
   const maxGridZ = minGridZ + chunkSize - 1;
   const positions: number[] = [];
   const normals: number[] = [];
+  const uvs: number[] = [];
+  const textureKinds: number[] = [];
+  const textureVariants: number[] = [];
+  const uvRotations: number[] = [];
+  const uvMirrors: number[] = [];
   const colors: number[] = [];
   const variations: number[] = [];
   const revealDelays: number[] = [];
@@ -84,6 +107,7 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
         const state = world.getState(x, y, z);
         const shape = getShapeDefinition(shapeId);
         const shapeFaces = shape.faces(rotation, state);
+        const grassTopCovered = blockId === BLOCK_IDS.Ground && isCellTopFullyCovered(world, x, y, z);
 
         // Position-based, not block/material-based — see isLoaderPlatformTopCell.
         // The loader platform keeps its own fixed look below regardless of
@@ -111,16 +135,26 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
               : getBlockDefinition(blockId).developmentColor,
           );
           const variation = ((x * 37 + z * 17 + y * 11) % 100) / 100;
+          const textureKind = isLoaderPlatformCell
+            ? SURFACE_TEXTURE_KINDS.None
+            : getSurfaceTextureKind(blockId, face.direction, grassTopCovered);
+          const textureVariation = getTextureVariation(x, y, z, textureKind);
+          const faceUvs = buildFaceUvs(face);
           const revealDelay = computeExpansionDelay(world, x, y, z);
           const centerFlag = isLoaderPlatformCell ? 1 : 0;
 
-          for (const corner of face.corners) {
+          for (const [cornerIndex, corner] of face.corners.entries()) {
             positions.push(
               worldPosition.x + corner[0] * SURFACE_BLOCK_SIZE,
               worldPosition.y + corner[1] * SURFACE_BLOCK_SIZE,
               worldPosition.z + corner[2] * SURFACE_BLOCK_SIZE,
             );
             normals.push(...face.normal);
+            uvs.push(...faceUvs[cornerIndex]);
+            textureKinds.push(textureKind);
+            textureVariants.push(textureVariation.variant);
+            uvRotations.push(textureVariation.rotation);
+            uvMirrors.push(textureVariation.mirror);
             colors.push(...color);
             variations.push(variation);
             revealDelays.push(revealDelay);
@@ -155,6 +189,11 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
     }) ? "water" : "opaque",
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
+    uvs: new Float32Array(uvs),
+    textureKinds: new Float32Array(textureKinds),
+    textureVariants: new Float32Array(textureVariants),
+    uvRotations: new Float32Array(uvRotations),
+    uvMirrors: new Float32Array(uvMirrors),
     colors: new Float32Array(colors),
     variations: new Float32Array(variations),
     revealDelays: new Float32Array(revealDelays),
@@ -172,6 +211,98 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
     },
     buildMs: Number((now() - startedAt).toFixed(3)),
   };
+}
+
+function buildFaceUvs(face: ShapeFace): Array<[number, number]> {
+  const projected = face.corners.map(([x, y, z]) => {
+    switch (face.direction) {
+      case "px": return [-z, y] as const;
+      case "nx": return [z, y] as const;
+      case "py": return [x, -z] as const;
+      case "ny": return [x, z] as const;
+      case "pz": return [x, y] as const;
+      case "nz": return [-x, y] as const;
+    }
+  });
+  const minU = Math.min(...projected.map(([u]) => u));
+  const maxU = Math.max(...projected.map(([u]) => u));
+  const minV = Math.min(...projected.map(([, v]) => v));
+  const maxV = Math.max(...projected.map(([, v]) => v));
+  const width = maxU - minU || 1;
+  const height = maxV - minV || 1;
+
+  return projected.map(([u, v]) => [
+    (u - minU) / width,
+    (v - minV) / height,
+  ]);
+}
+
+function getSurfaceTextureKind(blockId: number, direction: SurfaceFaceDirection, grassTopCovered: boolean) {
+  if (blockId === BLOCK_IDS.Ground) {
+    if (grassTopCovered) return SURFACE_TEXTURE_KINDS.Dirt;
+    if (direction === "py") return SURFACE_TEXTURE_KINDS.GrassTop;
+    if (direction === "ny") return SURFACE_TEXTURE_KINDS.Dirt;
+    return SURFACE_TEXTURE_KINDS.GrassSide;
+  }
+
+  if (blockId === BLOCK_IDS.Path) {
+    return SURFACE_TEXTURE_KINDS.PathDirt;
+  }
+
+  if (blockId === BLOCK_IDS.Dirt) return SURFACE_TEXTURE_KINDS.Dirt;
+  if (blockId === BLOCK_IDS.PathDirt) return SURFACE_TEXTURE_KINDS.PathDirt;
+  if (blockId === BLOCK_IDS.Stone) return SURFACE_TEXTURE_KINDS.Stone;
+  if (blockId === BLOCK_IDS.MossyStone) return SURFACE_TEXTURE_KINDS.MossyStone;
+  if (blockId === BLOCK_IDS.WoodPlanks) return SURFACE_TEXTURE_KINDS.WoodPlanks;
+  if (blockId === BLOCK_IDS.Sand) return SURFACE_TEXTURE_KINDS.Sand;
+  if (blockId === BLOCK_IDS.Riverbed) return SURFACE_TEXTURE_KINDS.Riverbed;
+
+  return SURFACE_TEXTURE_KINDS.None;
+}
+
+function getTextureVariation(x: number, y: number, z: number, textureKind: number) {
+  if (textureKind === SURFACE_TEXTURE_KINDS.None) {
+    return { variant: 0, rotation: 0, mirror: 0 };
+  }
+
+  const hash = hashCoordinates(x, y, z, textureKind);
+  const variantCount = (
+    textureKind === SURFACE_TEXTURE_KINDS.GrassSide ||
+    textureKind === SURFACE_TEXTURE_KINDS.MossyStone ||
+    textureKind === SURFACE_TEXTURE_KINDS.WoodPlanks
+  ) ? 3 : 4;
+  return {
+    variant: hash % variantCount,
+    rotation: (
+      textureKind === SURFACE_TEXTURE_KINDS.GrassSide || textureKind === SURFACE_TEXTURE_KINDS.WoodPlanks
+    ) ? 0 : (hash >>> 3) % 4,
+    mirror: (hash >>> 5) % 2,
+  };
+}
+
+function hashCoordinates(x: number, y: number, z: number, salt: number) {
+  return (
+    Math.imul(x + 1, 73_856_093) ^
+    Math.imul(y + 1, 19_349_663) ^
+    Math.imul(z + 1, 83_492_791) ^
+    Math.imul(salt + 1, 2_654_435_761)
+  ) >>> 0;
+}
+
+function isCellTopFullyCovered(world: VoxelWorld, x: number, y: number, z: number) {
+  const aboveY = y + 1;
+  if (!world.isInsideWorld(x, aboveY, z)) return false;
+
+  const aboveBlock = getBlockDefinition(world.getBlock(x, aboveY, z));
+  if (!aboveBlock.renderable || !aboveBlock.solid) return false;
+
+  const aboveShape = getShapeDefinition(world.getShape(x, aboveY, z));
+  if (!aboveShape.solid || aboveShape.fluid) return false;
+
+  return aboveShape.faces(
+    world.getRotation(x, aboveY, z),
+    world.getState(x, aboveY, z),
+  ).some((face) => face.direction === "ny" && face.occlusion === "full");
 }
 
 export function buildSurfaceChunkMeshes(world: VoxelWorld) {

@@ -313,7 +313,7 @@ const SHAPE_CATEGORIES: ShapePickerCategory[] = ["all", "terrain", "transition",
 const TERRAIN_MATERIAL_OPTIONS = [
   {
     id: BLOCK_IDS.Ground,
-    displayName: "None",
+    displayName: getBlockDefinition(BLOCK_IDS.Ground).displayName,
     developmentColor: getBlockDefinition(BLOCK_IDS.Ground).developmentColor,
   },
   // Water is deliberately excluded here — it is painted as one atomic action
@@ -1944,7 +1944,7 @@ function formatCoordinate(coordinate: GridCoordinate | null) {
 }
 
 function getTerrainMaterialLabel(blockId: BlockId) {
-  return blockId === BLOCK_IDS.Ground ? "None" : getBlockDefinition(blockId).displayName;
+  return getBlockDefinition(blockId).displayName;
 }
 
 function formatPerformance(fps: number | null | undefined, frameMs: number | null | undefined) {
