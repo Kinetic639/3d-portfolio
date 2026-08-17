@@ -3,10 +3,14 @@ import { clickWorldEntryItem } from "./helpers";
 
 test("loads the center platform, expands, and enters exploration", async ({ page }) => {
   const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") {
       consoleErrors.push(message.text());
     }
+  });
+  page.on("pageerror", (error) => {
+    pageErrors.push(error.message);
   });
 
   await page.goto("/");
@@ -19,6 +23,7 @@ test("loads the center platform, expands, and enters exploration", async ({ page
   await expect(experience).toHaveAttribute("data-phase", "explore", { timeout: 6_000 });
   await expect(page.locator("canvas")).toBeVisible();
   expect(consoleErrors.filter((message) => message.includes("THREE.WebGLProgram"))).toEqual([]);
+  expect(pageErrors).toEqual([]);
 
   const metrics = await page.evaluate(() => window.__portfolioExperienceMetrics);
   expect(metrics?.logicalCells).toBe(49_152);

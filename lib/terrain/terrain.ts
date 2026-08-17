@@ -1,5 +1,5 @@
 import { createFlatVoxelWorld, type RenderChunk, type RenderableCell, type VoxelWorld } from "@/lib/world/voxel-world";
-import { getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
+import { BLOCK_IDS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import type { CellRotation, ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import { buildSurfaceChunkMeshes, type SurfaceChunkMeshData } from "./surface-mesher";
 import {
@@ -117,7 +117,14 @@ function toTerrainCell(cell: RenderableCell, index: number): TerrainCell {
     worldX: cell.worldX,
     worldY: cell.worldY,
     worldZ: cell.worldZ,
-    color: hexToRgb(getBlockDefinition(cell.blockId).developmentColor),
+    // The loader platform keeps its own fixed color regardless of whatever
+    // block/material is actually painted onto that cell — see
+    // isLoaderPlatformTopCell in lib/world/reveal.ts.
+    color: hexToRgb(
+      cell.isCenterLoaderBlock
+        ? getBlockDefinition(BLOCK_IDS.LoaderOrigin).developmentColor
+        : getBlockDefinition(cell.blockId).developmentColor,
+    ),
     expansionDelay: cell.expansionDelay,
     variation: cell.variation,
     isCenterLoaderBlock: cell.isCenterLoaderBlock,

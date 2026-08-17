@@ -15,7 +15,137 @@ describe("surface mesher", () => {
     expect(mesh.visibleQuads).toBe(6);
     expect(mesh.triangles).toBe(12);
     expect(mesh.positions).toHaveLength(6 * 4 * 3);
+    expect(mesh.uvs).toHaveLength(6 * 4 * 2);
+    expect(mesh.textureKinds).toHaveLength(6 * 4);
+    expect(mesh.textureVariants).toHaveLength(6 * 4);
+    expect(mesh.uvRotations).toHaveLength(6 * 4);
+    expect(mesh.uvMirrors).toHaveLength(6 * 4);
     expect(mesh.indices).toHaveLength(6 * 6);
+  });
+
+  it("assigns grass top, grass side, dirt bottom, and path-dirt textures", () => {
+    const world = new VoxelWorld();
+    world.setBlock(1, 1, 1, BLOCK_IDS.Ground);
+    world.setBlock(3, 1, 1, BLOCK_IDS.Path);
+
+    const mesh = buildSurfaceChunkMesh(world, 0, 0);
+    const groundIndex = world.getIndex(1, 1, 1);
+    const pathIndex = world.getIndex(3, 1, 1);
+
+    for (let faceIndex = 0; faceIndex < mesh.faceMappings.length; faceIndex += 1) {
+      const face = mesh.faceMappings[faceIndex];
+      const textureKind = mesh.textureKinds[faceIndex * 4];
+      if (face.cellIndex === pathIndex) expect(textureKind).toBe(6);
+      if (face.cellIndex !== groundIndex) continue;
+      if (face.direction === "py") expect(textureKind).toBe(1);
+      else if (face.direction === "ny") expect(textureKind).toBe(3);
+      else expect(textureKind).toBe(2);
+    }
+  });
+
+  it("maps selectable material block ids to their texture families", () => {
+    const cases = [
+      [BLOCK_IDS.Dirt, 3],
+      [BLOCK_IDS.Stone, 4],
+      [BLOCK_IDS.MossyStone, 5],
+      [BLOCK_IDS.PathDirt, 6],
+      [BLOCK_IDS.WoodPlanks, 7],
+      [BLOCK_IDS.Sand, 8],
+      [BLOCK_IDS.Riverbed, 9],
+    ] as const;
+    const world = new VoxelWorld();
+    cases.forEach(([blockId], index) => world.setBlock(index * 2 + 1, 1, 1, blockId));
+
+    const mesh = buildSurfaceChunkMesh(world, 0, 0);
+    cases.forEach(([blockId, textureKind], index) => {
+      const cellIndex = world.getIndex(index * 2 + 1, 1, 1);
+      const faceIndex = mesh.faceMappings.findIndex((face) => face.cellIndex === cellIndex);
+      expect(blockId).toBeGreaterThan(BLOCK_IDS.LoaderOrigin);
+      expect(mesh.textureKinds[faceIndex * 4]).toBe(textureKind);
+    });
+  });
+
+  it("maps the top of every grass side face to the top of the side texture", () => {
+    const world = new VoxelWorld();
+    world.setBlock(1, 1, 1, BLOCK_IDS.Ground);
+    const mesh = buildSurfaceChunkMesh(world, 0, 0);
+
+    for (let faceIndex = 0; faceIndex < mesh.faceMappings.length; faceIndex += 1) {
+      const face = mesh.faceMappings[faceIndex];
+      if (face.direction === "py" || face.direction === "ny") continue;
+
+      const vertexOffset = faceIndex * 4;
+      const faceYs = Array.from({ length: 4 }, (_, index) => mesh.positions[(vertexOffset + index) * 3 + 1]);
+      const faceVs = Array.from({ length: 4 }, (_, index) => mesh.uvs[(vertexOffset + index) * 2 + 1]);
+      const maxY = Math.max(...faceYs);
+
+      for (let index = 0; index < 4; index += 1) {
+        if (faceYs[index] === maxY) expect(faceVs[index]).toBe(1);
+      }
+    }
+  });
+
+  it("renders a covered ground block as dirt without changing its block id", () => {
+    const world = new VoxelWorld();
+    world.setBlock(1, 1, 1, BLOCK_IDS.Ground);
+    world.setBlock(1, 2, 1, BLOCK_IDS.Ground);
+    const lowerIndex = world.getIndex(1, 1, 1);
+
+    const mesh = buildSurfaceChunkMesh(world, 0, 0);
+    for (let faceIndex = 0; faceIndex < mesh.faceMappings.length; faceIndex += 1) {
+      if (mesh.faceMappings[faceIndex].cellIndex !== lowerIndex) continue;
+      expect(mesh.textureKinds[faceIndex * 4]).toBe(3);
+    }
+    expect(world.getBlock(1, 1, 1)).toBe(BLOCK_IDS.Ground);
+  });
+
+  it("keeps grass sides when the shape above does not fully cover the top", () => {
+    const world = new VoxelWorld();
+    world.setBlock(1, 1, 1, BLOCK_IDS.Ground);
+    world.setCell({ x: 1, y: 2, z: 1, blockId: BLOCK_IDS.Special, shapeId: SHAPE_IDS.RUBBLE_SMALL, rotation: ROTATIONS.NORTH, state: 0, zoneId: 0 });
+    const lowerIndex = world.getIndex(1, 1, 1);
+
+    const mesh = buildSurfaceChunkMesh(world, 0, 0);
+    const lowerSideKinds = mesh.faceMappings.flatMap((face, faceIndex) => (
+      face.cellIndex === lowerIndex && face.direction !== "py" && face.direction !== "ny"
+        ? [mesh.textureKinds[faceIndex * 4]]
+        : []
+    ));
+
+    expect(lowerSideKinds.length).toBeGreaterThan(0);
+    expect(lowerSideKinds.every((kind) => kind === 2)).toBe(true);
+  });
+
+  it("assigns deterministic texture variants and safe grass-side transforms", () => {
+    const world = createFlatVoxelWorld();
+    const first = buildSurfaceChunkMesh(world, 0, 0);
+    const second = buildSurfaceChunkMesh(world, 0, 0);
+
+    expect(first.textureVariants).toEqual(second.textureVariants);
+    expect(first.uvRotations).toEqual(second.uvRotations);
+    expect(first.uvMirrors).toEqual(second.uvMirrors);
+
+    const topVariants = new Set<number>();
+    const sideVariants = new Set<number>();
+    const topRotations = new Set<number>();
+    const sideMirrors = new Set<number>();
+    for (let faceIndex = 0; faceIndex < first.faceMappings.length; faceIndex += 1) {
+      const vertexIndex = faceIndex * 4;
+      const direction = first.faceMappings[faceIndex].direction;
+      if (direction === "py") {
+        topVariants.add(first.textureVariants[vertexIndex]);
+        topRotations.add(first.uvRotations[vertexIndex]);
+      } else if (direction !== "ny") {
+        sideVariants.add(first.textureVariants[vertexIndex]);
+        sideMirrors.add(first.uvMirrors[vertexIndex]);
+        expect(first.uvRotations[vertexIndex]).toBe(0);
+      }
+    }
+
+    expect(topVariants.size).toBeGreaterThan(1);
+    expect(sideVariants.size).toBeGreaterThan(1);
+    expect(topRotations.size).toBeGreaterThan(1);
+    expect(sideMirrors).toEqual(new Set([0, 1]));
   });
 
   it("winds every face direction outward", () => {

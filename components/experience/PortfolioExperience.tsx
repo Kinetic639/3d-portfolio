@@ -1,6 +1,6 @@
 "use client";
 
-import { Canvas, type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, type ThreeEvent, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { MapControls, Text, TransformControls } from "@react-three/drei";
 import gsap from "gsap";
 import { Compass, LockKeyhole, RotateCcw, UnlockKeyhole } from "lucide-react";
@@ -323,10 +323,19 @@ const SURFACE_VERTEX_SHADER = `
   attribute float aRevealDelay;
   attribute vec3 aCellOrigin;
   attribute float aCenterFlag;
+  attribute float aTextureKind;
+  attribute float aTextureVariant;
+  attribute float aUvRotation;
+  attribute float aUvMirror;
 
   varying vec3 vNormal;
   varying vec3 vBlockColor;
   varying float vVariation;
+  varying vec2 vUv;
+  varying float vTextureKind;
+  varying float vTextureVariant;
+  varying float vUvRotation;
+  varying float vUvMirror;
 
   float easeOutBack(float x) {
     float c1 = 1.2;
@@ -355,18 +364,75 @@ const SURFACE_VERTEX_SHADER = `
     vNormal = normalize(normalMatrix * normal);
     vBlockColor = color;
     vVariation = aVariation;
+    vUv = uv;
+    vTextureKind = aTextureKind;
+    vTextureVariant = aTextureVariant;
+    vUvRotation = aUvRotation;
+    vUvMirror = aUvMirror;
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(grownPosition, 1.0);
   }
 `;
 
 const SURFACE_FRAGMENT_SHADER = `
+  uniform sampler2D uGrassTopStrip;
+  uniform sampler2D uGrassSideStrip;
+  uniform sampler2D uDirtStrip;
+  uniform sampler2D uStoneStrip;
+  uniform sampler2D uMossyStoneStrip;
+  uniform sampler2D uPathDirtStrip;
+  uniform sampler2D uWoodPlanksStrip;
+  uniform sampler2D uSandStrip;
+  uniform sampler2D uRiverbedStrip;
+
   varying vec3 vNormal;
   varying vec3 vBlockColor;
   varying float vVariation;
+  varying vec2 vUv;
+  varying float vTextureKind;
+  varying float vTextureVariant;
+  varying float vUvRotation;
+  varying float vUvMirror;
+
+  vec2 transformUv(vec2 sourceUv) {
+    vec2 result = sourceUv;
+    if (vUvMirror > 0.5) result.x = 1.0 - result.x;
+    if (vUvRotation > 2.5) return vec2(result.y, 1.0 - result.x);
+    if (vUvRotation > 1.5) return vec2(1.0 - result.x, 1.0 - result.y);
+    if (vUvRotation > 0.5) return vec2(1.0 - result.y, result.x);
+    return result;
+  }
+
+  vec2 stripUv(vec2 sourceUv, float variant, float count) {
+    float safeU = mix(0.5 / 64.0, 1.0 - 0.5 / 64.0, sourceUv.x);
+    return vec2((variant + safeU) / count, sourceUv.y);
+  }
 
   void main() {
     vec3 base = vBlockColor;
+    vec2 sampleUv = transformUv(vUv);
+    if (vTextureKind > 0.5 && vTextureKind < 1.5) {
+      base = texture2D(uGrassTopStrip, stripUv(sampleUv, vTextureVariant, 4.0)).rgb;
+    } else if (vTextureKind < 2.5 && vTextureKind > 1.5) {
+      base = texture2D(uGrassSideStrip, stripUv(sampleUv, vTextureVariant, 3.0)).rgb;
+    } else if (vTextureKind < 3.5 && vTextureKind > 2.5) {
+      base = texture2D(uDirtStrip, stripUv(sampleUv, vTextureVariant, 4.0)).rgb;
+    } else if (vTextureKind < 4.5 && vTextureKind > 3.5) {
+      base = texture2D(uStoneStrip, stripUv(sampleUv, vTextureVariant, 4.0)).rgb;
+    } else if (vTextureKind < 5.5 && vTextureKind > 4.5) {
+      base = texture2D(uMossyStoneStrip, stripUv(sampleUv, vTextureVariant, 3.0)).rgb;
+    } else if (vTextureKind < 6.5 && vTextureKind > 5.5) {
+      base = texture2D(uPathDirtStrip, stripUv(sampleUv, vTextureVariant, 4.0)).rgb;
+    } else if (vTextureKind < 7.5 && vTextureKind > 6.5) {
+      base = texture2D(uWoodPlanksStrip, stripUv(sampleUv, vTextureVariant, 3.0)).rgb;
+    } else if (vTextureKind < 8.5 && vTextureKind > 7.5) {
+      base = texture2D(uSandStrip, stripUv(sampleUv, vTextureVariant, 4.0)).rgb;
+    } else if (vTextureKind > 8.5) {
+      base = texture2D(uRiverbedStrip, stripUv(sampleUv, vTextureVariant, 4.0)).rgb;
+    }
+    if (vTextureKind > 0.5) {
+      base *= mix(0.94, 1.06, vVariation);
+    }
     vec3 lightDirection = normalize(vec3(0.35, 0.8, 0.42));
     float light = clamp(dot(normalize(vNormal), lightDirection), 0.0, 1.0);
     vec3 color = base * (0.48 + light * 0.52);
@@ -2747,7 +2813,7 @@ function ExperienceScene({
       <SurfaceTerrainChunks
         chunks={terrain.surfaceChunks}
         uniforms={uniforms}
-        visible={activeRenderMode === "surface" || (phase === "loading" && activeRenderMode !== "surface")}
+        visible={activeRenderMode === "surface" || phase === "loading"}
         warmup={phase === "loading" && activeRenderMode !== "surface"}
         neutral={editorAvailable && zoneNeutralTerrain}
         neutralColor={zoneNeutralTerrainColor}
@@ -2973,6 +3039,61 @@ function TerrainChunks({
   );
 }
 
+const TERRAIN_TEXTURE_URLS = [
+  "/textures/terrain/grass-top.png",
+  "/textures/terrain/grass-top-02.png",
+  "/textures/terrain/grass-top-03.png",
+  "/textures/terrain/grass-top-04.png",
+  "/textures/terrain/grass-side.png",
+  "/textures/terrain/grass-side-02.png",
+  "/textures/terrain/grass-side-03.png",
+  "/textures/terrain/dirt.png",
+  "/textures/terrain/dirt-02.png",
+  "/textures/terrain/dirt-03.png",
+  "/textures/terrain/dirt-04.png",
+  "/textures/terrain/stone-01.png",
+  "/textures/terrain/stone-02.png",
+  "/textures/terrain/stone-03.png",
+  "/textures/terrain/stone-04.png",
+  "/textures/terrain/mossy-stone-01.png",
+  "/textures/terrain/mossy-stone-02.png",
+  "/textures/terrain/mossy-stone-03.png",
+  "/textures/terrain/path-dirt-01.png",
+  "/textures/terrain/path-dirt-02.png",
+  "/textures/terrain/path-dirt-03.png",
+  "/textures/terrain/path-dirt-04.png",
+  "/textures/terrain/wood-planks-01.png",
+  "/textures/terrain/wood-planks-02.png",
+  "/textures/terrain/wood-planks-03.png",
+  "/textures/terrain/sand-01.png",
+  "/textures/terrain/sand-02.png",
+  "/textures/terrain/sand-03.png",
+  "/textures/terrain/sand-04.png",
+  "/textures/terrain/riverbed-01.png",
+  "/textures/terrain/riverbed-02.png",
+  "/textures/terrain/riverbed-03.png",
+  "/textures/terrain/riverbed-04.png",
+] as const;
+
+function createTextureStrip(textures: THREE.Texture[]) {
+  const canvas = document.createElement("canvas");
+  canvas.width = textures.length * 64;
+  canvas.height = 64;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Unable to create terrain texture strip.");
+  context.imageSmoothingEnabled = false;
+  textures.forEach((texture, index) => context.drawImage(texture.image as CanvasImageSource, index * 64, 0, 64, 64));
+
+  const strip = new THREE.CanvasTexture(canvas);
+  strip.colorSpace = THREE.SRGBColorSpace;
+  strip.magFilter = THREE.NearestFilter;
+  strip.minFilter = THREE.NearestFilter;
+  strip.generateMipmaps = false;
+  strip.wrapS = THREE.ClampToEdgeWrapping;
+  strip.wrapT = THREE.ClampToEdgeWrapping;
+  return strip;
+}
+
 function SurfaceTerrainChunks({
   chunks,
   uniforms,
@@ -2992,15 +3113,45 @@ function SurfaceTerrainChunks({
   gridLinesVisible: boolean;
   gridLineColor: string;
 }) {
+  const terrainTextures = useLoader(THREE.TextureLoader, [...TERRAIN_TEXTURE_URLS]);
+  const textureStrips = useMemo(() => [
+    createTextureStrip(terrainTextures.slice(0, 4)),
+    createTextureStrip(terrainTextures.slice(4, 7)),
+    createTextureStrip(terrainTextures.slice(7, 11)),
+    createTextureStrip(terrainTextures.slice(11, 15)),
+    createTextureStrip(terrainTextures.slice(15, 18)),
+    createTextureStrip(terrainTextures.slice(18, 22)),
+    createTextureStrip(terrainTextures.slice(22, 25)),
+    createTextureStrip(terrainTextures.slice(25, 29)),
+    createTextureStrip(terrainTextures.slice(29, 33)),
+  ], [terrainTextures]);
+
+  useEffect(() => () => {
+    textureStrips.forEach((texture) => texture.dispose());
+  }, [textureStrips]);
+
+  const materialUniforms = useMemo(() => ({
+    ...uniforms,
+    uGrassTopStrip: { value: textureStrips[0] },
+    uGrassSideStrip: { value: textureStrips[1] },
+    uDirtStrip: { value: textureStrips[2] },
+    uStoneStrip: { value: textureStrips[3] },
+    uMossyStoneStrip: { value: textureStrips[4] },
+    uPathDirtStrip: { value: textureStrips[5] },
+    uWoodPlanksStrip: { value: textureStrips[6] },
+    uSandStrip: { value: textureStrips[7] },
+    uRiverbedStrip: { value: textureStrips[8] },
+  }), [textureStrips, uniforms]);
+
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
-        uniforms,
+        uniforms: materialUniforms,
         vertexShader: SURFACE_VERTEX_SHADER,
         fragmentShader: SURFACE_FRAGMENT_SHADER,
         side: THREE.FrontSide,
       }),
-    [uniforms],
+    [materialUniforms],
   );
   const neutralMaterial = useMemo(
     () =>
@@ -3034,14 +3185,14 @@ function SurfaceTerrainChunks({
   const warmupMaterial = useMemo(
     () =>
       new THREE.ShaderMaterial({
-        uniforms,
+        uniforms: materialUniforms,
         vertexShader: SURFACE_VERTEX_SHADER,
         fragmentShader: SURFACE_FRAGMENT_SHADER,
         side: THREE.FrontSide,
         colorWrite: false,
         depthWrite: false,
       }),
-    [uniforms],
+    [materialUniforms],
   );
 
   useEffect(() => {
@@ -3082,8 +3233,22 @@ function SurfaceTerrainChunkMesh({
 }) {
   const geometry = useMemo(() => {
     const nextGeometry = new THREE.BufferGeometry();
+    const vertexCount = chunk.positions.length / 3;
+    // Fast Refresh can retain chunks built before new vertex attributes were
+    // introduced. Keep those stale development objects valid until the next
+    // chunk rebuild instead of handing Three.js an undefined buffer array.
+    const uvs = chunk.uvs ?? new Float32Array(vertexCount * 2);
+    const textureKinds = chunk.textureKinds ?? new Float32Array(vertexCount);
+    const textureVariants = chunk.textureVariants ?? new Float32Array(vertexCount);
+    const uvRotations = chunk.uvRotations ?? new Float32Array(vertexCount);
+    const uvMirrors = chunk.uvMirrors ?? new Float32Array(vertexCount);
     nextGeometry.setAttribute("position", new THREE.BufferAttribute(chunk.positions, 3));
     nextGeometry.setAttribute("normal", new THREE.BufferAttribute(chunk.normals, 3));
+    nextGeometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    nextGeometry.setAttribute("aTextureKind", new THREE.BufferAttribute(textureKinds, 1));
+    nextGeometry.setAttribute("aTextureVariant", new THREE.BufferAttribute(textureVariants, 1));
+    nextGeometry.setAttribute("aUvRotation", new THREE.BufferAttribute(uvRotations, 1));
+    nextGeometry.setAttribute("aUvMirror", new THREE.BufferAttribute(uvMirrors, 1));
     nextGeometry.setAttribute("color", new THREE.BufferAttribute(chunk.colors, 3));
     nextGeometry.setAttribute("aVariation", new THREE.BufferAttribute(chunk.variations, 1));
     nextGeometry.setAttribute("aRevealDelay", new THREE.BufferAttribute(chunk.revealDelays, 1));
@@ -4621,6 +4786,7 @@ function PrefabInstancedBatch({
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const revealStartedAt = useRef<number | null>(null);
   const revealFinished = useRef(false);
+  const previousRevealState = useRef<RuntimeObjectRevealState | null>(null);
   const material = useMemo(() => new THREE.MeshBasicMaterial({ color: batch.color }), [batch.color]);
   const instanceToEntityId = useMemo(() => batch.parts.map((part) => part.entityId), [batch.parts]);
   const maximumDelay = useMemo(
@@ -4677,8 +4843,18 @@ function PrefabInstancedBatch({
     const mesh = meshRef.current;
     if (!mesh) return;
 
+    const previousState = previousRevealState.current;
+    previousRevealState.current = runtimeRevealState;
+
+    // Batch and delay objects can be regenerated during ordinary rerenders.
+    // Once a reveal is running, those changes must not reset its clock or put
+    // the instances back at their hidden scale.
+    if (runtimeRevealState === "revealing" && previousState === "revealing") {
+      return;
+    }
+
     revealStartedAt.current = null;
-    revealFinished.current = false;
+    revealFinished.current = runtimeRevealState === "complete";
 
     // Calculate culling bounds from the final authored transforms, then put
     // the instances back into their initial hidden pop positions.
@@ -5075,6 +5251,7 @@ function EditorPlacedEntity({
   const transformActive = useRef(false);
   const runtimeRevealStartedAt = useRef<number | null>(null);
   const runtimeRevealFinished = useRef(false);
+  const previousRuntimeRevealState = useRef<RuntimeObjectRevealState | null>(null);
   const [transformObject, setTransformObject] = useState<THREE.Group | null>(null);
   const setGroupRef = useCallback((node: THREE.Group | null) => {
     groupRef.current = node;
@@ -5113,8 +5290,15 @@ function EditorPlacedEntity({
 
   useLayoutEffect(() => {
     if (transformActive.current) return;
+
+    const previousState = previousRuntimeRevealState.current;
+    previousRuntimeRevealState.current = runtimeRevealState;
+    if (runtimeMode && runtimeRevealState === "revealing" && previousState === "revealing") {
+      return;
+    }
+
     runtimeRevealStartedAt.current = null;
-    runtimeRevealFinished.current = false;
+    runtimeRevealFinished.current = runtimeMode && runtimeRevealState === "complete";
 
     if (runtimeMode && runtimeRevealState === "revealing") {
       applyAuthoredTransform(sampleRuntimeObjectPop(0, runtimeRevealDelay, reducedMotion));

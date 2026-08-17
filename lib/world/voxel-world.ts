@@ -22,7 +22,7 @@ import {
   type WorldConfig,
   type WorldPosition,
 } from "./world-config";
-import { computeExpansionDelay, isLoaderOriginBlock } from "./reveal";
+import { computeExpansionDelay, isLoaderPlatformTopCell } from "./reveal";
 
 export type ChunkCoordinate = {
   chunkX: number;
@@ -539,9 +539,9 @@ export class VoxelWorld {
             worldX: worldPosition.x,
             worldY: worldPosition.y,
             worldZ: worldPosition.z,
-            expansionDelay: computeExpansionDelay(blockId, x, z),
+            expansionDelay: computeExpansionDelay(this, x, y, z),
             variation: ((x * 37 + z * 17 + y * 11) % 100) / 100,
-            isCenterLoaderBlock: isLoaderOriginBlock(blockId),
+            isCenterLoaderBlock: isLoaderPlatformTopCell(this, x, y, z),
           });
         }
       }

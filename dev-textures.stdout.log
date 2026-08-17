@@ -1,0 +1,16 @@
+Already up to date
+Done in 722ms using pnpm v11.10.0
+▲ Next.js 16.2.12 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.1.45:3000
+✓ Ready in 905ms
+Creating turbopack project { dir: 'D:\\dev\\new-portfolio', testMode: true }
+
+ GET / 200 in 1610ms (next.js: 443ms, application-code: 1167ms)
+ GET / 200 in 66ms (next.js: 6ms, application-code: 59ms)
+ GET / 200 in 80ms (next.js: 6ms, application-code: 73ms)
+ GET / 200 in 147ms (next.js: 15ms, application-code: 132ms)
+ GET / 200 in 88ms (next.js: 27ms, application-code: 61ms)
+ GET / 200 in 57ms (next.js: 10ms, application-code: 47ms)
+ GET / 200 in 116ms (next.js: 8ms, application-code: 108ms)
+[?25h

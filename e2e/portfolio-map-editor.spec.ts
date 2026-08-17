@@ -22,7 +22,25 @@ test("enables editor in development after explore", async ({ page }) => {
   await expect(editor).toBeVisible();
   await expect(editor.getByText("Map Editor")).toBeVisible();
   await expect(editor.getByRole("button", { name: "Select" })).toBeVisible();
-  await expect(editor.getByRole("button", { name: "Paint" })).toBeVisible();
+  const paintButton = editor.getByRole("button", { name: "Paint" });
+  await expect(paintButton).toBeVisible();
   await expect(editor.getByRole("button", { name: "Add Block" })).toBeVisible();
-  await expect(editor.getByLabel("Preset")).toBeVisible();
+  await paintButton.click();
+  const material = editor.getByLabel("Current material");
+  await expect(material).toBeVisible();
+  await expect(material.locator("option")).toHaveText([
+    "Grass",
+    "Path",
+    "Zone Ground",
+    "Boundary",
+    "Special / Interactive",
+    "Loader Origin",
+    "Dirt",
+    "Path Dirt",
+    "Stone",
+    "Mossy Stone",
+    "Wood Planks",
+    "Sand",
+    "Riverbed",
+  ]);
 });
