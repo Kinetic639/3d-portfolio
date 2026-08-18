@@ -6,7 +6,7 @@
 - [x] Phase 3: Build the dedicated water mesher
 - [x] Phase 4: Add the stylized water renderer
 - [x] Phase 5: Integrate liquid authoring into the editor
-- [ ] Phase 6: Add map persistence, migration, and baking
+- [x] Phase 6: Add map persistence, migration, and baking
 - [ ] Phase 7: Integrate settled water into portfolio runtime
 - [ ] Phase 8: Add entity and navigation interaction rules
 - [ ] Phase 9: Author and validate the creek, ponds, and waterfalls
@@ -573,6 +573,8 @@ An editor action should store source edits and the resulting settled fluid trans
 - Large pond operations do not freeze editor input.
 
 ## Phase 6: Add Map Persistence, Migration, And Baking
+
+**Status:** Complete. Map document v4 and map definition schema v3 persist authoritative authored sources and settings, include fingerprinted settled caches, rebuild stale caches deterministically, preserve fluid data through editor/import/export paths, and reject retired IDs or invalid source containment. Solver-generated infinite sources remain derived rather than becoming authored on save.
 
 ### Target Areas
 

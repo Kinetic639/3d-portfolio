@@ -13,6 +13,7 @@ import { DEFAULT_ROTATION, DEFAULT_SHAPE_ID, DEFAULT_STATE, type CellRotation, t
 import { EMPTY_FLUID_CELL, FLUID_FLAGS, FLUID_IDS, type FluidCell, type FluidLayerSnapshot } from "@/lib/fluids/fluid-types";
 import { canTerrainStateContainFluid } from "@/lib/fluids/fluid-containment";
 import { WaterSimulator } from "@/lib/fluids/water-simulator";
+import { DEFAULT_FLUID_SETTINGS, type FluidSettings } from "@/lib/fluids/fluid-document";
 
 export type EditorTool =
   | "select"
@@ -115,11 +116,13 @@ export class MapEditorSession {
   private hasPendingChanges = false;
   private cachedSnapshot: EditorSnapshot | null = null;
   private savedFluidLayer: FluidLayerSnapshot;
+  private fluidSettings: FluidSettings;
 
-  constructor(world = createFlatVoxelWorld(), entities: MapEntityAnchor[] = []) {
+  constructor(world = createFlatVoxelWorld(), entities: MapEntityAnchor[] = [], fluidSettings: FluidSettings = DEFAULT_FLUID_SETTINGS) {
     this.world = world;
     this.entities = entities.map(cloneEntity);
-    this.savedDocument = serializeMapDocument(this.world, this.entities);
+    this.fluidSettings = { ...fluidSettings };
+    this.savedDocument = serializeMapDocument(this.world, this.entities, this.fluidSettings);
     this.currentDocument = this.savedDocument;
     this.savedFluidLayer = this.world.cloneFluidLayer();
   }
@@ -483,8 +486,10 @@ export class MapEditorSession {
   }
 
   previewBasinFill(origin: GridCoordinate, targetY = origin.y): BasinFillPreview {
+    const surfaceOrigin = this.resolveBasinSurfaceOrigin(origin, targetY);
+    if (!surfaceOrigin) return { cells: [], leaksAtBoundary: false };
     const cells: GridCoordinate[] = [];
-    const pending: GridCoordinate[] = [{ x: origin.x, y: targetY, z: origin.z }];
+    const pending: GridCoordinate[] = [surfaceOrigin];
     const visited = new Set<string>();
     let leaksAtBoundary = false;
     for (let cursor = 0; cursor < pending.length; cursor += 1) {
@@ -495,7 +500,7 @@ export class MapEditorSession {
       if (!this.world.canContainFluid(coordinate.x, coordinate.y, coordinate.z, FLUID_IDS.Water)) continue;
       cells.push(coordinate);
       for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
-        const next = { x: coordinate.x + dx, y: targetY, z: coordinate.z + dz };
+        const next = { x: coordinate.x + dx, y: surfaceOrigin.y, z: coordinate.z + dz };
         if (!this.world.isInsideWorld(next.x, next.y, next.z)) {
           leaksAtBoundary = true;
           continue;
@@ -504,6 +509,14 @@ export class MapEditorSession {
       }
     }
     return { cells, leaksAtBoundary };
+  }
+
+  private resolveBasinSurfaceOrigin(origin: GridCoordinate, targetY: number) {
+    const requested = { x: origin.x, y: targetY, z: origin.z };
+    if (this.world.canContainFluid(requested.x, requested.y, requested.z, FLUID_IDS.Water)) return requested;
+
+    const above = { x: origin.x, y: targetY + 1, z: origin.z };
+    return this.world.canContainFluid(above.x, above.y, above.z, FLUID_IDS.Water) ? above : null;
   }
 
   fillWaterBasin(origin: GridCoordinate, targetY = origin.y, infiniteSources = true): EditorActionResult {
@@ -549,6 +562,7 @@ export class MapEditorSession {
 
     this.world = imported.world;
     this.entities = imported.entities;
+    this.fluidSettings = { ...(document.fluids?.settings ?? DEFAULT_FLUID_SETTINGS) };
     this.currentDocument = document;
     this.documentDirty = false;
     this.cachedSnapshot = null;
@@ -587,6 +601,12 @@ export class MapEditorSession {
     this.hasPendingChanges = false;
     this.cachedSnapshot = null;
     this.savedFluidLayer = this.world.cloneFluidLayer();
+  }
+
+  setInfiniteWaterSources(enabled: boolean) {
+    if (this.fluidSettings.infiniteSources === enabled) return;
+    this.fluidSettings = { ...this.fluidSettings, infiniteSources: enabled };
+    this.markDocumentDirty();
   }
 
   private applyFluidSimulationCommand(label: string, mutate: (simulator: WaterSimulator) => void, options: WaterEditOptions) {
@@ -654,7 +674,7 @@ export class MapEditorSession {
 
   private getCurrentDocument() {
     if (this.documentDirty) {
-      this.currentDocument = serializeMapDocument(this.world, this.entities);
+      this.currentDocument = serializeMapDocument(this.world, this.entities, this.fluidSettings);
       this.documentDirty = false;
     }
 
@@ -743,6 +763,7 @@ function sameCellData(left: CellData, right: CellData) {
     && left.fluid.level === right.fluid.level
     && left.fluid.source === right.fluid.source
     && left.fluid.falling === right.fluid.falling
+    && Boolean(left.fluid.authored) === Boolean(right.fluid.authored)
   );
 }
 
@@ -761,6 +782,7 @@ function fluidFromSnapshot(snapshot: FluidLayerSnapshot, index: number): FluidCe
     level: snapshot.levels[index],
     source: (snapshot.flags[index] & FLUID_FLAGS.Source) !== 0,
     falling: (snapshot.flags[index] & FLUID_FLAGS.Falling) !== 0,
+    authored: (snapshot.flags[index] & FLUID_FLAGS.Authored) !== 0,
   };
 }
 

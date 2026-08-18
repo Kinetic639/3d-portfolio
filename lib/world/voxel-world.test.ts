@@ -292,6 +292,7 @@ describe("voxel world foundation", () => {
       level: 0,
       source: true,
       falling: false,
+      authored: true,
     });
     expect(world.getBlock(4, 1, 5)).toBe(BLOCK_IDS.Air);
 

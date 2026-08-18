@@ -1123,9 +1123,9 @@ function ExperienceScene({
   const mapHistoryRef = useRef<{ undo: MapDefinition[]; redo: MapDefinition[] }>({ undo: [], redo: [] });
   const [terrain, setTerrain] = useState(initialState.terrain);
   const [zoneOverlay, setZoneOverlay] = useState(() => buildZoneOverlayMeshes(initialState.loadedMap.world));
-  const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities));
+  const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities, initialState.loadedMap.definition.fluids.settings));
   const [tool, setTool] = useState<EditorTool>("select");
-  const [infiniteWaterSources, setInfiniteWaterSources] = useState(true);
+  const [infiniteWaterSources, setInfiniteWaterSources] = useState(initialState.loadedMap.definition.fluids.settings.infiniteSources);
   const [waterSimulationPlaying, setWaterSimulationPlaying] = useState(false);
   const [waterBasinPreview, setWaterBasinPreview] = useState<BasinFillPreview | null>(null);
   const [paintBlockId, setPaintBlockId] = useState<BlockId>(BLOCK_IDS.Ground);
@@ -1463,6 +1463,7 @@ function ExperienceScene({
       ...currentMap.metadata,
       updatedAt: new Date().toISOString(),
     },
+    fluidSettings: { ...currentMap.fluids.settings, infiniteSources: infiniteWaterSources },
   });
 
   const replaceLoadedMap = (map: MapDefinition, markSaved: boolean, message: string) => {
@@ -1473,6 +1474,7 @@ function ExperienceScene({
     const nextZoneOverlay = buildZoneOverlayMeshes(editorSession.world);
 
     setCurrentMap(editableMap);
+    setInfiniteWaterSources(editableMap.fluids.settings.infiniteSources);
     mapHistoryRef.current = { undo: [], redo: [] };
     setActiveMapId(map.id);
     dispatchBrowsing({ type: "changeMap", mapId: map.id });
@@ -1893,7 +1895,7 @@ function ExperienceScene({
       const loaded = loadEditableMapState(nextMapId);
       const editableDefinition = normalizeEditableMap(loaded.definition);
 
-      const nextSession = new MapEditorSession(loaded.world, loaded.entities);
+      const nextSession = new MapEditorSession(loaded.world, loaded.entities, loaded.definition.fluids.settings);
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
       const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
       setEditorSession(nextSession);
@@ -1919,7 +1921,7 @@ function ExperienceScene({
     try {
       const loaded = loadEditableMapState(nextMapId);
       const editableDefinition = normalizeEditableMap(loaded.definition);
-      const nextSession = new MapEditorSession(loaded.world, loaded.entities);
+      const nextSession = new MapEditorSession(loaded.world, loaded.entities, loaded.definition.fluids.settings);
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
       const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
 
@@ -2558,7 +2560,10 @@ function ExperienceScene({
       onNavigationNodeTypeChange: setNavigationNodeType,
       onPlaceNavigationNode: handlePlaceNavigationNode,
       onConnectNavigationNodes: handleConnectNavigationNodes,
-      onInfiniteWaterSourcesChange: setInfiniteWaterSources,
+      onInfiniteWaterSourcesChange: (enabled) => {
+        setInfiniteWaterSources(enabled);
+        editorSession.setInfiniteWaterSources(enabled);
+      },
       onWaterSimulationPlayingChange: setWaterSimulationPlaying,
       onWaterStep: () => runWaterAction(() => editorSession.settleWater(infiniteWaterSources), "Water simulation stepped."),
       onWaterSettle: () => runWaterAction(() => editorSession.settleWater(infiniteWaterSources), "Water settled."),
@@ -2574,8 +2579,11 @@ function ExperienceScene({
         setEditorMessage({ type: preview.leaksAtBoundary ? "error" : "info", text: preview.leaksAtBoundary ? "Basin preview reaches an open boundary." : `${preview.cells.length} basin cells ready.` });
       },
       onWaterConfirmBasin: () => {
-        if (!selectedCell || !waterBasinPreview || waterBasinPreview.leaksAtBoundary) return;
-        runWaterAction(() => editorSession.fillWaterBasin(selectedCell, selectedCell.y, infiniteWaterSources), "Basin filled and settled.");
+        if (!waterBasinPreview || waterBasinPreview.cells.length === 0) return;
+        runWaterAction(
+          () => editorSession.applyWaterSources(waterBasinPreview.cells, { infiniteSources: infiniteWaterSources, settle: true }),
+          waterBasinPreview.leaksAtBoundary ? "Open basin region filled and settled." : "Basin filled and settled.",
+        );
         setWaterBasinPreview(null);
       },
       onWaterCancelBasin: () => setWaterBasinPreview(null),
@@ -2982,6 +2990,9 @@ function ExperienceScene({
     // Shader uniforms are external Three.js state; updating them here avoids React rerenders.
     // eslint-disable-next-line react-hooks/immutability
     uniforms.uTime.value = clock.elapsedTime;
+    // Once exploration begins, editor rerenders must never replay or collapse
+    // the one-shot terrain reveal.
+    if (phase === "explore") uniforms.uExpansionProgress.value = 1;
   });
 
   const soldierSurface = getTerrainSurfaceAt(editorSession.world, 36, 34);
@@ -4298,7 +4309,7 @@ function getHoveredEditorCell(
     if (cellIndex !== undefined) {
       const coordinate = world.getCoordinates(cellIndex);
       if (coordinate) {
-        if (tool === "add" || tool === "waterSource") {
+        if (tool === "add" || tool === "waterSource" || tool === "waterInspect") {
           return getAdjacentFaceCoordinate(coordinate, hit.face?.normal, world);
         }
 
@@ -4313,7 +4324,7 @@ function getHoveredEditorCell(
     if (cellIndex !== undefined) {
       const coordinate = world.getCoordinates(cellIndex);
       if (coordinate) {
-        if (tool === "add" || tool === "waterSource") {
+        if (tool === "add" || tool === "waterSource" || tool === "waterInspect") {
           return getAdjacentFaceCoordinate(coordinate, hit.face?.normal, world);
         }
 

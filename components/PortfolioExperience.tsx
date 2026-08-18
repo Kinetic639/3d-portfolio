@@ -978,7 +978,7 @@ function ExperienceScene({
   const mapHistoryRef = useRef<{ undo: MapDefinition[]; redo: MapDefinition[] }>({ undo: [], redo: [] });
   const [terrain, setTerrain] = useState(initialState.terrain);
   const [zoneOverlay, setZoneOverlay] = useState(() => buildZoneOverlayMeshes(initialState.loadedMap.world));
-  const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities));
+  const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities, initialState.loadedMap.definition.fluids.settings));
   const [tool, setTool] = useState<EditorTool>("select");
   const [paintBlockId, setPaintBlockId] = useState<BlockId>(BLOCK_IDS.Ground);
   const [applyMaterialToAddedBlocks, setApplyMaterialToAddedBlocks] = useState(false);
@@ -1297,6 +1297,7 @@ function ExperienceScene({
       ...currentMap.metadata,
       updatedAt: new Date().toISOString(),
     },
+    fluidSettings: currentMap.fluids.settings,
   });
 
   const replaceLoadedMap = (map: MapDefinition, markSaved: boolean, message: string) => {
@@ -1661,7 +1662,7 @@ function ExperienceScene({
       const loaded = loadEditableMapState(nextMapId);
       const editableDefinition = normalizeEditableMap(loaded.definition);
 
-      const nextSession = new MapEditorSession(loaded.world, loaded.entities);
+      const nextSession = new MapEditorSession(loaded.world, loaded.entities, loaded.definition.fluids.settings);
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
       const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
       setEditorSession(nextSession);
@@ -1687,7 +1688,7 @@ function ExperienceScene({
     try {
       const loaded = loadEditableMapState(nextMapId);
       const editableDefinition = normalizeEditableMap(loaded.definition);
-      const nextSession = new MapEditorSession(loaded.world, loaded.entities);
+      const nextSession = new MapEditorSession(loaded.world, loaded.entities, loaded.definition.fluids.settings);
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
       const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
 

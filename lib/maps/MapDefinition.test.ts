@@ -88,7 +88,8 @@ describe("map definitions", () => {
     const result = validateMapDefinition(input);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.map.schemaVersion).toBe(2);
+      expect(result.map.schemaVersion).toBe(3);
+      expect(result.map.fluids).toMatchObject({ encoding: "fluid-sources-v1", sources: [] });
       expect(result.map.entities).toEqual([]);
       expect(result.map.entityGroups).toEqual([]);
       expect(result.map.navigation).toEqual({ nodes: [], edges: [], routes: [] });

@@ -32,7 +32,7 @@ export class WaterSimulator {
       if (world.fluidTypes[index] === FLUID_IDS.None) continue;
       this.managedCells.add(index);
       const coordinate = world.getCoordinates(index);
-      if (coordinate && world.getFluid(coordinate.x, coordinate.y, coordinate.z).source) this.authoredSources.add(index);
+      if (coordinate && world.getFluid(coordinate.x, coordinate.y, coordinate.z).authored) this.authoredSources.add(index);
     }
   }
 
@@ -143,7 +143,7 @@ export class WaterSimulator {
     for (const index of [...this.authoredSources, ...generatedSources].sort((a, b) => a - b)) {
       const coordinate = this.world.getCoordinates(index);
       if (!coordinate || !this.world.canContainFluid(coordinate.x, coordinate.y, coordinate.z, FLUID_IDS.Water)) continue;
-      desired.set(index, { type: FLUID_IDS.Water, level: 0, source: true, falling: false });
+      desired.set(index, { type: FLUID_IDS.Water, level: 0, source: true, falling: false, authored: this.authoredSources.has(index) });
       queue.push({ ...coordinate, level: 0, falling: false });
     }
 
@@ -197,7 +197,7 @@ function compareFluidStrength(left: FluidCell, right: FluidCell) {
 }
 
 function sameFluid(left: FluidCell, right: FluidCell) {
-  return left.type === right.type && left.level === right.level && left.source === right.source && left.falling === right.falling;
+  return left.type === right.type && left.level === right.level && left.source === right.source && left.falling === right.falling && Boolean(left.authored) === Boolean(right.authored);
 }
 
 function setsEqual(left: Set<number>, right: Set<number>) {

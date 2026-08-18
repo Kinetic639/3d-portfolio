@@ -848,7 +848,7 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
           <ActionButton icon="waterRemove" className={props.tool === "waterRemove" ? "active" : ""} onClick={() => props.onToolChange("waterRemove")}>Remove</ActionButton>
           <ActionButton icon="waterInspect" className={props.tool === "waterInspect" ? "active" : ""} onClick={() => props.onToolChange("waterInspect")}>Inspect</ActionButton>
           <ActionButton icon="fill" disabled={!props.selected} onClick={props.onWaterPreviewBasin}>Preview Basin</ActionButton>
-          <ActionButton icon="validate" disabled={props.waterBasinPreviewCellCount === 0 || props.waterBasinPreviewLeaks} onClick={props.onWaterConfirmBasin}>Confirm Fill</ActionButton>
+          <ActionButton icon="validate" disabled={props.waterBasinPreviewCellCount === 0} onClick={props.onWaterConfirmBasin}>{props.waterBasinPreviewLeaks ? "Confirm Open Fill" : "Confirm Fill"}</ActionButton>
           <ActionButton icon="clear" disabled={props.waterBasinPreviewCellCount === 0} onClick={props.onWaterCancelBasin}>Cancel Preview</ActionButton>
           {props.waterBasinPreviewCellCount > 0 ? <span className="editor-muted">{props.waterBasinPreviewCellCount} cells{props.waterBasinPreviewLeaks ? " · open boundary" : ""}</span> : null}
         </Section>

@@ -258,7 +258,7 @@ export class VoxelWorld {
 
   setFluidSource(x: number, y: number, z: number, fluidId: FluidId) {
     if (fluidId === FLUID_IDS.None) return false;
-    return this.setFluid(x, y, z, { type: fluidId, level: 0, source: true, falling: false });
+    return this.setFluid(x, y, z, { type: fluidId, level: 0, source: true, falling: false, authored: true });
   }
 
   clearFluid(x: number, y: number, z: number) {
@@ -824,7 +824,7 @@ function validateFluidArrays(
       !isKnownFluidId(types[index]) ||
       emptyCellHasData ||
       !isValidFluidCell(cell) ||
-      flags[index] > (FLUID_FLAGS.Source | FLUID_FLAGS.Falling) ||
+      flags[index] > (FLUID_FLAGS.Source | FLUID_FLAGS.Falling | FLUID_FLAGS.Authored) ||
       invalidContainment
     ) {
       throw new RangeError(`Invalid fluid state at cell index ${index}.`);

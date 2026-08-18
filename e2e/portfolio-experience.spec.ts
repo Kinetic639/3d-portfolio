@@ -55,5 +55,6 @@ test("opens the liquid authoring workspace with simulation controls", async ({ p
   await expect(page.getByRole("button", { name: "Preview Basin" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Settle" })).toBeVisible();
   await expect(page.getByText("Infinite sources", { exact: true })).toBeVisible();
+
   expect(pageErrors).toEqual([]);
 });

@@ -12,10 +12,20 @@ import {
   type CellRotation,
   type ShapeId,
 } from "@/lib/voxel-shapes/shape-ids";
+import {
+  DEFAULT_FLUID_SETTINGS,
+  loadFluidDocument,
+  serializeFluidDocument,
+  validateFluidDocument,
+  type FluidDocument,
+  type FluidLoadResult,
+  type FluidSettings,
+} from "@/lib/fluids/fluid-document";
 
 export const MAP_DOCUMENT_VERSION = 1;
 export const MAP_DOCUMENT_CELL_VERSION = 2;
 export const MAP_DOCUMENT_ZONE_VERSION = 3;
+export const MAP_DOCUMENT_FLUID_VERSION = 4;
 export const MAP_DOCUMENT_FILENAME = "portfolio-map.v1.json";
 
 export type MapEntityAnchor = {
@@ -40,7 +50,7 @@ export type MapZoneAssignment = Pick<GridCoordinate, "x" | "z"> & {
 };
 
 export type MapDocument = {
-  version: 1 | 2 | 3;
+  version: 1 | 2 | 3 | 4;
   world: {
     width: 64;
     depth: 64;
@@ -54,6 +64,7 @@ export type MapDocument = {
   edits: MapBlockEdit[];
   zones: MapZoneAssignment[];
   entities: MapEntityAnchor[];
+  fluids?: FluidDocument;
 };
 
 export type MapDocumentResult =
@@ -63,9 +74,10 @@ export type MapDocumentResult =
 export type ImportedMapState = {
   world: VoxelWorld;
   entities: MapEntityAnchor[];
+  fluidLoad: FluidLoadResult;
 };
 
-export function serializeMapDocument(world: VoxelWorld, entities: MapEntityAnchor[]): MapDocument {
+export function serializeMapDocument(world: VoxelWorld, entities: MapEntityAnchor[], fluidSettings: FluidSettings = DEFAULT_FLUID_SETTINGS): MapDocument {
   incrementEditorPerfCounter("mapSerializations");
   const baseWorld = createFlatVoxelWorld();
   const edits: MapBlockEdit[] = [];
@@ -110,7 +122,7 @@ export function serializeMapDocument(world: VoxelWorld, entities: MapEntityAncho
   zones.sort(compareZoneAssignments);
 
   return {
-    version: MAP_DOCUMENT_ZONE_VERSION,
+    version: MAP_DOCUMENT_FLUID_VERSION,
     cellEncoding: "cell-edits-v2",
     zoneEncoding: "column-zones-v2",
     world: {
@@ -124,6 +136,7 @@ export function serializeMapDocument(world: VoxelWorld, entities: MapEntityAncho
     edits,
     zones,
     entities: [...entities].sort((a, b) => a.id.localeCompare(b.id)).map(cloneEntity),
+    fluids: serializeFluidDocument(world, fluidSettings),
   };
 }
 
@@ -132,7 +145,7 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
     return { ok: false, error: "Map document must be a JSON object." };
   }
 
-  if (input.version !== MAP_DOCUMENT_VERSION && input.version !== MAP_DOCUMENT_CELL_VERSION && input.version !== MAP_DOCUMENT_ZONE_VERSION) {
+  if (input.version !== MAP_DOCUMENT_VERSION && input.version !== MAP_DOCUMENT_CELL_VERSION && input.version !== MAP_DOCUMENT_ZONE_VERSION && input.version !== MAP_DOCUMENT_FLUID_VERSION) {
     return { ok: false, error: `Unsupported map document version: ${String(input.version)}.` };
   }
 
@@ -165,13 +178,28 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
   if (!entities.ok) {
     return entities;
   }
+  const fluids = input.version === MAP_DOCUMENT_FLUID_VERSION
+    ? validateFluidDocument(input.fluids)
+    : { ok: true as const, value: undefined };
+  if (!fluids.ok) return fluids;
+  if (fluids.value) {
+    const validationWorld = createFlatVoxelWorld();
+    for (const edit of edits.value) {
+      validationWorld.setCell({ ...edit, shapeId: edit.shapeId ?? DEFAULT_SHAPE_ID, rotation: edit.rotation ?? DEFAULT_ROTATION, state: edit.state ?? DEFAULT_STATE, zoneId: 0 });
+    }
+    for (const source of fluids.value.sources) {
+      if (!validationWorld.canContainFluid(source.x, source.y, source.z, source.fluidId)) {
+        return { ok: false, error: `Fluid source cannot occupy solid terrain at ${source.x},${source.y},${source.z}.` };
+      }
+    }
+  }
 
   return {
     ok: true,
     document: {
-      version: input.version === MAP_DOCUMENT_VERSION ? MAP_DOCUMENT_VERSION : input.version === MAP_DOCUMENT_CELL_VERSION ? MAP_DOCUMENT_CELL_VERSION : MAP_DOCUMENT_ZONE_VERSION,
+      version: input.version === MAP_DOCUMENT_VERSION ? MAP_DOCUMENT_VERSION : input.version === MAP_DOCUMENT_CELL_VERSION ? MAP_DOCUMENT_CELL_VERSION : input.version === MAP_DOCUMENT_ZONE_VERSION ? MAP_DOCUMENT_ZONE_VERSION : MAP_DOCUMENT_FLUID_VERSION,
       cellEncoding: input.version === MAP_DOCUMENT_VERSION ? "flat-edits-v1" : "cell-edits-v2",
-      zoneEncoding: input.version === MAP_DOCUMENT_ZONE_VERSION ? "column-zones-v2" : "voxel-zones-v1",
+      zoneEncoding: input.version === MAP_DOCUMENT_ZONE_VERSION || input.version === MAP_DOCUMENT_FLUID_VERSION ? "column-zones-v2" : "voxel-zones-v1",
       world: {
         width: WORLD_CONFIG.width,
         depth: WORLD_CONFIG.depth,
@@ -183,6 +211,7 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
       edits: edits.value.sort(compareCoordinates),
       zones: zones.value.sort(compareZoneAssignments),
       entities: entities.value.sort((a, b) => a.id.localeCompare(b.id)),
+      ...(fluids.value ? { fluids: fluids.value } : {}),
     },
   };
 }
@@ -207,11 +236,16 @@ export function createMapStateFromDocument(document: MapDocument): ImportedMapSt
     world.setColumnZone(zone.x, zone.z, zone.zoneId);
   }
 
+  const fluidLoad = document.fluids
+    ? loadFluidDocument(world, document.fluids)
+    : { cacheStatus: "empty" as const, settled: true };
+
   world.clearDirtyChunks();
 
   return {
     world,
     entities: document.entities.map(cloneEntity),
+    fluidLoad,
   };
 }
 

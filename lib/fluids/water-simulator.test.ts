@@ -100,7 +100,7 @@ describe("WaterSimulator", () => {
     simulator.setSource(13, 1, 20);
     simulator.settle();
 
-    expect(world.getFluid(12, 1, 20)).toMatchObject({ type: FLUID_IDS.Water, level: 0, source: true });
+    expect(world.getFluid(12, 1, 20)).toMatchObject({ type: FLUID_IDS.Water, level: 0, source: true, authored: false });
   });
 
   it("does not create an infinite source when the option is disabled", () => {

@@ -215,6 +215,47 @@ describe("map editor session", () => {
     expect(editor.world.getStats().fluidCells).toBe(0);
   });
 
+  it("targets the containable cell above a selected solid riverbed", () => {
+    const editor = new MapEditorSession();
+    for (let z = 10; z <= 14; z += 1) {
+      for (let x = 10; x <= 14; x += 1) {
+        if (x === 10 || x === 14 || z === 10 || z === 14) editor.world.setBlock(x, 1, z, BLOCK_IDS.Stone);
+      }
+    }
+    editor.world.setBlock(12, 0, 12, BLOCK_IDS.Riverbed);
+    editor.world.clearDirtyChunks();
+
+    const preview = editor.previewBasinFill({ x: 12, y: 0, z: 12 }, 0);
+    expect(preview.leaksAtBoundary).toBe(false);
+    expect(preview.cells).toContainEqual({ x: 12, y: 1, z: 12 });
+
+    const result = editor.fillWaterBasin({ x: 12, y: 0, z: 12 }, 0, false);
+    expect(result.changed).toBe(true);
+    expect(editor.world.getFluid(12, 1, 12)).toMatchObject({ type: FLUID_IDS.Water, source: true });
+  });
+
+  it("fills downward from one waterline across a variable-depth basin", () => {
+    const editor = new MapEditorSession();
+    for (let z = 10; z <= 14; z += 1) {
+      for (let x = 10; x <= 14; x += 1) {
+        const boundary = x === 10 || x === 14 || z === 10 || z === 14;
+        if (boundary) {
+          editor.world.setBlock(x, 1, z, BLOCK_IDS.Stone);
+          editor.world.setBlock(x, 2, z, BLOCK_IDS.Stone);
+        } else if (x !== 12 || z !== 12) {
+          editor.world.setBlock(x, 1, z, BLOCK_IDS.Riverbed);
+        }
+      }
+    }
+    editor.world.clearDirtyChunks();
+
+    const result = editor.fillWaterBasin({ x: 11, y: 1, z: 11 }, 1, false);
+    expect(result.changed).toBe(true);
+    expect(editor.world.getStats().fluidSources).toBe(9);
+    expect(editor.world.getFluid(12, 2, 12)).toMatchObject({ source: true });
+    expect(editor.world.getFluid(12, 1, 12)).toMatchObject({ type: FLUID_IDS.Water, falling: true });
+  });
+
   it("resets to the original flat world", () => {
     const editor = new MapEditorSession();
     editor.erase({ x: 4, y: 0, z: 5 });
