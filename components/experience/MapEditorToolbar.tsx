@@ -40,6 +40,10 @@ import {
   Upload,
   X,
   Replace,
+  Waves,
+  Play,
+  Pause,
+  StepForward,
   type LucideIcon,
 } from "lucide-react";
 import { createEditorCommands, findEditorCommands, type EditorCommand, type EditorIconName } from "@/lib/editor/editor-commands";
@@ -71,6 +75,7 @@ import { BLOCK_IDS, RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type Block
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
 import { getShapeDefinition, getShapePitch, getShapeStateValue, setShapePitch, TERRAIN_PALETTE_SHAPE_DEFINITIONS, type ShapeCategory } from "@/lib/voxel-shapes/shape-registry";
 import { SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
+import type { FluidCell } from "@/lib/fluids/fluid-types";
 
 export type TerrainRenderMode = "instanced" | "surface";
 export type EntityTransformMode = "translate" | "rotate";
@@ -94,6 +99,9 @@ type EditorIconKey =
   | "zone-replace"
   | "sparkles"
   | "asset-preview"
+  | "play"
+  | "pause"
+  | "step"
   | "close";
 
 export type EditorLayerId =
@@ -105,7 +113,8 @@ export type EditorLayerId =
   | "navigation"
   | "spawnPoints"
   | "cameraPresets"
-  | "developmentHelpers";
+  | "developmentHelpers"
+  | "liquid";
 
 export type EditorLayerState = {
   id: EditorLayerId;
@@ -141,6 +150,15 @@ export type EditorInspectorState = {
   selectedShapeId: ShapeId | null;
   selectedRotation: CellRotation | null;
   selectedState: number | null;
+  selectedFluid: FluidCell | null;
+  fluidCellCount: number;
+  fluidSourceCount: number;
+  fallingFluidCount: number;
+  pendingFluidUpdates: number;
+  infiniteWaterSources: boolean;
+  waterSimulationPlaying: boolean;
+  waterBasinPreviewCellCount: number;
+  waterBasinPreviewLeaks: boolean;
   selectedZoneId: number;
   selectedWorldPosition: WorldPosition | null;
   selectedChunk: { chunkX: number; chunkZ: number } | null;
@@ -246,6 +264,15 @@ export type MapEditorToolbarProps = EditorInspectorState & {
   onNavigationNodeTypeChange: (type: NavigationNodeType) => void;
   onPlaceNavigationNode: () => void;
   onConnectNavigationNodes: () => void;
+  onInfiniteWaterSourcesChange: (enabled: boolean) => void;
+  onWaterSimulationPlayingChange: (playing: boolean) => void;
+  onWaterStep: () => void;
+  onWaterSettle: () => void;
+  onWaterReset: () => void;
+  onWaterClearDerived: () => void;
+  onWaterPreviewBasin: () => void;
+  onWaterConfirmBasin: () => void;
+  onWaterCancelBasin: () => void;
   onCreateRoute: () => void;
   onLayerVisibilityChange: (id: EditorLayerId, visible: boolean) => void;
   onLayerLockChange: (id: EditorLayerId, locked: boolean) => void;
@@ -268,6 +295,7 @@ export type EditorViewportLayoutState = {
 const WORKSPACES: Array<{ id: EditorWorkspace; label: string }> = [
   { id: "map", label: "Map" },
   { id: "terrain", label: "Terrain" },
+  { id: "liquid", label: "Liquid" },
   { id: "objects", label: "Objects" },
   { id: "zones", label: "Zones" },
   { id: "navigation", label: "Navigation" },
@@ -277,6 +305,7 @@ const WORKSPACES: Array<{ id: EditorWorkspace; label: string }> = [
 const WORKSPACE_TOOLS: Record<EditorWorkspace, EditorTool[]> = {
   map: ["select", "marker"],
   terrain: ["select", "paint", "add", "erase", "raise", "lower", "flatten", "clear"],
+  liquid: ["waterSource", "waterRemove", "waterInspect"],
   objects: ["select", "entity"],
   zones: ["select"],
   navigation: ["select", "navigation"],
@@ -300,6 +329,9 @@ const TOOL_LABELS: Record<EditorTool, string> = {
   marker: "Marker",
   entity: "Place",
   navigation: "Nav Node",
+  waterSource: "Water Source",
+  waterRemove: "Remove Water",
+  waterInspect: "Inspect Water",
 };
 
 const PRIMITIVES: PrimitiveType[] = ["box", "cylinder", "sphere", "plane", "platform", "sign"];
@@ -808,6 +840,40 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
   const [prefabPreviewYaw, setPrefabPreviewYaw] = useState(0);
   const prefabPreviewDrag = useRef<{ x: number; yaw: number } | null>(null);
 
+  if (workspace === "liquid") {
+    return (
+      <Panel title="Liquid">
+        <Section title="Authoring">
+          <ActionButton icon="waterSource" className={props.tool === "waterSource" ? "active" : ""} onClick={() => props.onToolChange("waterSource")}>Source</ActionButton>
+          <ActionButton icon="waterRemove" className={props.tool === "waterRemove" ? "active" : ""} onClick={() => props.onToolChange("waterRemove")}>Remove</ActionButton>
+          <ActionButton icon="waterInspect" className={props.tool === "waterInspect" ? "active" : ""} onClick={() => props.onToolChange("waterInspect")}>Inspect</ActionButton>
+          <ActionButton icon="fill" disabled={!props.selected} onClick={props.onWaterPreviewBasin}>Preview Basin</ActionButton>
+          <ActionButton icon="validate" disabled={props.waterBasinPreviewCellCount === 0 || props.waterBasinPreviewLeaks} onClick={props.onWaterConfirmBasin}>Confirm Fill</ActionButton>
+          <ActionButton icon="clear" disabled={props.waterBasinPreviewCellCount === 0} onClick={props.onWaterCancelBasin}>Cancel Preview</ActionButton>
+          {props.waterBasinPreviewCellCount > 0 ? <span className="editor-muted">{props.waterBasinPreviewCellCount} cells{props.waterBasinPreviewLeaks ? " · open boundary" : ""}</span> : null}
+        </Section>
+        <Section title="Simulation">
+          <div className="editor-segmented-control" aria-label="Water simulation">
+            <button type="button" className={props.waterSimulationPlaying ? "active" : ""} onClick={() => props.onWaterSimulationPlayingChange(!props.waterSimulationPlaying)}><EditorIcon name={props.waterSimulationPlaying ? "pause" : "play"} /><span>{props.waterSimulationPlaying ? "Pause" : "Play"}</span></button>
+            <button type="button" onClick={props.onWaterStep}><EditorIcon name="step" /><span>Step</span></button>
+          </div>
+          <ActionButton icon="validate" onClick={props.onWaterSettle}>Settle</ActionButton>
+          <ActionButton icon="undo" onClick={props.onWaterReset}>Reset</ActionButton>
+          <ActionButton icon="clear" onClick={props.onWaterClearDerived}>Clear Flow</ActionButton>
+          <label><input type="checkbox" checked={props.infiniteWaterSources} onChange={(event) => props.onInfiniteWaterSourcesChange(event.target.checked)} /> Infinite sources</label>
+        </Section>
+        <Section title="Status">
+          <dl className="editor-mini-summary">
+            <KeyValue label="Water" value={String(props.fluidCellCount)} mono />
+            <KeyValue label="Sources" value={String(props.fluidSourceCount)} mono />
+            <KeyValue label="Falling" value={String(props.fallingFluidCount)} mono />
+            <KeyValue label="Pending" value={String(props.pendingFluidUpdates)} mono />
+          </dl>
+        </Section>
+      </Panel>
+    );
+  }
+
   if (workspace === "objects") {
     const selectPrimitive = (primitive: PrimitiveType) => {
       props.onActivePrefabChange("");
@@ -1070,6 +1136,7 @@ function Outliner({ props, query, onQueryChange }: { props: MapEditorToolbarProp
       <input aria-label="Search outliner" placeholder="Search scene" value={query} onChange={(event) => onQueryChange(event.target.value)} />
       <TreeRow label="Current Map" value={props.mapName} selected={false} />
       <TreeRow label="Terrain" value={`${props.blockEditCount} edits`} selected={Boolean(props.selected)} />
+      <TreeRow label="Liquid" value={`${props.fluidCellCount} cells`} selected={Boolean(props.selectedFluid?.type)} />
       <TreeRow label="Zones" value={`${props.zoneAssignmentCount} cells`} selected={false} />
       <TreeRow label="Markers" value={`${props.entityAnchorCount}`} selected={Boolean(props.selectedMarkerId)} />
       <TreeRow label="Entities" value={`${props.entityCount}`} selected={props.selectedEntityIds.length > 0} />
@@ -1369,6 +1436,22 @@ function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspa
     );
   }
 
+  if (workspace === "liquid") {
+    const fluid = props.selectedFluid;
+    return (
+      <Panel title="Inspector">
+        <Section title="Fluid Cell">
+          <KeyValue label="Coordinates" value={formatCoordinate(props.selected)} mono />
+          <KeyValue label="Type" value={fluid?.type ? "Water" : "None"} />
+          <KeyValue label="Level" value={fluid?.type ? String(fluid.level) : "-"} mono />
+          <KeyValue label="Source" value={fluid?.source ? "yes" : "no"} />
+          <KeyValue label="Falling" value={fluid?.falling ? "yes" : "no"} />
+          <KeyValue label="Chunk" value={props.selectedChunk ? `${props.selectedChunk.chunkX},${props.selectedChunk.chunkZ}` : "-"} mono />
+        </Section>
+      </Panel>
+    );
+  }
+
   if (props.selected && workspace !== "terrain") {
     return (
       <Panel title="Inspector">
@@ -1463,6 +1546,19 @@ function WorkspaceOverviewTab({ props, workspace }: { props: MapEditorToolbarPro
         <KeyValue label="Selected" value={formatCoordinate(props.selected)} mono />
         <KeyValue label="Dirty chunks" value={String(props.dirtyChunks)} mono />
         <KeyValue label="Last rebuilt" value={props.lastRebuiltChunks.join(", ") || "-"} mono />
+      </dl>
+    );
+  }
+
+  if (workspace === "liquid") {
+    return (
+      <dl className="editor-metrics-grid">
+        <KeyValue label="Tool" value={TOOL_LABELS[props.tool]} />
+        <KeyValue label="Water cells" value={String(props.fluidCellCount)} mono />
+        <KeyValue label="Sources" value={String(props.fluidSourceCount)} mono />
+        <KeyValue label="Falling" value={String(props.fallingFluidCount)} mono />
+        <KeyValue label="Pending" value={String(props.pendingFluidUpdates)} mono />
+        <KeyValue label="Selected" value={formatCoordinate(props.selected)} mono />
       </dl>
     );
   }
@@ -1839,6 +1935,12 @@ const EDITOR_ICONS: Record<EditorIconKey, LucideIcon> = {
   "zone-replace": Replace,
   sparkles: Sparkles,
   "asset-preview": Eye,
+  waterSource: Waves,
+  waterRemove: Eraser,
+  waterInspect: Eye,
+  play: Play,
+  pause: Pause,
+  step: StepForward,
 };
 
 function EditorIcon({ name }: { name: EditorIconKey }) {
@@ -1875,6 +1977,7 @@ function bottomTabIcon(tab: BottomDockTab): EditorIconKey {
 function bottomTabsForWorkspace(workspace: EditorWorkspace): BottomDockTab[] {
   if (workspace === "review") return ["validation", "performance", "history"];
   if (workspace === "terrain") return ["overview", "history", "performance"];
+  if (workspace === "liquid") return ["overview", "history", "performance"];
   if (workspace === "map") return ["overview", "validation", "history"];
   if (workspace === "navigation") return ["overview", "validation"];
   if (workspace === "zones") return ["overview", "validation"];
@@ -1888,6 +1991,7 @@ function leftDockTitle(workspace: EditorWorkspace, tool: EditorTool) {
     if (tool === "raise" || tool === "lower" || tool === "flatten" || tool === "erase" || tool === "clear") return `${TOOL_LABELS[tool]} Terrain`;
     return "Terrain";
   }
+  if (workspace === "liquid") return "Liquid";
   if (workspace === "objects") return "Primitive Palette";
   if (workspace === "map") return "Map Library";
   if (workspace === "zones") return "Zones";

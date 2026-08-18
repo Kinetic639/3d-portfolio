@@ -59,6 +59,15 @@ export class WaterSimulator {
     return this.scheduler.schedule(index, this.logicalTick + delay);
   }
 
+  scheduleAllSources(delay = 0) {
+    let scheduled = 0;
+    for (const index of this.authoredSources) {
+      const coordinate = this.world.getCoordinates(index);
+      if (coordinate && this.scheduleCell(coordinate.x, coordinate.y, coordinate.z, delay)) scheduled += 1;
+    }
+    return scheduled;
+  }
+
   notifyTerrainChanged(x: number, y: number, z: number) {
     const changedIndex = this.world.getIndex(x, y, z);
     if (changedIndex !== null && !this.world.getFluid(x, y, z).source) {

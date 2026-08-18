@@ -5,7 +5,7 @@
 - [x] Phase 2: Implement the deterministic water solver
 - [x] Phase 3: Build the dedicated water mesher
 - [x] Phase 4: Add the stylized water renderer
-- [ ] Phase 5: Integrate liquid authoring into the editor
+- [x] Phase 5: Integrate liquid authoring into the editor
 - [ ] Phase 6: Add map persistence, migration, and baking
 - [ ] Phase 7: Integrate settled water into portfolio runtime
 - [ ] Phase 8: Add entity and navigation interaction rules
@@ -500,21 +500,31 @@ Waterfalls should be visually animated but geometrically static after settling:
 
 ## Phase 5: Integrate Liquid Authoring Into The Editor
 
+### Implementation Status
+
+The editor now has a dedicated Liquid workspace with source, removal, and
+inspection tools; play/pause, step, settle, reset, and clear-flow controls; an
+infinite-source toggle; fluid diagnostics; direct water-surface picking; and a
+selected-cell source/level/falling/flow overlay. Source strokes and their
+derived settled results are stored as one undoable transaction. Basin filling
+uses an explicit point preview, rejects open-boundary leaks, and requires
+confirmation before creating sources.
+
 ### Editor Mode
 
 Introduce a dedicated Liquid mode or dedicated subsection under Terrain. Water should not remain an ordinary material choice because authors place sources, not final derived flow cells.
 
 ### Core Tools
 
-- [ ] Source brush: place permanent water source cells.
-- [ ] Remove brush: remove authored sources and schedule receding.
-- [ ] Inspect tool: show source, level, falling state, and incoming direction.
-- [ ] Play/Pause control: run or suspend scheduled water ticks.
-- [ ] Step control: process one logical water tick.
-- [ ] Settle control: process until stable within a safety limit.
-- [ ] Reset control: restore fluid state from the last saved/source snapshot.
-- [ ] Clear derived flow: remove non-source water without deleting sources.
-- [ ] Infinite-source toggle: configure map behavior.
+- [x] Source brush: place permanent water source cells.
+- [x] Remove brush: remove authored sources and schedule receding.
+- [x] Inspect tool: show source, level, falling state, and incoming direction.
+- [x] Play/Pause control: run or suspend scheduled water ticks.
+- [x] Step control: process one logical water tick.
+- [x] Settle control: process until stable within a safety limit.
+- [x] Reset control: restore fluid state from the last saved/source snapshot.
+- [x] Clear derived flow: remove non-source water without deleting sources.
+- [x] Infinite-source toggle: configure map behavior.
 
 ### Basin Fill Tool
 

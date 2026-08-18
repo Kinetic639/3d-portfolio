@@ -10,8 +10,9 @@ import type { GridCoordinate } from "@/lib/world/world-config";
 import type { TerrainCellMutation } from "./terrain-brushes";
 import type { ZoneColumnChange } from "./zone-tools";
 import { DEFAULT_ROTATION, DEFAULT_SHAPE_ID, DEFAULT_STATE, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
-import { EMPTY_FLUID_CELL, type FluidCell } from "@/lib/fluids/fluid-types";
+import { EMPTY_FLUID_CELL, FLUID_FLAGS, FLUID_IDS, type FluidCell, type FluidLayerSnapshot } from "@/lib/fluids/fluid-types";
 import { canTerrainStateContainFluid } from "@/lib/fluids/fluid-containment";
+import { WaterSimulator } from "@/lib/fluids/water-simulator";
 
 export type EditorTool =
   | "select"
@@ -29,7 +30,10 @@ export type EditorTool =
   | "removeZone"
   | "marker"
   | "entity"
-  | "navigation";
+  | "navigation"
+  | "waterSource"
+  | "waterRemove"
+  | "waterInspect";
 
 export type EditorMessage = {
   type: "info" | "error";
@@ -88,6 +92,16 @@ export type EditorActionResult = {
   message?: EditorMessage;
 };
 
+export type WaterEditOptions = {
+  infiniteSources?: boolean;
+  settle?: boolean;
+};
+
+export type BasinFillPreview = {
+  cells: GridCoordinate[];
+  leaksAtBoundary: boolean;
+};
+
 const HISTORY_LIMIT = 80;
 
 export class MapEditorSession {
@@ -100,12 +114,14 @@ export class MapEditorSession {
   private documentDirty = false;
   private hasPendingChanges = false;
   private cachedSnapshot: EditorSnapshot | null = null;
+  private savedFluidLayer: FluidLayerSnapshot;
 
   constructor(world = createFlatVoxelWorld(), entities: MapEntityAnchor[] = []) {
     this.world = world;
     this.entities = entities.map(cloneEntity);
     this.savedDocument = serializeMapDocument(this.world, this.entities);
     this.currentDocument = this.savedDocument;
+    this.savedFluidLayer = this.world.cloneFluidLayer();
   }
 
   getSnapshot(): EditorSnapshot {
@@ -430,6 +446,77 @@ export class MapEditorSession {
     });
   }
 
+  applyWaterSources(coordinates: GridCoordinate[], options: WaterEditOptions = {}): EditorActionResult {
+    return this.applyFluidSimulationCommand("Place Water Source", (simulator) => {
+      coordinates.forEach((coordinate) => simulator.setSource(coordinate.x, coordinate.y, coordinate.z));
+    }, options);
+  }
+
+  removeWaterSources(coordinates: GridCoordinate[], options: WaterEditOptions = {}): EditorActionResult {
+    return this.applyFluidSimulationCommand("Remove Water Source", (simulator) => {
+      coordinates.forEach((coordinate) => simulator.removeSource(coordinate.x, coordinate.y, coordinate.z));
+    }, options);
+  }
+
+  settleWater(infiniteSources = true): EditorActionResult {
+    return this.applyFluidSimulationCommand("Settle Water", (simulator) => {
+      simulator.scheduleAllSources();
+    }, { infiniteSources, settle: true });
+  }
+
+  clearDerivedWater(): EditorActionResult {
+    const before = this.world.cloneFluidLayer();
+    const after = cloneFluidSnapshot(before);
+    for (let index = 0; index < after.types.length; index += 1) {
+      const flags = after.flags[index];
+      if (after.types[index] !== FLUID_IDS.None && (flags & FLUID_FLAGS.Source) === 0) {
+        after.types[index] = FLUID_IDS.None;
+        after.levels[index] = 0;
+        after.flags[index] = 0;
+      }
+    }
+    return this.applyFluidSnapshots("Clear Derived Water", before, after);
+  }
+
+  resetWater(): EditorActionResult {
+    return this.applyFluidSnapshots("Reset Water", this.world.cloneFluidLayer(), cloneFluidSnapshot(this.savedFluidLayer));
+  }
+
+  previewBasinFill(origin: GridCoordinate, targetY = origin.y): BasinFillPreview {
+    const cells: GridCoordinate[] = [];
+    const pending: GridCoordinate[] = [{ x: origin.x, y: targetY, z: origin.z }];
+    const visited = new Set<string>();
+    let leaksAtBoundary = false;
+    for (let cursor = 0; cursor < pending.length; cursor += 1) {
+      const coordinate = pending[cursor];
+      const key = coordinateKey(coordinate);
+      if (visited.has(key)) continue;
+      visited.add(key);
+      if (!this.world.canContainFluid(coordinate.x, coordinate.y, coordinate.z, FLUID_IDS.Water)) continue;
+      cells.push(coordinate);
+      for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+        const next = { x: coordinate.x + dx, y: targetY, z: coordinate.z + dz };
+        if (!this.world.isInsideWorld(next.x, next.y, next.z)) {
+          leaksAtBoundary = true;
+          continue;
+        }
+        if (!visited.has(coordinateKey(next))) pending.push(next);
+      }
+    }
+    return { cells, leaksAtBoundary };
+  }
+
+  fillWaterBasin(origin: GridCoordinate, targetY = origin.y, infiniteSources = true): EditorActionResult {
+    const preview = this.previewBasinFill(origin, targetY);
+    if (preview.leaksAtBoundary) {
+      return { changed: false, rebuiltChunkIds: [], rebuiltChunks: [], message: { type: "error", text: "Basin reaches an open world boundary." } };
+    }
+    if (preview.cells.length === 0) {
+      return { changed: false, rebuiltChunkIds: [], rebuiltChunks: [], message: { type: "info", text: "No containable basin cells found." } };
+    }
+    return this.applyWaterSources(preview.cells, { infiniteSources, settle: true });
+  }
+
   undo(): EditorActionResult {
     const command = this.undoStack.pop();
     if (!command) {
@@ -481,6 +568,7 @@ export class MapEditorSession {
     if (markSaved) {
       this.savedDocument = this.currentDocument;
       this.hasPendingChanges = false;
+      this.savedFluidLayer = this.world.cloneFluidLayer();
     }
 
     return result;
@@ -498,6 +586,32 @@ export class MapEditorSession {
     this.savedDocument = this.getCurrentDocument();
     this.hasPendingChanges = false;
     this.cachedSnapshot = null;
+    this.savedFluidLayer = this.world.cloneFluidLayer();
+  }
+
+  private applyFluidSimulationCommand(label: string, mutate: (simulator: WaterSimulator) => void, options: WaterEditOptions) {
+    const before = this.world.cloneFluidLayer();
+    const simulatedWorld = this.world.clone();
+    const simulator = new WaterSimulator(simulatedWorld, { infiniteSources: options.infiniteSources ?? true });
+    mutate(simulator);
+    if (options.settle ?? true) simulator.settle();
+    return this.applyFluidSnapshots(label, before, simulatedWorld.cloneFluidLayer());
+  }
+
+  private applyFluidSnapshots(label: string, before: FluidLayerSnapshot, after: FluidLayerSnapshot) {
+    const cells: CellChange[] = [];
+    for (let index = 0; index < before.types.length; index += 1) {
+      if (before.types[index] === after.types[index] && before.levels[index] === after.levels[index] && before.flags[index] === after.flags[index]) continue;
+      const coordinate = this.world.getCoordinates(index);
+      if (!coordinate) continue;
+      const base = this.captureCell(coordinate);
+      cells.push({
+        coordinate,
+        before: { ...base, fluid: fluidFromSnapshot(before, index) },
+        after: { ...base, fluid: fluidFromSnapshot(after, index) },
+      });
+    }
+    return this.applyCommand({ label, cells });
   }
 
   private applyCommand(command: EditorCommand): EditorActionResult {
@@ -555,7 +669,7 @@ export class MapEditorSession {
 
   private flushDirtyChunks(): EditorActionResult {
     const rebuiltChunks = this.world.rebuildDirtyChunks();
-    const rebuiltChunkIds = rebuiltChunks.map((chunk) => chunk.id);
+    const rebuiltChunkIds = [...new Set([...rebuiltChunks.map((chunk) => chunk.id), ...this.world.dirtyFluidChunks])];
 
     return { changed: rebuiltChunkIds.length > 0, rebuiltChunkIds, rebuiltChunks };
   }
@@ -630,6 +744,24 @@ function sameCellData(left: CellData, right: CellData) {
     && left.fluid.source === right.fluid.source
     && left.fluid.falling === right.fluid.falling
   );
+}
+
+function cloneFluidSnapshot(snapshot: FluidLayerSnapshot): FluidLayerSnapshot {
+  return {
+    types: new Uint8Array(snapshot.types),
+    levels: new Uint8Array(snapshot.levels),
+    flags: new Uint8Array(snapshot.flags),
+  };
+}
+
+function fluidFromSnapshot(snapshot: FluidLayerSnapshot, index: number): FluidCell {
+  if (snapshot.types[index] === FLUID_IDS.None) return { ...EMPTY_FLUID_CELL };
+  return {
+    type: FLUID_IDS.Water,
+    level: snapshot.levels[index],
+    source: (snapshot.flags[index] & FLUID_FLAGS.Source) !== 0,
+    falling: (snapshot.flags[index] & FLUID_FLAGS.Falling) !== 0,
+  };
 }
 
 function collectDocumentZoneChanges(before: MapDocument, after: MapDocument): ZoneChange[] {

@@ -35,3 +35,25 @@ test("loads the center platform, expands, and enters exploration", async ({ page
   expect(metrics?.calls).toBeGreaterThan(0);
   expect(metrics?.triangles).toBeGreaterThan(0);
 });
+
+test("opens the liquid authoring workspace with simulation controls", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.goto("/?editor=1");
+
+  const experience = page.locator(".experience-shell");
+  await expect(experience).toHaveAttribute("data-phase", "ready", { timeout: 10_000 });
+  await clickWorldEntryItem(page);
+  await expect(experience).toHaveAttribute("data-phase", "explore", { timeout: 6_000 });
+
+  const editor = page.getByLabel("Development map editor");
+  await expect(editor).toBeVisible();
+  await page.getByRole("tab", { name: "Liquid" }).click();
+  await expect(page.getByRole("button", { name: "Source", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Inspect", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Preview Basin" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Settle" })).toBeVisible();
+  await expect(page.getByText("Infinite sources", { exact: true })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
