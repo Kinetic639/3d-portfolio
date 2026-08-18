@@ -3,6 +3,7 @@ import { BLOCK_IDS } from "@/lib/world/block-registry";
 import { VoxelWorld, createFlatVoxelWorld } from "@/lib/world/voxel-world";
 import { WORLD_CONFIG } from "@/lib/world/world-config";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
+import { FLUID_IDS } from "@/lib/fluids/fluid-types";
 import { buildSurfaceChunkMesh } from "./surface-mesher";
 
 describe("surface mesher", () => {
@@ -276,15 +277,15 @@ describe("surface mesher", () => {
     expect(mesh.visibleQuads).toBeGreaterThan(10);
   });
 
-  it("generates water geometry without occluding adjacent solid terrain", () => {
+  it("does not treat independent fluid cells as opaque terrain geometry", () => {
     const world = new VoxelWorld();
     world.setBlock(1, 1, 1, BLOCK_IDS.Ground);
-    world.setCell({ x: 2, y: 1, z: 1, blockId: BLOCK_IDS.Water, shapeId: SHAPE_IDS.WATER, rotation: ROTATIONS.NORTH, state: 15, zoneId: 0 });
+    world.setFluidSource(2, 1, 1, FLUID_IDS.Water);
 
     const mesh = buildSurfaceChunkMesh(world, 0, 0);
 
     expect(mesh.faceMappings.some((face) => face.cellIndex === world.getIndex(1, 1, 1) && face.direction === "px")).toBe(true);
-    expect(mesh.faceMappings.some((face) => face.cellIndex === world.getIndex(2, 1, 1))).toBe(true);
+    expect(mesh.faceMappings.some((face) => face.cellIndex === world.getIndex(2, 1, 1))).toBe(false);
   });
 
   it("maps generated triangles back to the owning logical cell", () => {

@@ -5,6 +5,7 @@ import { createFlatVoxelWorld } from "@/lib/world/voxel-world";
 import { MapEditorSession } from "./map-editor";
 import { createTerrainMutations } from "./terrain-brushes";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
+import { EMPTY_FLUID_CELL, FLUID_IDS } from "@/lib/fluids/fluid-types";
 
 describe("map editor session", () => {
   it("paints only the intended logical cell", () => {
@@ -134,6 +135,127 @@ describe("map editor session", () => {
     expect(editor.getSnapshot().redoDepth).toBe(0);
   });
 
+  it("restores displaced fluid when a terrain edit is undone", () => {
+    const editor = new MapEditorSession();
+    const coordinate = { x: 4, y: 1, z: 5 };
+    editor.world.setFluidSource(coordinate.x, coordinate.y, coordinate.z, FLUID_IDS.Water);
+
+    editor.addBlock(coordinate, BLOCK_IDS.Stone);
+    expect(editor.world.getFluid(coordinate.x, coordinate.y, coordinate.z)).toEqual(EMPTY_FLUID_CELL);
+
+    editor.undo();
+    expect(editor.world.getFluid(coordinate.x, coordinate.y, coordinate.z)).toMatchObject({
+      type: FLUID_IDS.Water,
+      source: true,
+    });
+
+    editor.redo();
+    expect(editor.world.getFluid(coordinate.x, coordinate.y, coordinate.z)).toEqual(EMPTY_FLUID_CELL);
+  });
+
+  it("places settled water as one undoable editor command", () => {
+    const editor = new MapEditorSession();
+    const source = { x: 12, y: 1, z: 12 };
+
+    const result = editor.applyWaterSources([source], { infiniteSources: false });
+    expect(result.changed).toBe(true);
+    expect(editor.world.getFluid(source.x, source.y, source.z)).toMatchObject({ type: FLUID_IDS.Water, source: true });
+    expect(editor.world.getStats().fluidCells).toBeGreaterThan(1);
+    expect(editor.getSnapshot().undoDepth).toBe(1);
+
+    editor.undo();
+    expect(editor.world.getStats().fluidCells).toBe(0);
+    editor.redo();
+    expect(editor.world.getFluid(source.x, source.y, source.z).source).toBe(true);
+  });
+
+  it("removes a source and its derived flow in one command", () => {
+    const editor = new MapEditorSession();
+    const source = { x: 12, y: 1, z: 12 };
+    editor.applyWaterSources([source], { infiniteSources: false });
+
+    editor.removeWaterSources([source], { infiniteSources: false });
+    expect(editor.world.getStats().fluidCells).toBe(0);
+    editor.undo();
+    expect(editor.world.getFluid(source.x, source.y, source.z).source).toBe(true);
+  });
+
+  it("clears only derived flow and preserves authored sources", () => {
+    const editor = new MapEditorSession();
+    editor.applyWaterSources([{ x: 12, y: 1, z: 12 }], { infiniteSources: false });
+
+    editor.clearDerivedWater();
+    expect(editor.world.getStats().fluidCells).toBe(1);
+    expect(editor.world.getStats().fluidSources).toBe(1);
+  });
+
+  it("rejects basin fill when the selected waterline reaches the world boundary", () => {
+    const editor = new MapEditorSession();
+    const result = editor.fillWaterBasin({ x: 12, y: 1, z: 12 }, 1, false);
+
+    expect(result.changed).toBe(false);
+    expect(result.message?.type).toBe("error");
+    expect(editor.world.getStats().fluidCells).toBe(0);
+  });
+
+  it("fills a closed basin with sources and can reset to the saved fluid snapshot", () => {
+    const editor = new MapEditorSession();
+    for (let z = 10; z <= 14; z += 1) {
+      for (let x = 10; x <= 14; x += 1) {
+        if (x === 10 || x === 14 || z === 10 || z === 14) editor.world.setBlock(x, 1, z, BLOCK_IDS.Stone);
+      }
+    }
+    editor.world.clearDirtyChunks();
+
+    const result = editor.fillWaterBasin({ x: 12, y: 1, z: 12 }, 1, false);
+    expect(result.changed).toBe(true);
+    expect(editor.world.getStats().fluidSources).toBe(9);
+
+    editor.resetWater();
+    expect(editor.world.getStats().fluidCells).toBe(0);
+  });
+
+  it("targets the containable cell above a selected solid riverbed", () => {
+    const editor = new MapEditorSession();
+    for (let z = 10; z <= 14; z += 1) {
+      for (let x = 10; x <= 14; x += 1) {
+        if (x === 10 || x === 14 || z === 10 || z === 14) editor.world.setBlock(x, 1, z, BLOCK_IDS.Stone);
+      }
+    }
+    editor.world.setBlock(12, 0, 12, BLOCK_IDS.Riverbed);
+    editor.world.clearDirtyChunks();
+
+    const preview = editor.previewBasinFill({ x: 12, y: 0, z: 12 }, 0);
+    expect(preview.leaksAtBoundary).toBe(false);
+    expect(preview.cells).toContainEqual({ x: 12, y: 1, z: 12 });
+
+    const result = editor.fillWaterBasin({ x: 12, y: 0, z: 12 }, 0, false);
+    expect(result.changed).toBe(true);
+    expect(editor.world.getFluid(12, 1, 12)).toMatchObject({ type: FLUID_IDS.Water, source: true });
+  });
+
+  it("fills downward from one waterline across a variable-depth basin", () => {
+    const editor = new MapEditorSession();
+    for (let z = 10; z <= 14; z += 1) {
+      for (let x = 10; x <= 14; x += 1) {
+        const boundary = x === 10 || x === 14 || z === 10 || z === 14;
+        if (boundary) {
+          editor.world.setBlock(x, 1, z, BLOCK_IDS.Stone);
+          editor.world.setBlock(x, 2, z, BLOCK_IDS.Stone);
+        } else if (x !== 12 || z !== 12) {
+          editor.world.setBlock(x, 1, z, BLOCK_IDS.Riverbed);
+        }
+      }
+    }
+    editor.world.clearDirtyChunks();
+
+    const result = editor.fillWaterBasin({ x: 11, y: 1, z: 11 }, 1, false);
+    expect(result.changed).toBe(true);
+    expect(editor.world.getStats().fluidSources).toBe(9);
+    expect(editor.world.getFluid(12, 2, 12)).toMatchObject({ source: true });
+    expect(editor.world.getFluid(12, 1, 12)).toMatchObject({ type: FLUID_IDS.Water, falling: true });
+  });
+
   it("resets to the original flat world", () => {
     const editor = new MapEditorSession();
     editor.erase({ x: 4, y: 0, z: 5 });
@@ -195,7 +317,7 @@ describe("map editor session", () => {
       shapeId: SHAPE_IDS.STAIR,
       rotation: ROTATIONS.EAST,
       state: 3,
-      zoneId: 2,
+      zoneId: 0,
     });
   });
 });

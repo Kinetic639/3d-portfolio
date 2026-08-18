@@ -27,8 +27,9 @@ import {
   type MapNavigationDefinition,
   type NavigationNodeType,
 } from "./map-navigation";
+import { DEFAULT_FLUID_SETTINGS, type FluidDocument, validateFluidDocument } from "@/lib/fluids/fluid-document";
 
-export const MAP_DEFINITION_SCHEMA_VERSION = 2;
+export const MAP_DEFINITION_SCHEMA_VERSION = 3;
 
 export type MapRuntimeMode = "baked-static" | "dynamic-voxel";
 export type MapKind = "portfolio" | "interior" | "minigame" | "test" | "custom";
@@ -119,6 +120,7 @@ export type MapDefinition = {
   };
   blockSize: 1;
   blocks: SerializedBlockData;
+  fluids: FluidDocument;
   zoneAssignments: MapZoneAssignment[];
   zones: MapZoneDefinition[];
   markers: MapMarkerDefinition[];
@@ -145,6 +147,7 @@ export type LoadedMapState = {
   definition: MapDefinition;
   world: VoxelWorld;
   entities: MapEntityAnchor[];
+  fluidLoad: import("@/lib/fluids/fluid-document").FluidLoadResult;
 };
 
 export function createMapDefinitionFromWorld(input: {
@@ -165,8 +168,9 @@ export function createMapDefinitionFromWorld(input: {
   defaultCameraPresetId?: string;
   presentation?: Partial<MapPresentationConfig>;
   metadata?: MapDefinition["metadata"];
+  fluidSettings?: import("@/lib/fluids/fluid-document").FluidSettings;
 }): MapDefinition {
-  const document = serializeMapDocument(input.world, markersToEntityAnchors(input.markers));
+  const document = serializeMapDocument(input.world, markersToEntityAnchors(input.markers), input.fluidSettings);
 
   return {
     schemaVersion: MAP_DEFINITION_SCHEMA_VERSION,
@@ -186,6 +190,7 @@ export function createMapDefinitionFromWorld(input: {
       generator: "flat-v1",
       edits: document.edits,
     },
+    fluids: document.fluids!,
     zoneAssignments: document.zones,
     zones: input.zones.map(cloneZone),
     markers: input.markers.map(cloneMarker),
@@ -250,6 +255,7 @@ export function cloneMapDefinition(map: MapDefinition): MapDefinition {
     ...migrated,
     dimensions: { ...migrated.dimensions },
     blocks: { ...migrated.blocks, edits: migrated.blocks.edits.map((edit) => ({ ...edit })) },
+    fluids: cloneFluidDocument(migrated.fluids),
     zoneAssignments: migrated.zoneAssignments.map((zone) => ({ ...zone })),
     zones: migrated.zones.map(cloneZone),
     markers: migrated.markers.map(cloneMarker),
@@ -278,7 +284,7 @@ export function duplicateMapDefinition(map: MapDefinition, id: string, name: str
 
 export function mapDefinitionToDocument(map: MapDefinition): MapDocument {
   return {
-    version: map.blocks.encoding === "cell-edits-v2" ? 3 : 1,
+    version: 4,
     cellEncoding: map.blocks.encoding,
     zoneEncoding: "column-zones-v2",
     world: {
@@ -292,6 +298,7 @@ export function mapDefinitionToDocument(map: MapDefinition): MapDocument {
     edits: map.blocks.edits.map((edit) => ({ ...edit })),
     zones: map.zoneAssignments.map((zone) => ({ ...zone })),
     entities: markersToEntityAnchors(map.markers),
+    fluids: cloneFluidDocument(map.fluids),
   };
 }
 
@@ -307,6 +314,7 @@ export function createLoadedMapState(map: MapDefinition): LoadedMapState {
     definition: cloneMapDefinition(map),
     world: state.world,
     entities: state.entities,
+    fluidLoad: state.fluidLoad,
   };
 }
 
@@ -345,6 +353,8 @@ export function validateMapDefinition(input: unknown): MapDefinitionValidationRe
   } else {
     validateBlockEdits(map.blocks.edits, errors);
   }
+  const fluids = validateFluidDocument(map.fluids);
+  if (!fluids.ok) errors.push(fluids.error);
 
   const zoneIds = new Set<string>();
   const zoneNumericIds = new Set<number>();
@@ -412,6 +422,11 @@ export function migrateMapDefinition(input: MapDefinition): MapDefinition {
   return {
     ...input,
     schemaVersion: MAP_DEFINITION_SCHEMA_VERSION,
+    fluids: input.fluids ?? {
+      encoding: "fluid-sources-v1",
+      settings: { ...DEFAULT_FLUID_SETTINGS },
+      sources: [],
+    },
     entities: Array.isArray(input.entities) ? input.entities.map(clonePlacedEntity) : [],
     entityGroups: Array.isArray(input.entityGroups) ? input.entityGroups.map(cloneEntityGroup) : [],
     navigation: input.navigation ? cloneNavigationDefinition({
@@ -419,6 +434,18 @@ export function migrateMapDefinition(input: MapDefinition): MapDefinition {
       edges: Array.isArray(input.navigation.edges) ? input.navigation.edges : [],
       routes: Array.isArray(input.navigation.routes) ? input.navigation.routes : [],
     }) : createEmptyNavigationDefinition(),
+  };
+}
+
+function cloneFluidDocument(fluids: FluidDocument): FluidDocument {
+  return {
+    encoding: fluids.encoding,
+    settings: { ...fluids.settings },
+    sources: fluids.sources.map((source) => ({ ...source })),
+    ...(fluids.settledCache ? { settledCache: {
+      ...fluids.settledCache,
+      cells: fluids.settledCache.cells.map((cell) => ({ ...cell })),
+    } } : {}),
   };
 }
 

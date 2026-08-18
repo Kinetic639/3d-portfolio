@@ -5,7 +5,6 @@ export const BLOCK_IDS = {
   ZoneGround: 3,
   Boundary: 4,
   Special: 5,
-  Water: 6,
   LoaderOrigin: 7,
   Dirt: 8,
   PathDirt: 9,
@@ -75,14 +74,6 @@ export const BLOCK_REGISTRY = {
     renderable: true,
     solid: true,
     developmentColor: "#86735c",
-  },
-  [BLOCK_IDS.Water]: {
-    id: BLOCK_IDS.Water,
-    key: "water",
-    displayName: "Water",
-    renderable: true,
-    solid: false,
-    developmentColor: "#5f9fb8",
   },
   [BLOCK_IDS.LoaderOrigin]: {
     id: BLOCK_IDS.LoaderOrigin,

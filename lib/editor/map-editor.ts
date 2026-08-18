@@ -10,6 +10,10 @@ import type { GridCoordinate } from "@/lib/world/world-config";
 import type { TerrainCellMutation } from "./terrain-brushes";
 import type { ZoneColumnChange } from "./zone-tools";
 import { DEFAULT_ROTATION, DEFAULT_SHAPE_ID, DEFAULT_STATE, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
+import { EMPTY_FLUID_CELL, FLUID_FLAGS, FLUID_IDS, type FluidCell, type FluidLayerSnapshot } from "@/lib/fluids/fluid-types";
+import { canTerrainStateContainFluid } from "@/lib/fluids/fluid-containment";
+import { WaterSimulator } from "@/lib/fluids/water-simulator";
+import { DEFAULT_FLUID_SETTINGS, type FluidSettings } from "@/lib/fluids/fluid-document";
 
 export type EditorTool =
   | "select"
@@ -27,7 +31,10 @@ export type EditorTool =
   | "removeZone"
   | "marker"
   | "entity"
-  | "navigation";
+  | "navigation"
+  | "waterSource"
+  | "waterRemove"
+  | "waterInspect";
 
 export type EditorMessage = {
   type: "info" | "error";
@@ -58,6 +65,7 @@ type CellData = {
   rotation: CellRotation;
   state: number;
   zoneId: number;
+  fluid: FluidCell;
 };
 
 type ZoneChange = {
@@ -85,6 +93,16 @@ export type EditorActionResult = {
   message?: EditorMessage;
 };
 
+export type WaterEditOptions = {
+  infiniteSources?: boolean;
+  settle?: boolean;
+};
+
+export type BasinFillPreview = {
+  cells: GridCoordinate[];
+  leaksAtBoundary: boolean;
+};
+
 const HISTORY_LIMIT = 80;
 
 export class MapEditorSession {
@@ -97,12 +115,16 @@ export class MapEditorSession {
   private documentDirty = false;
   private hasPendingChanges = false;
   private cachedSnapshot: EditorSnapshot | null = null;
+  private savedFluidLayer: FluidLayerSnapshot;
+  private fluidSettings: FluidSettings;
 
-  constructor(world = createFlatVoxelWorld(), entities: MapEntityAnchor[] = []) {
+  constructor(world = createFlatVoxelWorld(), entities: MapEntityAnchor[] = [], fluidSettings: FluidSettings = DEFAULT_FLUID_SETTINGS) {
     this.world = world;
     this.entities = entities.map(cloneEntity);
-    this.savedDocument = serializeMapDocument(this.world, this.entities);
+    this.fluidSettings = { ...fluidSettings };
+    this.savedDocument = serializeMapDocument(this.world, this.entities, this.fluidSettings);
     this.currentDocument = this.savedDocument;
+    this.savedFluidLayer = this.world.cloneFluidLayer();
   }
 
   getSnapshot(): EditorSnapshot {
@@ -204,7 +226,7 @@ export class MapEditorSession {
       cells: [{
         coordinate,
         before: this.captureCell(coordinate),
-        after: { blockId, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getZone(coordinate.x, coordinate.y, coordinate.z) },
+        after: { blockId, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getZone(coordinate.x, coordinate.y, coordinate.z), fluid: { ...EMPTY_FLUID_CELL } },
       }],
     });
   }
@@ -215,7 +237,7 @@ export class MapEditorSession {
       cells: [{
         coordinate,
         before: this.captureCell(coordinate),
-        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(coordinate.x, coordinate.z) },
+        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(coordinate.x, coordinate.z), fluid: this.world.getFluid(coordinate.x, coordinate.y, coordinate.z) },
       }],
     });
   }
@@ -242,7 +264,7 @@ export class MapEditorSession {
       cells: [{
         coordinate: target,
         before: this.captureCell(target),
-        after: { blockId, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getZone(target.x, target.y, target.z) },
+        after: { blockId, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getZone(target.x, target.y, target.z), fluid: { ...EMPTY_FLUID_CELL } },
       }],
     });
   }
@@ -270,7 +292,7 @@ export class MapEditorSession {
       cells: [{
         coordinate: target,
         before: this.captureCell(target),
-        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(target.x, target.z) },
+        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(target.x, target.z), fluid: this.world.getFluid(target.x, target.y, target.z) },
       }],
     });
   }
@@ -284,7 +306,7 @@ export class MapEditorSession {
       const before = this.captureCell(cellCoordinate);
       const afterBlock = y <= coordinate.y ? targetBlock : BLOCK_IDS.Air;
       const after = afterBlock === BLOCK_IDS.Air
-        ? { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(cellCoordinate.x, cellCoordinate.z) }
+        ? { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(cellCoordinate.x, cellCoordinate.z), fluid: before.fluid }
         : { ...before, blockId: afterBlock };
       cells.push({ coordinate: cellCoordinate, before, after });
     }
@@ -326,6 +348,7 @@ export class MapEditorSession {
             rotation: mutation.beforeRotation,
             state: mutation.beforeState,
             zoneId: mutation.beforeZone,
+            fluid: this.world.getFluid(mutation.coordinate.x, mutation.coordinate.y, mutation.coordinate.z),
           },
           after: {
             blockId: mutation.afterBlock,
@@ -333,6 +356,9 @@ export class MapEditorSession {
             rotation: mutation.afterRotation,
             state: mutation.afterState,
             zoneId: mutation.afterZone,
+            fluid: canTerrainStateContainFluid(mutation.afterBlock, mutation.afterShape, this.world.getFluid(mutation.coordinate.x, mutation.coordinate.y, mutation.coordinate.z).type)
+              ? this.world.getFluid(mutation.coordinate.x, mutation.coordinate.y, mutation.coordinate.z)
+              : { ...EMPTY_FLUID_CELL },
           },
         })),
       zones: uniqueMutations
@@ -423,6 +449,87 @@ export class MapEditorSession {
     });
   }
 
+  applyWaterSources(coordinates: GridCoordinate[], options: WaterEditOptions = {}): EditorActionResult {
+    return this.applyFluidSimulationCommand("Place Water Source", (simulator) => {
+      coordinates.forEach((coordinate) => simulator.setSource(coordinate.x, coordinate.y, coordinate.z));
+    }, options);
+  }
+
+  removeWaterSources(coordinates: GridCoordinate[], options: WaterEditOptions = {}): EditorActionResult {
+    return this.applyFluidSimulationCommand("Remove Water Source", (simulator) => {
+      coordinates.forEach((coordinate) => simulator.removeSource(coordinate.x, coordinate.y, coordinate.z));
+    }, options);
+  }
+
+  settleWater(infiniteSources = true): EditorActionResult {
+    return this.applyFluidSimulationCommand("Settle Water", (simulator) => {
+      simulator.scheduleAllSources();
+    }, { infiniteSources, settle: true });
+  }
+
+  clearDerivedWater(): EditorActionResult {
+    const before = this.world.cloneFluidLayer();
+    const after = cloneFluidSnapshot(before);
+    for (let index = 0; index < after.types.length; index += 1) {
+      const flags = after.flags[index];
+      if (after.types[index] !== FLUID_IDS.None && (flags & FLUID_FLAGS.Source) === 0) {
+        after.types[index] = FLUID_IDS.None;
+        after.levels[index] = 0;
+        after.flags[index] = 0;
+      }
+    }
+    return this.applyFluidSnapshots("Clear Derived Water", before, after);
+  }
+
+  resetWater(): EditorActionResult {
+    return this.applyFluidSnapshots("Reset Water", this.world.cloneFluidLayer(), cloneFluidSnapshot(this.savedFluidLayer));
+  }
+
+  previewBasinFill(origin: GridCoordinate, targetY = origin.y): BasinFillPreview {
+    const surfaceOrigin = this.resolveBasinSurfaceOrigin(origin, targetY);
+    if (!surfaceOrigin) return { cells: [], leaksAtBoundary: false };
+    const cells: GridCoordinate[] = [];
+    const pending: GridCoordinate[] = [surfaceOrigin];
+    const visited = new Set<string>();
+    let leaksAtBoundary = false;
+    for (let cursor = 0; cursor < pending.length; cursor += 1) {
+      const coordinate = pending[cursor];
+      const key = coordinateKey(coordinate);
+      if (visited.has(key)) continue;
+      visited.add(key);
+      if (!this.world.canContainFluid(coordinate.x, coordinate.y, coordinate.z, FLUID_IDS.Water)) continue;
+      cells.push(coordinate);
+      for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+        const next = { x: coordinate.x + dx, y: surfaceOrigin.y, z: coordinate.z + dz };
+        if (!this.world.isInsideWorld(next.x, next.y, next.z)) {
+          leaksAtBoundary = true;
+          continue;
+        }
+        if (!visited.has(coordinateKey(next))) pending.push(next);
+      }
+    }
+    return { cells, leaksAtBoundary };
+  }
+
+  private resolveBasinSurfaceOrigin(origin: GridCoordinate, targetY: number) {
+    const requested = { x: origin.x, y: targetY, z: origin.z };
+    if (this.world.canContainFluid(requested.x, requested.y, requested.z, FLUID_IDS.Water)) return requested;
+
+    const above = { x: origin.x, y: targetY + 1, z: origin.z };
+    return this.world.canContainFluid(above.x, above.y, above.z, FLUID_IDS.Water) ? above : null;
+  }
+
+  fillWaterBasin(origin: GridCoordinate, targetY = origin.y, infiniteSources = true): EditorActionResult {
+    const preview = this.previewBasinFill(origin, targetY);
+    if (preview.leaksAtBoundary) {
+      return { changed: false, rebuiltChunkIds: [], rebuiltChunks: [], message: { type: "error", text: "Basin reaches an open world boundary." } };
+    }
+    if (preview.cells.length === 0) {
+      return { changed: false, rebuiltChunkIds: [], rebuiltChunks: [], message: { type: "info", text: "No containable basin cells found." } };
+    }
+    return this.applyWaterSources(preview.cells, { infiniteSources, settle: true });
+  }
+
   undo(): EditorActionResult {
     const command = this.undoStack.pop();
     if (!command) {
@@ -455,6 +562,7 @@ export class MapEditorSession {
 
     this.world = imported.world;
     this.entities = imported.entities;
+    this.fluidSettings = { ...(document.fluids?.settings ?? DEFAULT_FLUID_SETTINGS) };
     this.currentDocument = document;
     this.documentDirty = false;
     this.cachedSnapshot = null;
@@ -474,6 +582,7 @@ export class MapEditorSession {
     if (markSaved) {
       this.savedDocument = this.currentDocument;
       this.hasPendingChanges = false;
+      this.savedFluidLayer = this.world.cloneFluidLayer();
     }
 
     return result;
@@ -491,6 +600,38 @@ export class MapEditorSession {
     this.savedDocument = this.getCurrentDocument();
     this.hasPendingChanges = false;
     this.cachedSnapshot = null;
+    this.savedFluidLayer = this.world.cloneFluidLayer();
+  }
+
+  setInfiniteWaterSources(enabled: boolean) {
+    if (this.fluidSettings.infiniteSources === enabled) return;
+    this.fluidSettings = { ...this.fluidSettings, infiniteSources: enabled };
+    this.markDocumentDirty();
+  }
+
+  private applyFluidSimulationCommand(label: string, mutate: (simulator: WaterSimulator) => void, options: WaterEditOptions) {
+    const before = this.world.cloneFluidLayer();
+    const simulatedWorld = this.world.clone();
+    const simulator = new WaterSimulator(simulatedWorld, { infiniteSources: options.infiniteSources ?? true });
+    mutate(simulator);
+    if (options.settle ?? true) simulator.settle();
+    return this.applyFluidSnapshots(label, before, simulatedWorld.cloneFluidLayer());
+  }
+
+  private applyFluidSnapshots(label: string, before: FluidLayerSnapshot, after: FluidLayerSnapshot) {
+    const cells: CellChange[] = [];
+    for (let index = 0; index < before.types.length; index += 1) {
+      if (before.types[index] === after.types[index] && before.levels[index] === after.levels[index] && before.flags[index] === after.flags[index]) continue;
+      const coordinate = this.world.getCoordinates(index);
+      if (!coordinate) continue;
+      const base = this.captureCell(coordinate);
+      cells.push({
+        coordinate,
+        before: { ...base, fluid: fluidFromSnapshot(before, index) },
+        after: { ...base, fluid: fluidFromSnapshot(after, index) },
+      });
+    }
+    return this.applyCommand({ label, cells });
   }
 
   private applyCommand(command: EditorCommand): EditorActionResult {
@@ -519,6 +660,7 @@ export class MapEditorSession {
         ...change.coordinate,
         ...change[side],
       });
+      this.world.setFluid(change.coordinate.x, change.coordinate.y, change.coordinate.z, change[side].fluid);
     }
 
     for (const change of command.zones ?? []) {
@@ -532,7 +674,7 @@ export class MapEditorSession {
 
   private getCurrentDocument() {
     if (this.documentDirty) {
-      this.currentDocument = serializeMapDocument(this.world, this.entities);
+      this.currentDocument = serializeMapDocument(this.world, this.entities, this.fluidSettings);
       this.documentDirty = false;
     }
 
@@ -547,7 +689,7 @@ export class MapEditorSession {
 
   private flushDirtyChunks(): EditorActionResult {
     const rebuiltChunks = this.world.rebuildDirtyChunks();
-    const rebuiltChunkIds = rebuiltChunks.map((chunk) => chunk.id);
+    const rebuiltChunkIds = [...new Set([...rebuiltChunks.map((chunk) => chunk.id), ...this.world.dirtyFluidChunks])];
 
     return { changed: rebuiltChunkIds.length > 0, rebuiltChunkIds, rebuiltChunks };
   }
@@ -559,6 +701,7 @@ export class MapEditorSession {
       rotation: this.world.getRotation(coordinate.x, coordinate.y, coordinate.z),
       state: this.world.getState(coordinate.x, coordinate.y, coordinate.z),
       zoneId: this.world.getZone(coordinate.x, coordinate.y, coordinate.z),
+      fluid: this.world.getFluid(coordinate.x, coordinate.y, coordinate.z),
     };
   }
 
@@ -584,6 +727,7 @@ function collectDocumentCellChanges(before: MapDocument, after: MapDocument): Ce
       rotation: baseWorld.getRotation(coordinate.x, coordinate.y, coordinate.z),
       state: baseWorld.getState(coordinate.x, coordinate.y, coordinate.z),
       zoneId: 0,
+      fluid: { ...EMPTY_FLUID_CELL },
     };
     const beforeEdit = beforeMap.get(key);
     const afterEdit = afterMap.get(key);
@@ -604,6 +748,7 @@ function editToCellData(edit: MapDocument["edits"][number], fallback: CellData):
     rotation: edit.rotation ?? fallback.rotation,
     state: edit.state ?? fallback.state,
     zoneId: fallback.zoneId,
+    fluid: fallback.fluid,
   };
 }
 
@@ -614,7 +759,31 @@ function sameCellData(left: CellData, right: CellData) {
     left.rotation === right.rotation &&
     left.state === right.state &&
     left.zoneId === right.zoneId
+    && left.fluid.type === right.fluid.type
+    && left.fluid.level === right.fluid.level
+    && left.fluid.source === right.fluid.source
+    && left.fluid.falling === right.fluid.falling
+    && Boolean(left.fluid.authored) === Boolean(right.fluid.authored)
   );
+}
+
+function cloneFluidSnapshot(snapshot: FluidLayerSnapshot): FluidLayerSnapshot {
+  return {
+    types: new Uint8Array(snapshot.types),
+    levels: new Uint8Array(snapshot.levels),
+    flags: new Uint8Array(snapshot.flags),
+  };
+}
+
+function fluidFromSnapshot(snapshot: FluidLayerSnapshot, index: number): FluidCell {
+  if (snapshot.types[index] === FLUID_IDS.None) return { ...EMPTY_FLUID_CELL };
+  return {
+    type: FLUID_IDS.Water,
+    level: snapshot.levels[index],
+    source: (snapshot.flags[index] & FLUID_FLAGS.Source) !== 0,
+    falling: (snapshot.flags[index] & FLUID_FLAGS.Falling) !== 0,
+    authored: (snapshot.flags[index] & FLUID_FLAGS.Authored) !== 0,
+  };
 }
 
 function collectDocumentZoneChanges(before: MapDocument, after: MapDocument): ZoneChange[] {

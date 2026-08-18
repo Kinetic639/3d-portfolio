@@ -3,9 +3,6 @@ import type { VoxelWorld } from "@/lib/world/voxel-world";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
 import { computeExpansionDelay, isLoaderPlatformTopCell } from "@/lib/world/reveal";
 import { FACE_NEIGHBOUR_OFFSETS, getShapeDefinition, type FaceDirection, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
-import { SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
-
-export type SurfaceMaterialFamily = "opaque" | "water";
 
 export const SURFACE_TEXTURE_KINDS = {
   None: 0,
@@ -31,7 +28,6 @@ export type SurfaceChunkMeshData = {
   id: string;
   chunkX: number;
   chunkZ: number;
-  materialFamily: SurfaceMaterialFamily;
   positions: Float32Array;
   normals: Float32Array;
   uvs: Float32Array;
@@ -183,10 +179,6 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
     id: world.getChunkId(chunkX, chunkZ),
     chunkX,
     chunkZ,
-    materialFamily: positions.length > 0 && faceMappings.every((face) => {
-      const coordinate = world.getCoordinates(face.cellIndex);
-      return coordinate ? world.getShape(coordinate.x, coordinate.y, coordinate.z) === SHAPE_IDS.WATER : false;
-    }) ? "water" : "opaque",
     positions: new Float32Array(positions),
     normals: new Float32Array(normals),
     uvs: new Float32Array(uvs),

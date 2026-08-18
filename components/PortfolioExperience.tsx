@@ -131,6 +131,9 @@ const TOOL_COLORS: Record<EditorTool, string> = {
   marker: "#a855f7",
   entity: "#22c55e",
   navigation: "#60a5fa",
+  waterSource: "#22d3ee",
+  waterRemove: "#f97316",
+  waterInspect: "#67e8f9",
 };
 
 const DEFAULT_EDITOR_LAYERS: EditorLayerState[] = [
@@ -975,7 +978,7 @@ function ExperienceScene({
   const mapHistoryRef = useRef<{ undo: MapDefinition[]; redo: MapDefinition[] }>({ undo: [], redo: [] });
   const [terrain, setTerrain] = useState(initialState.terrain);
   const [zoneOverlay, setZoneOverlay] = useState(() => buildZoneOverlayMeshes(initialState.loadedMap.world));
-  const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities));
+  const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities, initialState.loadedMap.definition.fluids.settings));
   const [tool, setTool] = useState<EditorTool>("select");
   const [paintBlockId, setPaintBlockId] = useState<BlockId>(BLOCK_IDS.Ground);
   const [applyMaterialToAddedBlocks, setApplyMaterialToAddedBlocks] = useState(false);
@@ -1294,6 +1297,7 @@ function ExperienceScene({
       ...currentMap.metadata,
       updatedAt: new Date().toISOString(),
     },
+    fluidSettings: currentMap.fluids.settings,
   });
 
   const replaceLoadedMap = (map: MapDefinition, markSaved: boolean, message: string) => {
@@ -1658,7 +1662,7 @@ function ExperienceScene({
       const loaded = loadEditableMapState(nextMapId);
       const editableDefinition = normalizeEditableMap(loaded.definition);
 
-      const nextSession = new MapEditorSession(loaded.world, loaded.entities);
+      const nextSession = new MapEditorSession(loaded.world, loaded.entities, loaded.definition.fluids.settings);
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
       const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
       setEditorSession(nextSession);
@@ -1684,7 +1688,7 @@ function ExperienceScene({
     try {
       const loaded = loadEditableMapState(nextMapId);
       const editableDefinition = normalizeEditableMap(loaded.definition);
-      const nextSession = new MapEditorSession(loaded.world, loaded.entities);
+      const nextSession = new MapEditorSession(loaded.world, loaded.entities, loaded.definition.fluids.settings);
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
       const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
 
@@ -2118,6 +2122,15 @@ function ExperienceScene({
       selectedShapeId,
       selectedRotation,
       selectedState,
+      selectedFluid: selectedCell ? editorSession.world.getFluid(selectedCell.x, selectedCell.y, selectedCell.z) : null,
+      fluidCellCount: editorSession.world.getStats().fluidCells,
+      fluidSourceCount: editorSession.world.getStats().fluidSources,
+      fallingFluidCount: editorSession.world.getStats().fallingFluidCells,
+      pendingFluidUpdates: 0,
+      infiniteWaterSources: true,
+      waterSimulationPlaying: false,
+      waterBasinPreviewCellCount: 0,
+      waterBasinPreviewLeaks: false,
       selectedZoneId,
       selectedWorldPosition,
       selectedChunk,
@@ -2160,9 +2173,7 @@ function ExperienceScene({
         setActiveShapeCategory(category);
         const nextShape = getShapeDefinition(activeShapeId).category === category
           ? activeShapeId
-          : category === "fluid"
-            ? SHAPE_IDS.WATER
-            : category === "transition"
+          : category === "transition"
               ? SHAPE_IDS.STAIR
               : category === "structure"
                 ? SHAPE_IDS.WALL
@@ -2171,14 +2182,12 @@ function ExperienceScene({
                   : SHAPE_IDS.CUBE;
         setActiveShapeId(nextShape);
         setActiveShapeState(DEFAULT_STATE);
-        if (nextShape === SHAPE_IDS.WATER) setPaintBlockId(BLOCK_IDS.Water);
       },
       onShapeChange: (shapeId) => {
         const shape = getShapeDefinition(shapeId);
         setActiveShapeId(shape.id);
         setActiveShapeCategory(shape.category);
         setActiveShapeState(DEFAULT_STATE);
-        if (shape.id === SHAPE_IDS.WATER) setPaintBlockId(BLOCK_IDS.Water);
       },
       onCellRotationChange: setActiveRotation,
       onShapeStateChange: (state) => setActiveShapeState(Math.max(0, Math.min(255, Math.floor(state) || 0))),
@@ -2314,6 +2323,15 @@ function ExperienceScene({
       onNavigationNodeTypeChange: setNavigationNodeType,
       onPlaceNavigationNode: handlePlaceNavigationNode,
       onConnectNavigationNodes: handleConnectNavigationNodes,
+      onInfiniteWaterSourcesChange: () => undefined,
+      onWaterSimulationPlayingChange: () => undefined,
+      onWaterStep: () => undefined,
+      onWaterSettle: () => undefined,
+      onWaterReset: () => undefined,
+      onWaterClearDerived: () => undefined,
+      onWaterPreviewBasin: () => undefined,
+      onWaterConfirmBasin: () => undefined,
+      onWaterCancelBasin: () => undefined,
       onCreateRoute: handleCreateRoute,
       onLayerVisibilityChange: (id, visible) => updateLayer(id, { visible }),
       onLayerLockChange: (id, locked) => updateLayer(id, { locked }),
@@ -2954,16 +2972,6 @@ function SurfaceTerrainChunks({
       }),
     [gridLineColor],
   );
-  const waterMaterial = useMemo(
-    () =>
-      new THREE.MeshBasicMaterial({
-        vertexColors: true,
-        side: THREE.FrontSide,
-        transparent: true,
-        opacity: 0.78,
-      }),
-    [],
-  );
   const warmupMaterial = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -2980,12 +2988,11 @@ function SurfaceTerrainChunks({
   useEffect(() => {
     return () => {
       material.dispose();
-      waterMaterial.dispose();
       neutralMaterial.dispose();
       gridLineMaterial.dispose();
       warmupMaterial.dispose();
     };
-  }, [gridLineMaterial, material, neutralMaterial, warmupMaterial, waterMaterial]);
+  }, [gridLineMaterial, material, neutralMaterial, warmupMaterial]);
 
   return (
     <group visible={visible}>
@@ -2993,7 +3000,7 @@ function SurfaceTerrainChunks({
         <SurfaceTerrainChunkMesh
           key={chunk.id}
           chunk={chunk}
-          material={warmup ? warmupMaterial : neutral ? neutralMaterial : chunk.materialFamily === "water" ? waterMaterial : material}
+          material={warmup ? warmupMaterial : neutral ? neutralMaterial : material}
           gridLineMaterial={gridLineMaterial}
           gridLinesVisible={gridLinesVisible}
         />
@@ -5197,13 +5204,13 @@ function getTerrainBrushOperation(tool: EditorTool): TerrainBrushOperation | nul
 }
 
 function getActiveTerrainBlockId(blockId: BlockId, shapeId: ShapeId): BlockId {
-  return shapeId === SHAPE_IDS.WATER ? BLOCK_IDS.Water : blockId === BLOCK_IDS.Water ? BLOCK_IDS.Ground : blockId;
+  void shapeId;
+  return blockId;
 }
 
 function getTerrainMutationBlockId(tool: EditorTool, operation: TerrainBrushOperation, blockId: BlockId, shapeId: ShapeId, applyMaterialToAddedBlocks = true): BlockId {
   if (operation === "paint-path") return BLOCK_IDS.Path;
   if (tool === "add") {
-    if (shapeId === SHAPE_IDS.WATER) return BLOCK_IDS.Water;
     return applyMaterialToAddedBlocks ? getActiveTerrainBlockId(blockId, shapeId) : BLOCK_IDS.Ground;
   }
   return getActiveTerrainBlockId(blockId, shapeId);

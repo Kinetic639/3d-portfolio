@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas, type ThreeEvent, useFrame, useLoader, useThree } from "@react-three/fiber";
-import { MapControls, Text, TransformControls } from "@react-three/drei";
+import { MapControls, Text, TransformControls, useAnimations, useGLTF } from "@react-three/drei";
 import gsap from "gsap";
 import { Compass, LockKeyhole, RotateCcw, UnlockKeyhole } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -14,13 +14,14 @@ import {
   type TerrainChunk,
 } from "@/lib/terrain/terrain";
 import { buildSurfaceChunkMesh, type SurfaceChunkMeshData } from "@/lib/terrain/surface-mesher";
+import { buildWaterChunkMesh, getWaterFlowVector, type WaterChunkMeshData } from "@/lib/terrain/water-mesher";
 import { buildZoneOverlayChunkMeshes, buildZoneOverlayMeshes, type ZoneOverlayChunkMeshData } from "@/lib/terrain/zone-overlay";
 import { BLOCK_IDS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import { parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
-import { WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
+import { WORLD_CONFIG, type GridCoordinate, type WorldPosition } from "@/lib/world/world-config";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
-import { getTerrainSurfaceAt } from "@/lib/world/surface-query";
-import { MapEditorSession, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
+import { getTerrainSurfaceAt, getTerrainSurfaceAtWorldPosition } from "@/lib/world/surface-query";
+import { MapEditorSession, type BasinFillPreview, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
 import { createMapPresetWorld, type MapPresetId } from "@/lib/editor/map-presets";
 import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
 import { EDITOR_MIN_ZOOM_DISTANCE_FLOOR } from "@/lib/editor/editor-layout-store";
@@ -131,10 +132,14 @@ const TOOL_COLORS: Record<EditorTool, string> = {
   marker: "#a855f7",
   entity: "#22c55e",
   navigation: "#60a5fa",
+  waterSource: "#22d3ee",
+  waterRemove: "#f97316",
+  waterInspect: "#67e8f9",
 };
 
 const DEFAULT_EDITOR_LAYERS: EditorLayerState[] = [
   { id: "terrain", label: "Terrain", visible: true, locked: false },
+  { id: "liquid", label: "Liquid", visible: true, locked: false },
   { id: "paths", label: "Paths", visible: true, locked: false },
   { id: "zones", label: "Zones", visible: true, locked: false },
   { id: "entities", label: "Entities", visible: true, locked: false },
@@ -439,6 +444,73 @@ const SURFACE_FRAGMENT_SHADER = `
     color += vec3(0.035, 0.028, 0.018);
 
     gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
+const WATER_VERTEX_SHADER = `
+  uniform float uExpansionProgress;
+  uniform float uTime;
+
+  attribute vec2 aFlowVector;
+  attribute float aFalling;
+  attribute float aFoam;
+  attribute float aRevealDelay;
+
+  varying vec2 vUv;
+  varying vec2 vFlowVector;
+  varying float vFalling;
+  varying float vFoam;
+  varying vec3 vNormal;
+  varying vec3 vWorldPosition;
+
+  void main() {
+    float reveal = clamp((uExpansionProgress - aRevealDelay) / 0.18, 0.0, 1.0);
+    vec3 transformed = position;
+    bool topSurface = normal.y > 0.5;
+    if (topSurface) {
+      float ripple = sin((position.x + position.z) * 7.0 + uTime * 2.1) * 0.012;
+      ripple += sin(position.x * 11.0 - position.z * 5.0 + uTime * 1.4) * 0.007;
+      transformed.y += ripple * reveal;
+    }
+    transformed.y -= (1.0 - reveal) * 0.34;
+
+    vUv = uv;
+    vFlowVector = aFlowVector;
+    vFalling = aFalling;
+    vFoam = aFoam;
+    vNormal = normalize(normalMatrix * normal);
+    vWorldPosition = transformed;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);
+  }
+`;
+
+const WATER_FRAGMENT_SHADER = `
+  uniform float uTime;
+
+  varying vec2 vUv;
+  varying vec2 vFlowVector;
+  varying float vFalling;
+  varying float vFoam;
+  varying vec3 vNormal;
+  varying vec3 vWorldPosition;
+
+  void main() {
+    vec2 direction = length(vFlowVector) > 0.05 ? normalize(vFlowVector) : vec2(0.18, 0.08);
+    vec2 animatedUv = vUv + direction * uTime * mix(0.035, 0.15, vFalling);
+    float bands = sin((animatedUv.x + animatedUv.y) * 22.0 + uTime * 1.7);
+    float crossBands = sin((animatedUv.x - animatedUv.y) * 13.0 - uTime * 1.1);
+    float pattern = smoothstep(0.28, 0.92, bands * 0.5 + crossBands * 0.22 + 0.55);
+
+    vec3 deepColor = vec3(0.035, 0.32, 0.43);
+    vec3 brightColor = vec3(0.12, 0.66, 0.73);
+    vec3 color = mix(deepColor, brightColor, pattern * 0.48 + max(vNormal.y, 0.0) * 0.18);
+    float edgeInk = pow(1.0 - abs(dot(normalize(vNormal), vec3(0.0, 1.0, 0.0))), 1.6);
+    color = mix(color, vec3(0.015, 0.055, 0.065), edgeInk * 0.68);
+    float foamLine = smoothstep(0.58, 0.9, pattern + vFoam * 0.58);
+    color = mix(color, vec3(0.72, 0.94, 0.9), foamLine * vFoam * 0.58);
+
+    float alpha = mix(0.72, 0.88, edgeInk) + foamLine * vFoam * 0.06;
+    gl_FragColor = vec4(color, clamp(alpha, 0.0, 0.92));
   }
 `;
 
@@ -1051,8 +1123,11 @@ function ExperienceScene({
   const mapHistoryRef = useRef<{ undo: MapDefinition[]; redo: MapDefinition[] }>({ undo: [], redo: [] });
   const [terrain, setTerrain] = useState(initialState.terrain);
   const [zoneOverlay, setZoneOverlay] = useState(() => buildZoneOverlayMeshes(initialState.loadedMap.world));
-  const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities));
+  const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities, initialState.loadedMap.definition.fluids.settings));
   const [tool, setTool] = useState<EditorTool>("select");
+  const [infiniteWaterSources, setInfiniteWaterSources] = useState(initialState.loadedMap.definition.fluids.settings.infiniteSources);
+  const [waterSimulationPlaying, setWaterSimulationPlaying] = useState(false);
+  const [waterBasinPreview, setWaterBasinPreview] = useState<BasinFillPreview | null>(null);
   const [paintBlockId, setPaintBlockId] = useState<BlockId>(BLOCK_IDS.Ground);
   const [applyMaterialToAddedBlocks, setApplyMaterialToAddedBlocks] = useState(false);
   const [activeShapeCategory, setActiveShapeCategory] = useState<ShapeCategory>("terrain");
@@ -1086,6 +1161,8 @@ function ExperienceScene({
   const [entityPopPreviewCount, setEntityPopPreviewCount] = useState(0);
   const [entityPopAnimationId, setEntityPopAnimationId] = useState<string | null>(null);
   const [runtimeObjectReveal, setRuntimeObjectReveal] = useState<RuntimeObjectRevealState>("hidden");
+  const [soldierSelected, setSoldierSelected] = useState(false);
+  const [soldierDestination, setSoldierDestination] = useState<WorldPosition | null>(null);
   const [collisionMode, setCollisionMode] = useState<CollisionMode>("blocking");
   const [entityColor, setEntityColor] = useState("#9ca3af");
   const [entityName, setEntityName] = useState("Placeholder");
@@ -1177,6 +1254,10 @@ function ExperienceScene({
   const selectedState = selectedCell
     ? editorSession.world.getState(selectedCell.x, selectedCell.y, selectedCell.z)
     : null;
+  const selectedFluid = selectedCell
+    ? editorSession.world.getFluid(selectedCell.x, selectedCell.y, selectedCell.z)
+    : null;
+  const fluidStats = editorSession.world.getStats();
   const selectedZoneId = selectedCell ? editorSession.world.getZone(selectedCell.x, selectedCell.y, selectedCell.z) : 0;
   const activeZoneDefinition = currentMap.zones.find((zone) => zone.numericId === zoneId) ?? null;
   const selectedEntity = currentMap.entities.find((entity) => selectedEntityIds.includes(entity.id)) ?? null;
@@ -1229,6 +1310,13 @@ function ExperienceScene({
     selectedShapeId,
     selectedRotation,
     selectedState,
+    selectedFluid: selectedFluid ? `${selectedFluid.type}:${selectedFluid.level}:${selectedFluid.source ? 1 : 0}:${selectedFluid.falling ? 1 : 0}` : "",
+    fluidCells: fluidStats.fluidCells,
+    fluidSources: fluidStats.fluidSources,
+    fallingFluidCells: fluidStats.fallingFluidCells,
+    infiniteWaterSources,
+    waterSimulationPlaying,
+    waterBasinPreview: waterBasinPreview ? `${waterBasinPreview.cells.length}:${waterBasinPreview.leaksAtBoundary ? 1 : 0}` : "",
     selectedZoneId,
     selectedMarkerId,
     selectedEntityId: selectedEntity?.id ?? "",
@@ -1284,6 +1372,7 @@ function ExperienceScene({
     entityName,
     hoveredCell,
     lastRebuiltChunks,
+    infiniteWaterSources,
     layerStates,
     navigationNodeType,
     activeRotation,
@@ -1306,6 +1395,7 @@ function ExperienceScene({
     selectedEntity?.id,
     selectedEntityIds,
     selectedMarkerId,
+    selectedFluid,
     selectedZoneId,
     snapshot.blockEditCount,
     snapshot.entityAnchorCount,
@@ -1314,6 +1404,8 @@ function ExperienceScene({
     snapshot.undoDepth,
     snapshot.zoneAssignmentCount,
     tool,
+    waterSimulationPlaying,
+    waterBasinPreview,
     validationSummary,
     zoneId,
     zoneEditMode,
@@ -1371,6 +1463,7 @@ function ExperienceScene({
       ...currentMap.metadata,
       updatedAt: new Date().toISOString(),
     },
+    fluidSettings: { ...currentMap.fluids.settings, infiniteSources: infiniteWaterSources },
   });
 
   const replaceLoadedMap = (map: MapDefinition, markSaved: boolean, message: string) => {
@@ -1381,6 +1474,7 @@ function ExperienceScene({
     const nextZoneOverlay = buildZoneOverlayMeshes(editorSession.world);
 
     setCurrentMap(editableMap);
+    setInfiniteWaterSources(editableMap.fluids.settings.infiniteSources);
     mapHistoryRef.current = { undo: [], redo: [] };
     setActiveMapId(map.id);
     dispatchBrowsing({ type: "changeMap", mapId: map.id });
@@ -1396,7 +1490,8 @@ function ExperienceScene({
   };
 
   const replaceRebuiltChunks = (rebuiltChunks: ReturnType<MapEditorSession["applyTool"]>["rebuiltChunks"]) => {
-    if (rebuiltChunks.length === 0) {
+    const dirtyFluidChunkIds = [...editorSession.world.dirtyFluidChunks];
+    if (rebuiltChunks.length === 0 && dirtyFluidChunkIds.length === 0) {
       if (editorSession.world.dirtyZoneChunks.size > 0) {
         replaceZoneOverlayChunks([...editorSession.world.dirtyZoneChunks]);
         editorSession.world.clearDirtyZoneChunks();
@@ -1410,6 +1505,13 @@ function ExperienceScene({
     const startedAt = performance.now();
     const rebuiltTerrainChunks = new Map(rebuiltChunks.map((chunk) => [chunk.id, toTerrainChunk(chunk)]));
     const rebuiltSurfaceChunks = new Map(rebuiltChunks.map((chunk) => [chunk.id, buildSurfaceChunkMesh(editorSession.world, chunk.chunkX, chunk.chunkZ)]));
+    const waterChunkIds = [...new Set([...rebuiltChunks.map((chunk) => chunk.id), ...dirtyFluidChunkIds])];
+    const rebuiltWaterChunks = new Map(waterChunkIds.flatMap((chunkId) => {
+      const coordinates = parseChunkId(chunkId);
+      if (!coordinates) return [];
+      const mesh = buildWaterChunkMesh(editorSession.world, coordinates.chunkX, coordinates.chunkZ);
+      return [[mesh.id, mesh] as const];
+    }));
     // eslint-disable-next-line react-hooks/purity
     const rebuildMs = Number((performance.now() - startedAt).toFixed(3));
     incrementEditorPerfCounter("terrainChunkRebuilds", rebuiltChunks.length);
@@ -1418,6 +1520,7 @@ function ExperienceScene({
       ...currentTerrain,
       chunks: currentTerrain.chunks.map((chunk) => rebuiltTerrainChunks.get(chunk.id) ?? chunk),
       surfaceChunks: currentTerrain.surfaceChunks.map((chunk) => rebuiltSurfaceChunks.get(chunk.id) ?? chunk),
+      waterChunks: currentTerrain.waterChunks.map((chunk) => rebuiltWaterChunks.get(chunk.id) ?? chunk),
       instanceCount: editorSession.world.getStats().renderedInstances,
       airCellCount: editorSession.world.getStats().airCells,
       nonAirBlockCount: editorSession.world.getStats().nonAirBlocks,
@@ -1429,9 +1532,18 @@ function ExperienceScene({
         (sum, chunk) => sum + (rebuiltSurfaceChunks.get(chunk.id)?.triangles ?? chunk.triangles),
         0,
       ),
+      waterQuadCount: currentTerrain.waterChunks.reduce(
+        (sum, chunk) => sum + (rebuiltWaterChunks.get(chunk.id)?.visibleQuads ?? chunk.visibleQuads),
+        0,
+      ),
+      waterTriangleCount: currentTerrain.waterChunks.reduce(
+        (sum, chunk) => sum + (rebuiltWaterChunks.get(chunk.id)?.triangles ?? chunk.triangles),
+        0,
+      ),
     }));
     replaceZoneOverlayChunks([...new Set([...rebuiltChunks.map((chunk) => chunk.id), ...editorSession.world.dirtyZoneChunks])]);
     editorSession.world.clearDirtyZoneChunks();
+    editorSession.world.clearDirtyFluidChunks();
     setLastRebuiltChunks([...rebuiltTerrainChunks.keys()]);
     setLastChunkRebuildMs(rebuildMs);
     setEditorRevision((revision) => revision + 1);
@@ -1458,6 +1570,24 @@ function ExperienceScene({
       };
     });
   };
+
+  const runWaterAction = (action: () => ReturnType<MapEditorSession["settleWater"]>, successMessage: string) => {
+    const result = action();
+    replaceRebuiltChunks(result.rebuiltChunks);
+    setEditorMessage(result.message ?? { type: "info", text: successMessage });
+    if (result.changed) setPreviewRevision((revision) => revision + 1);
+  };
+
+  useEffect(() => {
+    if (!waterSimulationPlaying || !editorAvailable) return;
+    const timer = window.setInterval(() => {
+      const result = editorSession.settleWater(infiniteWaterSources);
+      if (!result.changed) return;
+      replaceRebuiltChunks(result.rebuiltChunks);
+      setPreviewRevision((revision) => revision + 1);
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [editorAvailable, editorSession, infiniteWaterSources, waterSimulationPlaying]);
 
   const handleEditorCell = (coordinate: GridCoordinate) => {
     if (!editorAvailable) {
@@ -1493,6 +1623,20 @@ function ExperienceScene({
     if (tool === "select") {
       const selectedColumnZone = editorSession.world.getColumnZone(editCoordinate.x, editCoordinate.z);
       if (selectedColumnZone > 0) setZoneId(selectedColumnZone);
+    }
+
+    if (tool === "waterInspect") {
+      setEditorMessage({ type: "info", text: `Fluid inspected at ${editCoordinate.x},${editCoordinate.y},${editCoordinate.z}.` });
+      return;
+    }
+    if (tool === "waterSource" || tool === "waterRemove") {
+      const result = tool === "waterSource"
+        ? editorSession.applyWaterSources([editCoordinate], { infiniteSources: infiniteWaterSources, settle: !waterSimulationPlaying })
+        : editorSession.removeWaterSources([editCoordinate], { infiniteSources: infiniteWaterSources, settle: !waterSimulationPlaying });
+      setEditorMessage(result.message ?? { type: "info", text: `${tool === "waterSource" ? "Water source placed" : "Water source removed"} at ${editCoordinate.x},${editCoordinate.y},${editCoordinate.z}.` });
+      replaceRebuiltChunks(result.rebuiltChunks);
+      if (result.changed) setPreviewRevision((revision) => revision + 1);
+      return;
     }
 
     const brushOperation = getTerrainBrushOperation(tool);
@@ -1532,6 +1676,21 @@ function ExperienceScene({
 
     if (tool === "zone") {
       applyZoneColumns(coordinates, coordinates[coordinates.length - 1]);
+      return;
+    }
+
+    if (tool === "waterSource" || tool === "waterRemove") {
+      const targets = coordinates.flatMap((coordinate) => {
+        const target = getToolTargetCoordinate(editorSession, tool, coordinate);
+        return target ? [target] : [];
+      });
+      const result = tool === "waterSource"
+        ? editorSession.applyWaterSources(targets, { infiniteSources: infiniteWaterSources, settle: !waterSimulationPlaying })
+        : editorSession.removeWaterSources(targets, { infiniteSources: infiniteWaterSources, settle: !waterSimulationPlaying });
+      setSelectedCell(targets.at(-1) ?? coordinates.at(-1) ?? null);
+      setEditorMessage(result.message ?? { type: "info", text: `${targets.length} water cell${targets.length === 1 ? "" : "s"} updated.` });
+      replaceRebuiltChunks(result.rebuiltChunks);
+      if (result.changed) setPreviewRevision((revision) => revision + 1);
       return;
     }
 
@@ -1599,6 +1758,7 @@ function ExperienceScene({
 
   const handleToolChange = (nextTool: EditorTool) => {
     setTool(nextTool);
+    if (nextTool !== "waterSource" && nextTool !== "waterRemove" && nextTool !== "waterInspect") setWaterBasinPreview(null);
     setZoneRectangleAnchor(null);
     if (nextTool !== "zone") {
       setZoneId(0);
@@ -1735,7 +1895,7 @@ function ExperienceScene({
       const loaded = loadEditableMapState(nextMapId);
       const editableDefinition = normalizeEditableMap(loaded.definition);
 
-      const nextSession = new MapEditorSession(loaded.world, loaded.entities);
+      const nextSession = new MapEditorSession(loaded.world, loaded.entities, loaded.definition.fluids.settings);
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
       const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
       setEditorSession(nextSession);
@@ -1761,7 +1921,7 @@ function ExperienceScene({
     try {
       const loaded = loadEditableMapState(nextMapId);
       const editableDefinition = normalizeEditableMap(loaded.definition);
-      const nextSession = new MapEditorSession(loaded.world, loaded.entities);
+      const nextSession = new MapEditorSession(loaded.world, loaded.entities, loaded.definition.fluids.settings);
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
       const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
 
@@ -2199,6 +2359,15 @@ function ExperienceScene({
       selectedShapeId,
       selectedRotation,
       selectedState,
+      selectedFluid,
+      fluidCellCount: fluidStats.fluidCells,
+      fluidSourceCount: fluidStats.fluidSources,
+      fallingFluidCount: fluidStats.fallingFluidCells,
+      pendingFluidUpdates: 0,
+      infiniteWaterSources,
+      waterSimulationPlaying,
+      waterBasinPreviewCellCount: waterBasinPreview?.cells.length ?? 0,
+      waterBasinPreviewLeaks: waterBasinPreview?.leaksAtBoundary ?? false,
       selectedZoneId,
       selectedWorldPosition,
       selectedChunk,
@@ -2241,9 +2410,7 @@ function ExperienceScene({
         setActiveShapeCategory(category);
         const nextShape = getShapeDefinition(activeShapeId).category === category
           ? activeShapeId
-          : category === "fluid"
-            ? SHAPE_IDS.WATER
-            : category === "transition"
+          : category === "transition"
               ? SHAPE_IDS.STAIR
               : category === "structure"
                 ? SHAPE_IDS.WALL
@@ -2252,14 +2419,12 @@ function ExperienceScene({
                   : SHAPE_IDS.CUBE;
         setActiveShapeId(nextShape);
         setActiveShapeState(DEFAULT_STATE);
-        if (nextShape === SHAPE_IDS.WATER) setPaintBlockId(BLOCK_IDS.Water);
       },
       onShapeChange: (shapeId) => {
         const shape = getShapeDefinition(shapeId);
         setActiveShapeId(shape.id);
         setActiveShapeCategory(shape.category);
         setActiveShapeState(DEFAULT_STATE);
-        if (shape.id === SHAPE_IDS.WATER) setPaintBlockId(BLOCK_IDS.Water);
       },
       onCellRotationChange: setActiveRotation,
       onShapeStateChange: (state) => setActiveShapeState(Math.max(0, Math.min(255, Math.floor(state) || 0))),
@@ -2395,6 +2560,30 @@ function ExperienceScene({
       onNavigationNodeTypeChange: setNavigationNodeType,
       onPlaceNavigationNode: handlePlaceNavigationNode,
       onConnectNavigationNodes: handleConnectNavigationNodes,
+      onInfiniteWaterSourcesChange: (enabled) => {
+        setInfiniteWaterSources(enabled);
+        editorSession.setInfiniteWaterSources(enabled);
+      },
+      onWaterSimulationPlayingChange: setWaterSimulationPlaying,
+      onWaterStep: () => runWaterAction(() => editorSession.settleWater(infiniteWaterSources), "Water simulation stepped."),
+      onWaterSettle: () => runWaterAction(() => editorSession.settleWater(infiniteWaterSources), "Water settled."),
+      onWaterReset: () => runWaterAction(() => editorSession.resetWater(), "Water reset."),
+      onWaterClearDerived: () => runWaterAction(() => editorSession.clearDerivedWater(), "Derived water cleared."),
+      onWaterPreviewBasin: () => {
+        if (!selectedCell) {
+          setEditorMessage({ type: "error", text: "Select a basin cell first." });
+          return;
+        }
+        const preview = editorSession.previewBasinFill(selectedCell, selectedCell.y);
+        setWaterBasinPreview(preview);
+        setEditorMessage({ type: preview.leaksAtBoundary ? "error" : "info", text: preview.leaksAtBoundary ? "Basin preview reaches an open boundary." : `${preview.cells.length} basin cells ready.` });
+      },
+      onWaterConfirmBasin: () => {
+        if (!selectedCell || !waterBasinPreview || waterBasinPreview.cells.length === 0 || waterBasinPreview.leaksAtBoundary) return;
+        runWaterAction(() => editorSession.fillWaterBasin(selectedCell, selectedCell.y, infiniteWaterSources), "Basin filled and settled.");
+        setWaterBasinPreview(null);
+      },
+      onWaterCancelBasin: () => setWaterBasinPreview(null),
       onCreateRoute: handleCreateRoute,
       onLayerVisibilityChange: (id, visible) => updateLayer(id, { visible }),
       onLayerLockChange: (id, locked) => updateLayer(id, { locked }),
@@ -2798,7 +2987,28 @@ function ExperienceScene({
     // Shader uniforms are external Three.js state; updating them here avoids React rerenders.
     // eslint-disable-next-line react-hooks/immutability
     uniforms.uTime.value = clock.elapsedTime;
+    // Once exploration begins, editor rerenders must never replay or collapse
+    // the one-shot terrain reveal.
+    if (phase === "explore") uniforms.uExpansionProgress.value = 1;
   });
+
+  const soldierSurface = getTerrainSurfaceAt(editorSession.world, 36, 34);
+  const handleSoldierTerrainClick = useCallback((event: ThreeEvent<MouseEvent>) => {
+    if (!soldierSelected || editorAvailable || phase !== "explore" || event.delta > POINTER_CLICK_MAX_DISTANCE_PX) {
+      return;
+    }
+
+    const destination = getTerrainSurfaceAtWorldPosition(editorSession.world, event.point);
+    if (!destination.valid || !destination.walkable || destination.fluid) {
+      return;
+    }
+
+    event.stopPropagation();
+    setSoldierDestination(destination.worldPosition);
+  }, [editorAvailable, editorSession.world, phase, soldierSelected]);
+  const resolveSoldierSurface = useCallback((x: number, z: number) => (
+    getTerrainSurfaceAtWorldPosition(editorSession.world, { x, z })
+  ), [editorSession.world]);
 
   return (
     <>
@@ -2809,6 +3019,7 @@ function ExperienceScene({
         chunks={terrain.chunks}
         uniforms={uniforms}
         visible={activeRenderMode === "instanced"}
+        onTerrainClick={handleSoldierTerrainClick}
       />
       <SurfaceTerrainChunks
         chunks={terrain.surfaceChunks}
@@ -2819,8 +3030,39 @@ function ExperienceScene({
         neutralColor={zoneNeutralTerrainColor}
         gridLinesVisible={editorAvailable && zoneGridLinesVisible}
         gridLineColor={zoneGridLineColor}
+        onTerrainClick={handleSoldierTerrainClick}
       />
+      <WaterTerrainChunks
+        chunks={terrain.waterChunks}
+        uniforms={uniforms}
+        visible={isLayerVisible(layerStates, "liquid")}
+      />
+      <LiquidDebugOverlay
+        world={editorSession.world}
+        coordinate={selectedCell}
+        visible={editorAvailable && (tool === "waterSource" || tool === "waterRemove" || tool === "waterInspect") && isLayerVisible(layerStates, "developmentHelpers")}
+      />
+      <LiquidBasinPreviewOverlay preview={waterBasinPreview} world={editorSession.world} visible={editorAvailable && isLayerVisible(layerStates, "developmentHelpers")} />
       <WorldEntryItem visible={phase === "ready"} position={LOADER_ORIGIN_WORLD} onActivate={startExpansion} />
+      {soldierSurface.valid ? (
+        <AnimatedSoldier
+          position={[
+            soldierSurface.worldPosition.x,
+            soldierSurface.worldPosition.y,
+            soldierSurface.worldPosition.z,
+          ]}
+          visible={(editorAvailable || runtimeObjectReveal !== "hidden") && isLayerVisible(layerStates, "entities")}
+          selected={soldierSelected}
+          destination={soldierDestination}
+          resolveSurface={resolveSoldierSurface}
+          onSelect={() => {
+            if (!editorAvailable && phase === "explore") {
+              setSoldierSelected(true);
+            }
+          }}
+          onArrive={() => setSoldierDestination(null)}
+        />
+      ) : null}
       <ConstrainedMapControls
         enabled={benchmarkMode ? benchmarkInputEnabled : isInteractivePhase(phase) && !entityTransformDragging}
         phase={phase}
@@ -2838,6 +3080,7 @@ function ExperienceScene({
         renderMode={activeRenderMode}
         chunks={terrain.chunks}
         surfaceChunks={terrain.surfaceChunks}
+        waterChunks={terrain.waterChunks}
         entities={currentMap.entities}
         world={editorSession.world}
         hoveredCell={hoveredCell}
@@ -3002,10 +3245,12 @@ function TerrainChunks({
   chunks,
   uniforms,
   visible,
+  onTerrainClick,
 }: {
   chunks: TerrainChunk[];
   uniforms: TerrainUniforms;
   visible: boolean;
+  onTerrainClick: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const geometry = useMemo(() => createOpenBottomBlockGeometry(1.01, 1.01, 1.01), []);
   const material = useMemo(
@@ -3033,6 +3278,7 @@ function TerrainChunks({
           chunk={chunk}
           geometry={geometry}
           material={material}
+          onTerrainClick={onTerrainClick}
         />
       ))}
     </group>
@@ -3103,6 +3349,7 @@ function SurfaceTerrainChunks({
   neutralColor,
   gridLinesVisible,
   gridLineColor,
+  onTerrainClick,
 }: {
   chunks: SurfaceChunkMeshData[];
   uniforms: TerrainUniforms;
@@ -3112,6 +3359,7 @@ function SurfaceTerrainChunks({
   neutralColor: string;
   gridLinesVisible: boolean;
   gridLineColor: string;
+  onTerrainClick: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const terrainTextures = useLoader(THREE.TextureLoader, [...TERRAIN_TEXTURE_URLS]);
   const textureStrips = useMemo(() => [
@@ -3172,16 +3420,6 @@ function SurfaceTerrainChunks({
       }),
     [gridLineColor],
   );
-  const waterMaterial = useMemo(
-    () =>
-      new THREE.MeshBasicMaterial({
-        vertexColors: true,
-        side: THREE.FrontSide,
-        transparent: true,
-        opacity: 0.78,
-      }),
-    [],
-  );
   const warmupMaterial = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -3198,12 +3436,11 @@ function SurfaceTerrainChunks({
   useEffect(() => {
     return () => {
       material.dispose();
-      waterMaterial.dispose();
       neutralMaterial.dispose();
       gridLineMaterial.dispose();
       warmupMaterial.dispose();
     };
-  }, [gridLineMaterial, material, neutralMaterial, warmupMaterial, waterMaterial]);
+  }, [gridLineMaterial, material, neutralMaterial, warmupMaterial]);
 
   return (
     <group visible={visible}>
@@ -3211,9 +3448,10 @@ function SurfaceTerrainChunks({
         <SurfaceTerrainChunkMesh
           key={chunk.id}
           chunk={chunk}
-          material={warmup ? warmupMaterial : neutral ? neutralMaterial : chunk.materialFamily === "water" ? waterMaterial : material}
+          material={warmup ? warmupMaterial : neutral ? neutralMaterial : material}
           gridLineMaterial={gridLineMaterial}
           gridLinesVisible={gridLinesVisible}
+          onTerrainClick={onTerrainClick}
         />
       ))}
     </group>
@@ -3225,11 +3463,13 @@ function SurfaceTerrainChunkMesh({
   material,
   gridLineMaterial,
   gridLinesVisible,
+  onTerrainClick,
 }: {
   chunk: SurfaceChunkMeshData;
   material: THREE.Material;
   gridLineMaterial: THREE.Material;
   gridLinesVisible: boolean;
+  onTerrainClick: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const geometry = useMemo(() => {
     const nextGeometry = new THREE.BufferGeometry();
@@ -3278,6 +3518,7 @@ function SurfaceTerrainChunkMesh({
           portfolioSurfaceTriangleToCell: chunk.triangleToCell,
         }}
         frustumCulled
+        onClick={onTerrainClick}
       />
       {gridLinesVisible ? (
         <lineSegments
@@ -3290,6 +3531,250 @@ function SurfaceTerrainChunkMesh({
     </group>
   );
 }
+
+function WaterTerrainChunks({
+  chunks,
+  uniforms,
+  visible,
+}: {
+  chunks: WaterChunkMeshData[];
+  uniforms: TerrainUniforms;
+  visible: boolean;
+}) {
+  const material = useMemo(() => new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: WATER_VERTEX_SHADER,
+    fragmentShader: WATER_FRAGMENT_SHADER,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.FrontSide,
+  }), [uniforms]);
+
+  useEffect(() => () => material.dispose(), [material]);
+
+  return (
+    <group visible={visible} renderOrder={4}>
+      {chunks.map((chunk) => (
+        chunk.indices.length > 0 ? <WaterTerrainChunkMesh key={chunk.id} chunk={chunk} material={material} /> : null
+      ))}
+    </group>
+  );
+}
+
+function WaterTerrainChunkMesh({ chunk, material }: { chunk: WaterChunkMeshData; material: THREE.Material }) {
+  const geometry = useMemo(() => {
+    const nextGeometry = new THREE.BufferGeometry();
+    nextGeometry.setAttribute("position", new THREE.BufferAttribute(chunk.positions, 3));
+    nextGeometry.setAttribute("normal", new THREE.BufferAttribute(chunk.normals, 3));
+    nextGeometry.setAttribute("uv", new THREE.BufferAttribute(chunk.uvs, 2));
+    nextGeometry.setAttribute("aFlowVector", new THREE.BufferAttribute(chunk.flowVectors, 2));
+    nextGeometry.setAttribute("aFalling", new THREE.BufferAttribute(chunk.fallingFlags, 1));
+    nextGeometry.setAttribute("aFoam", new THREE.BufferAttribute(chunk.foamFactors, 1));
+    nextGeometry.setAttribute("aRevealDelay", new THREE.BufferAttribute(chunk.revealDelays, 1));
+    nextGeometry.setIndex(new THREE.BufferAttribute(chunk.indices, 1));
+    nextGeometry.computeBoundingBox();
+    nextGeometry.computeBoundingSphere();
+    return nextGeometry;
+  }, [chunk]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  return (
+    <mesh
+      geometry={geometry}
+      material={material}
+      renderOrder={4}
+      frustumCulled
+      userData={{
+        portfolioWaterChunkId: chunk.id,
+        portfolioWaterTriangleToCell: chunk.triangleToCell,
+      }}
+    />
+  );
+}
+
+function LiquidDebugOverlay({
+  world,
+  coordinate,
+  visible,
+}: {
+  world: VoxelWorld;
+  coordinate: GridCoordinate | null;
+  visible: boolean;
+}) {
+  if (!visible || !coordinate) return null;
+  const fluid = world.getFluid(coordinate.x, coordinate.y, coordinate.z);
+  const position = world.gridToWorld(coordinate.x, coordinate.y, coordinate.z);
+  const flow = getWaterFlowVector(world, coordinate.x, coordinate.y, coordinate.z);
+  const direction = fluid.falling ? "DOWN" : getFlowDirectionLabel(flow);
+  const color = fluid.source ? "#22d3ee" : fluid.falling ? "#f59e0b" : fluid.type ? "#38bdf8" : "#64748b";
+  const label = fluid.type ? `${fluid.source ? "SRC" : `L${fluid.level}`} ${direction}` : "DRY";
+
+  return (
+    <group position={[position.x, position.y, position.z]}>
+      <mesh>
+        <boxGeometry args={[1.04, 1.04, 1.04]} />
+        <meshBasicMaterial color={color} wireframe transparent opacity={0.9} depthTest={false} />
+      </mesh>
+      <Text position={[0, 0.72, 0]} fontSize={0.2} color={color} anchorX="center" anchorY="middle" depthOffset={-2}>{label}</Text>
+    </group>
+  );
+}
+
+function getFlowDirectionLabel([x, z]: [number, number]) {
+  if (Math.hypot(x, z) < 0.05) return "STILL";
+  if (Math.abs(x) >= Math.abs(z)) return x > 0 ? "E" : "W";
+  return z > 0 ? "S" : "N";
+}
+
+function LiquidBasinPreviewOverlay({ preview, world, visible }: { preview: BasinFillPreview | null; world: VoxelWorld; visible: boolean }) {
+  const geometry = useMemo(() => {
+    const positions = new Float32Array((preview?.cells.length ?? 0) * 3);
+    preview?.cells.forEach((coordinate, index) => {
+      const position = world.gridToWorld(coordinate.x, coordinate.y, coordinate.z);
+      positions[index * 3] = position.x;
+      positions[index * 3 + 1] = position.y + 0.46;
+      positions[index * 3 + 2] = position.z;
+    });
+    const next = new THREE.BufferGeometry();
+    next.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    return next;
+  }, [preview, world]);
+  const material = useMemo(() => new THREE.PointsMaterial({
+    color: preview?.leaksAtBoundary ? "#ef4444" : "#22d3ee",
+    size: 0.16,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+  }), [preview?.leaksAtBoundary]);
+
+  useEffect(() => () => {
+    geometry.dispose();
+    material.dispose();
+  }, [geometry, material]);
+
+  if (!visible || !preview || preview.cells.length === 0) return null;
+  return <points geometry={geometry} material={material} renderOrder={8} frustumCulled={false} />;
+}
+
+function AnimatedSoldier({
+  position,
+  visible,
+  selected,
+  destination,
+  resolveSurface,
+  onSelect,
+  onArrive,
+}: {
+  position: [number, number, number];
+  visible: boolean;
+  selected: boolean;
+  destination: WorldPosition | null;
+  resolveSurface: (x: number, z: number) => ReturnType<typeof getTerrainSurfaceAtWorldPosition>;
+  onSelect: () => void;
+  onArrive: () => void;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const [spawnPosition] = useState(position);
+  const { scene, animations } = useGLTF("/models/characters/Soldier.glb");
+  const { actions } = useAnimations(animations, groupRef);
+  const onArriveRef = useRef(onArrive);
+
+  useEffect(() => {
+    onArriveRef.current = onArrive;
+  }, [onArrive]);
+
+  useEffect(() => {
+    scene.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+  }, [scene]);
+
+  useEffect(() => {
+    const nextAction = destination ? actions.Walk : actions.Idle;
+    if (!nextAction) {
+      return;
+    }
+
+    const previousAction = destination ? actions.Idle : actions.Walk;
+    previousAction?.fadeOut(0.18);
+    nextAction.reset().setLoop(THREE.LoopRepeat, Infinity).fadeIn(0.18).play();
+    return () => {
+      nextAction.fadeOut(0.18);
+    };
+  }, [actions, destination]);
+
+  useFrame((_, delta) => {
+    const soldier = groupRef.current;
+    if (!soldier || !destination) {
+      return;
+    }
+
+    const offsetX = destination.x - soldier.position.x;
+    const offsetZ = destination.z - soldier.position.z;
+    const remainingDistance = Math.hypot(offsetX, offsetZ);
+    const step = 2.1 * delta;
+
+    if (remainingDistance <= step) {
+      soldier.position.set(destination.x, destination.y, destination.z);
+      onArriveRef.current();
+      return;
+    }
+
+    const directionX = offsetX / remainingDistance;
+    const directionZ = offsetZ / remainingDistance;
+    const nextX = soldier.position.x + directionX * step;
+    const nextZ = soldier.position.z + directionZ * step;
+    const nextSurface = resolveSurface(nextX, nextZ);
+    if (!nextSurface.valid || !nextSurface.walkable || nextSurface.fluid) {
+      onArriveRef.current();
+      return;
+    }
+
+    soldier.position.set(nextX, nextSurface.worldPosition.y, nextZ);
+    // Soldier.glb is authored facing -Z, opposite Three.js's +Z direction convention here.
+    const targetRotation = Math.atan2(directionX, directionZ) + Math.PI;
+    soldier.rotation.y = dampAngle(soldier.rotation.y, targetRotation, 12, delta);
+  });
+
+  const handleSelect = (event: ThreeEvent<MouseEvent>) => {
+    if (event.delta > POINTER_CLICK_MAX_DISTANCE_PX) {
+      return;
+    }
+    event.stopPropagation();
+    onSelect();
+  };
+
+  return (
+    <group
+      ref={groupRef}
+      position={spawnPosition}
+      rotation={[0, Math.PI, 0]}
+      visible={visible}
+      userData={{ portfolioCharacterId: "soldier", activeAnimation: destination ? "Walk" : "Idle" }}
+      onClick={handleSelect}
+    >
+      <primitive object={scene} />
+      {selected ? (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.025, 0]}>
+          <ringGeometry args={[0.48, 0.57, 32]} />
+          <meshBasicMaterial color="#f0b83f" transparent opacity={0.95} depthWrite={false} />
+        </mesh>
+      ) : null}
+    </group>
+  );
+}
+
+function dampAngle(current: number, target: number, smoothing: number, delta: number) {
+  const difference = normalizeAngleRadians(target - current);
+  return current + difference * (1 - Math.exp(-smoothing * delta));
+}
+
+useGLTF.preload("/models/characters/Soldier.glb");
 
 function WorldEntryItem({
   visible,
@@ -3438,10 +3923,12 @@ function TerrainChunkMesh({
   chunk,
   geometry,
   material,
+  onTerrainClick,
 }: {
   chunk: TerrainChunk;
   geometry: THREE.BufferGeometry;
   material: THREE.ShaderMaterial;
+  onTerrainClick: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const chunkGeometry = useMemo(() => {
@@ -3497,6 +3984,7 @@ function TerrainChunkMesh({
       ref={meshRef}
       args={[chunkGeometry, material, CHUNK_MAX_INSTANCE_COUNT]}
       frustumCulled={false}
+      onClick={onTerrainClick}
     />
   );
 }
@@ -3508,6 +3996,7 @@ function EditorInteractionOverlay({
   renderMode,
   chunks,
   surfaceChunks,
+  waterChunks,
   entities,
   world,
   hoveredCell,
@@ -3522,6 +4011,7 @@ function EditorInteractionOverlay({
   renderMode: TerrainRenderMode;
   chunks: TerrainChunk[];
   surfaceChunks: SurfaceChunkMeshData[];
+  waterChunks: WaterChunkMeshData[];
   entities: PlacedMapEntity[];
   world: MapEditorSession["world"];
   hoveredCell: GridCoordinate | null;
@@ -3533,6 +4023,7 @@ function EditorInteractionOverlay({
   const { camera, gl, raycaster, scene } = useThree();
   const chunkById = useMemo(() => new Map(chunks.map((chunk) => [chunk.id, chunk])), [chunks]);
   const surfaceChunkById = useMemo(() => new Map(surfaceChunks.map((chunk) => [chunk.id, chunk])), [surfaceChunks]);
+  const waterChunkById = useMemo(() => new Map(waterChunks.map((chunk) => [chunk.id, chunk])), [waterChunks]);
   const mousePosition = useRef(new THREE.Vector2(0, 0));
   const pointerDownPosition = useRef<{ x: number; y: number } | null>(null);
   const zoneRectangleAnchorRef = useRef<GridCoordinate | null>(null);
@@ -3544,13 +4035,14 @@ function EditorInteractionOverlay({
   const groundPlane = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const planeIntersection = useRef(new THREE.Vector3());
   const shouldRaycast = useRef(true);
-  const editorTargets = useRef<{ chunks: THREE.InstancedMesh[]; surfaces: THREE.Mesh[]; entities: THREE.Mesh[] }>({ chunks: [], surfaces: [], entities: [] });
+  const editorTargets = useRef<{ chunks: THREE.InstancedMesh[]; surfaces: THREE.Mesh[]; water: THREE.Mesh[]; entities: THREE.Mesh[] }>({ chunks: [], surfaces: [], water: [], entities: [] });
   const raycastHits = useRef<THREE.Intersection[]>([]);
 
   useEffect(() => {
     const chunksList: THREE.InstancedMesh[] = [];
     const surfacesList: THREE.Mesh[] = [];
     const entitiesList: THREE.Mesh[] = [];
+    const waterList: THREE.Mesh[] = [];
 
     scene.traverse((object) => {
       incrementEditorPerfCounter("sceneTraversals");
@@ -3560,14 +4052,17 @@ function EditorInteractionOverlay({
       if ((object as THREE.Mesh).isMesh && typeof object.userData.portfolioSurfaceChunkId === "string") {
         surfacesList.push(object as THREE.Mesh);
       }
+      if ((object as THREE.Mesh).isMesh && typeof object.userData.portfolioWaterChunkId === "string") {
+        waterList.push(object as THREE.Mesh);
+      }
       if ((object as THREE.Mesh).isMesh && typeof object.userData.portfolioEntityId === "string") {
         entitiesList.push(object as THREE.Mesh);
       }
     });
 
-    editorTargets.current = { chunks: chunksList, surfaces: surfacesList, entities: entitiesList };
+    editorTargets.current = { chunks: chunksList, surfaces: surfacesList, water: waterList, entities: entitiesList };
     shouldRaycast.current = true;
-  }, [chunks, entities, scene, surfaceChunks]);
+  }, [chunks, entities, scene, surfaceChunks, waterChunks]);
 
   useEffect(() => {
     if (!editorEnabled) {
@@ -3597,7 +4092,7 @@ function EditorInteractionOverlay({
     const paintCurrentHover = () => {
       raycaster.setFromCamera(mousePosition.current, camera);
       incrementEditorPerfCounter("raycasts");
-      const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
+      const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, waterChunkById, world, tool, renderMode);
       if (!currentHover) {
         return null;
       }
@@ -3626,7 +4121,7 @@ function EditorInteractionOverlay({
       if (tool === "zone" && zoneSelectionMode === "rectangle") {
         raycaster.setFromCamera(mousePosition.current, camera);
         incrementEditorPerfCounter("raycasts");
-        const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
+        const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, waterChunkById, world, tool, renderMode);
         zoneRectangleAnchorRef.current = currentHover;
         onZoneRectangleAnchor(currentHover);
       } else if (shouldStartContinuousTerrainStroke(tool, event)) {
@@ -3672,7 +4167,7 @@ function EditorInteractionOverlay({
       if (tool === "zone" && zoneSelectionMode === "rectangle" && zoneRectangleAnchorRef.current) {
         raycaster.setFromCamera(mousePosition.current, camera);
         incrementEditorPerfCounter("raycasts");
-        const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
+        const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, waterChunkById, world, tool, renderMode);
         const anchor = zoneRectangleAnchorRef.current;
         zoneRectangleAnchorRef.current = null;
         onZoneRectangleAnchor(null);
@@ -3712,7 +4207,7 @@ function EditorInteractionOverlay({
         if ((tool === "entity" || tool === "select") && hasHoveredEditorEntity(editorTargets.current.entities, raycastHits.current, raycaster)) {
           return;
         }
-        const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, world, tool, renderMode);
+        const currentHover = getHoveredEditorCell(editorTargets.current, raycastHits.current, raycaster, chunkById, surfaceChunkById, waterChunkById, world, tool, renderMode);
         if (currentHover && shouldApplySingleShotEditOnPointerUp(tool)) {
           event.preventDefault();
           onEditCell(currentHover);
@@ -3742,11 +4237,11 @@ function EditorInteractionOverlay({
       window.removeEventListener("pointerup", handlePointerUp, { capture: true });
       window.removeEventListener("pointercancel", handlePointerCancel, { capture: true });
     };
-  }, [camera, chunkById, editorEnabled, gl.domElement, onEditCell, onEditCells, onHoverCell, onZoneRectangleAnchor, raycaster, renderMode, surfaceChunkById, tool, world, zoneSelectionMode]);
+  }, [camera, chunkById, editorEnabled, gl.domElement, onEditCell, onEditCells, onHoverCell, onZoneRectangleAnchor, raycaster, renderMode, surfaceChunkById, tool, waterChunkById, world, zoneSelectionMode]);
 
   useEffect(() => {
     shouldRaycast.current = true;
-  }, [chunkById, surfaceChunkById]);
+  }, [chunkById, surfaceChunkById, waterChunkById]);
 
   useFrame(() => {
     if (!editorEnabled || !shouldRaycast.current) {
@@ -3762,6 +4257,7 @@ function EditorInteractionOverlay({
       raycaster,
       chunkById,
       surfaceChunkById,
+      waterChunkById,
       world,
       tool,
       renderMode,
@@ -3778,11 +4274,12 @@ function EditorInteractionOverlay({
 }
 
 function getHoveredEditorCell(
-  terrainTargets: { chunks: THREE.InstancedMesh[]; surfaces: THREE.Mesh[] },
+  terrainTargets: { chunks: THREE.InstancedMesh[]; surfaces: THREE.Mesh[]; water: THREE.Mesh[] },
   hits: THREE.Intersection[],
   raycaster: THREE.Raycaster,
   chunkById: Map<string, TerrainChunk>,
   surfaceChunkById: Map<string, SurfaceChunkMeshData>,
+  waterChunkById: Map<string, WaterChunkMeshData>,
   world: MapEditorSession["world"],
   tool: EditorTool,
   renderMode: TerrainRenderMode,
@@ -3790,8 +4287,18 @@ function getHoveredEditorCell(
   planeIntersection = new THREE.Vector3(),
 ) {
   hits.length = 0;
-  raycaster.intersectObjects(renderMode === "surface" ? terrainTargets.surfaces : terrainTargets.chunks, false, hits);
+  const terrain = renderMode === "surface" ? terrainTargets.surfaces : terrainTargets.chunks;
+  const targets = tool === "waterSource" || tool === "waterRemove" || tool === "waterInspect"
+    ? [...terrainTargets.water, ...terrain]
+    : terrain;
+  raycaster.intersectObjects(targets, false, hits);
   const hit = hits[0];
+
+  if (hit && typeof hit.faceIndex === "number" && typeof hit.object.userData.portfolioWaterChunkId === "string") {
+    const waterChunk = waterChunkById.get(hit.object.userData.portfolioWaterChunkId as string);
+    const cellIndex = waterChunk?.triangleToCell[hit.faceIndex];
+    if (cellIndex !== undefined) return world.getCoordinates(cellIndex);
+  }
 
   if (hit && hit.instanceId !== undefined) {
     const chunk = chunkById.get(hit.object.userData.portfolioChunkId as string);
@@ -3799,7 +4306,7 @@ function getHoveredEditorCell(
     if (cellIndex !== undefined) {
       const coordinate = world.getCoordinates(cellIndex);
       if (coordinate) {
-        if (tool === "add") {
+        if (tool === "add" || tool === "waterSource" || tool === "waterInspect") {
           return getAdjacentFaceCoordinate(coordinate, hit.face?.normal, world);
         }
 
@@ -3814,7 +4321,7 @@ function getHoveredEditorCell(
     if (cellIndex !== undefined) {
       const coordinate = world.getCoordinates(cellIndex);
       if (coordinate) {
-        if (tool === "add") {
+        if (tool === "add" || tool === "waterSource" || tool === "waterInspect") {
           return getAdjacentFaceCoordinate(coordinate, hit.face?.normal, world);
         }
 
@@ -5698,13 +6205,13 @@ function getTerrainBrushOperation(tool: EditorTool): TerrainBrushOperation | nul
 }
 
 function getActiveTerrainBlockId(blockId: BlockId, shapeId: ShapeId): BlockId {
-  return shapeId === SHAPE_IDS.WATER ? BLOCK_IDS.Water : blockId === BLOCK_IDS.Water ? BLOCK_IDS.Ground : blockId;
+  void shapeId;
+  return blockId;
 }
 
 function getTerrainMutationBlockId(tool: EditorTool, operation: TerrainBrushOperation, blockId: BlockId, shapeId: ShapeId, applyMaterialToAddedBlocks = true): BlockId {
   if (operation === "paint-path") return BLOCK_IDS.Path;
   if (tool === "add") {
-    if (shapeId === SHAPE_IDS.WATER) return BLOCK_IDS.Water;
     return applyMaterialToAddedBlocks ? getActiveTerrainBlockId(blockId, shapeId) : BLOCK_IDS.Ground;
   }
   return getActiveTerrainBlockId(blockId, shapeId);
@@ -5714,7 +6221,7 @@ const POINTER_CLICK_MAX_DISTANCE_PX = 5;
 const CONTINUOUS_SINGLE_SHOT_STEP_DISTANCE_PX = 14;
 
 function isContinuousTerrainStrokeTool(tool: EditorTool) {
-  return tool === "zone" || (
+  return tool === "zone" || tool === "waterSource" || tool === "waterRemove" || (
     getTerrainBrushOperation(tool) !== null &&
     !shouldApplySingleShotEditOnPointerUp(tool)
   );
@@ -5739,7 +6246,7 @@ function isModifierContinuousSingleShotTool(tool: EditorTool) {
 }
 
 function shouldApplySingleShotEditOnPointerUp(tool: EditorTool) {
-  return tool === "add" || tool === "erase" || tool === "select" || tool === "entity" || tool === "marker";
+  return tool === "add" || tool === "erase" || tool === "select" || tool === "entity" || tool === "marker" || tool === "waterInspect";
 }
 
 function getPointerGestureDistance(start: { x: number; y: number }, event: PointerEvent) {
@@ -5747,6 +6254,7 @@ function getPointerGestureDistance(start: { x: number; y: number }, event: Point
 }
 
 function shouldApplyStrokeImmediately(tool: EditorTool, zoneSelectionMode: ZoneSelectionMode) {
+  if (tool === "waterSource" || tool === "waterRemove") return false;
   return tool !== "zone" || zoneSelectionMode === "brush";
 }
 
@@ -5765,6 +6273,7 @@ function isLayerLocked(layers: EditorLayerState[], id: EditorLayerId) {
 }
 
 function getToolLayer(tool: EditorTool): EditorLayerId {
+  if (tool === "waterSource" || tool === "waterRemove" || tool === "waterInspect") return "liquid";
   if (tool === "zone" || tool === "removeZone") return "zones";
   if (tool === "marker") return "markers";
   if (tool === "entity") return "entities";

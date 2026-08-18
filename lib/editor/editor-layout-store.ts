@@ -1,4 +1,4 @@
-export type EditorWorkspace = "map" | "terrain" | "objects" | "zones" | "navigation" | "review";
+export type EditorWorkspace = "map" | "terrain" | "liquid" | "objects" | "zones" | "navigation" | "review";
 export type BottomDockTab = "overview" | "validation" | "history" | "performance";
 export type EditorPanelId = "left" | "right" | "bottom" | "outliner" | "inspector";
 

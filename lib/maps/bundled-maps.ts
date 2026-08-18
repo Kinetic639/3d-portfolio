@@ -201,11 +201,6 @@ export function createTerrainShapeShowcaseMapDefinition(): MapDefinition {
   place(37, 1, 42, BLOCK_IDS.Special, SHAPE_IDS.PIPE_LONG, ROTATIONS.NORTH, 2);
   place(40, 1, 42, BLOCK_IDS.Special, SHAPE_IDS.PIPE_CORNER);
 
-  for (let z = 50; z <= 54; z += 1) {
-    for (let x = 8; x <= 14; x += 1) {
-      place(x, 1, z, BLOCK_IDS.Water, SHAPE_IDS.WATER, ROTATIONS.NORTH, (x + z) % 16);
-    }
-  }
   place(15, 1, 31, BLOCK_IDS.Special, SHAPE_IDS.SLAB);
   place(16, 1, 31, BLOCK_IDS.Special, SHAPE_IDS.SLAB, ROTATIONS.NORTH, 1);
   world.clearDirtyChunks();

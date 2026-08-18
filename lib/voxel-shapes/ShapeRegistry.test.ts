@@ -5,7 +5,6 @@ import { ROTATIONS, SHAPE_IDS, SHAPE_ID_VALUES } from "./shape-ids";
 describe("shape registry", () => {
   it("keeps stable unique shape ids", () => {
     expect(SHAPE_IDS.CUBE).toBe(0);
-    expect(SHAPE_IDS.WATER).toBe(22);
     expect(SHAPE_IDS.STAIR_INVERTED).toBe(39);
     expect(SHAPE_IDS.TERRAIN_DIAGONAL_BANK).toBe(50);
     expect(SHAPE_IDS.WOODEN_WALL_END).toBe(51);
@@ -34,17 +33,7 @@ describe("shape registry", () => {
     expect(getShapeDefinition(255).id).toBe(SHAPE_IDS.CUBE);
   });
 
-  it("marks water as fluid and non-supporting", () => {
-    const water = getShapeDefinition(SHAPE_IDS.WATER);
-    const sample = water.surfaceAt(0, 0, ROTATIONS.NORTH, 15);
-
-    expect(water.renderLayer).toBe("water");
-    expect(sample.fluid).toBe(true);
-    expect(sample.solidSupport).toBe(false);
-    expect(sample.walkable).toBe(false);
-  });
-
-  it("defines visibly distinct cut-corner, stair-corner, pillar and water geometry", () => {
+  it("defines visibly distinct cut-corner, stair-corner and pillar geometry", () => {
     const cube = getShapeDefinition(SHAPE_IDS.CUBE);
     const cutCorner = getShapeDefinition(SHAPE_IDS.CUT_CORNER);
     const outerCorner = getShapeDefinition(SHAPE_IDS.SLOPE_OUTER_CORNER);
@@ -60,7 +49,6 @@ describe("shape registry", () => {
     const woodenWall = getShapeDefinition(SHAPE_IDS.WOODEN_WALL_FULL);
     const iceChunks = getShapeDefinition(SHAPE_IDS.ICE_CHUNKS_MEDIUM);
     const icicles = getShapeDefinition(SHAPE_IDS.ICICLES_LARGE);
-    const water = getShapeDefinition(SHAPE_IDS.WATER);
     const lowSteps = getShapeDefinition(SHAPE_IDS.STAIR_LOW);
     const fenceCorner = getShapeDefinition(SHAPE_IDS.FENCE_CORNER);
     const fenceT = getShapeDefinition(SHAPE_IDS.FENCE_T);
@@ -105,7 +93,6 @@ describe("shape registry", () => {
     expect(woodenWall.faces(ROTATIONS.NORTH, 0).length).toBeGreaterThan(cube.faces(ROTATIONS.NORTH, 0).length);
     expect(iceChunks.faces(ROTATIONS.NORTH, 0).length).toBeGreaterThan(cube.faces(ROTATIONS.NORTH, 0).length);
     expect(icicles.faces(ROTATIONS.NORTH, 0).length).toBeGreaterThan(cube.faces(ROTATIONS.NORTH, 0).length);
-    expect(water.faces(ROTATIONS.NORTH, 15)).toHaveLength(1);
     expect(lowSteps.category).toBe("transition");
     expect(serializeFaces(fenceCorner.faces(ROTATIONS.NORTH, 0))).not.toBe(serializeFaces(fenceT.faces(ROTATIONS.NORTH, 0)));
     expect(serializeFaces(fenceT.faces(ROTATIONS.NORTH, 0))).not.toBe(serializeFaces(fenceCross.faces(ROTATIONS.NORTH, 0)));

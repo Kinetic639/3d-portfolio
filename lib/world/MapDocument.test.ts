@@ -8,6 +8,7 @@ import {
 } from "./map-document";
 import { createFlatVoxelWorld } from "./voxel-world";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
+import { WaterSimulator } from "@/lib/fluids/water-simulator";
 
 describe("map document format", () => {
   it("exports and imports deterministic world differences, zones and entities", () => {
@@ -93,7 +94,7 @@ describe("map document format", () => {
     const document = serializeMapDocument(world, []);
     const imported = createMapStateFromDocument(document);
 
-    expect(document.version).toBe(3);
+    expect(document.version).toBe(4);
     expect(document.cellEncoding).toBe("cell-edits-v2");
     expect(document.zoneEncoding).toBe("column-zones-v2");
     expect(document.edits).toContainEqual({
@@ -198,5 +199,49 @@ describe("map document format", () => {
     };
 
     expect(parseMapDocument(invalidEntity).ok).toBe(false);
+  });
+
+  it("round trips authoritative water sources and uses a valid settled cache", () => {
+    const world = createFlatVoxelWorld();
+    for (const [x, z] of [[7, 8], [9, 8], [8, 7], [8, 9]]) world.setBlock(x, 1, z, BLOCK_IDS.Boundary);
+    const simulator = new WaterSimulator(world);
+    expect(simulator.setSource(8, 1, 8)).toBe(true);
+    simulator.settle();
+
+    const document = serializeMapDocument(world, []);
+    expect(document.fluids?.sources).toEqual([{ x: 8, y: 1, z: 8, fluidId: 1 }]);
+    const imported = createMapStateFromDocument(document);
+    expect(imported.fluidLoad).toEqual({ cacheStatus: "hit", settled: true });
+    expect(imported.world.getFluid(8, 1, 8)).toMatchObject({ type: 1, source: true });
+    expect(serializeMapDocument(imported.world, []).fluids).toEqual(document.fluids);
+  });
+
+  it("rebuilds water from sources when a settled cache fingerprint is stale", () => {
+    const world = createFlatVoxelWorld();
+    const simulator = new WaterSimulator(world);
+    simulator.setSource(8, 1, 8);
+    simulator.settle();
+    const document = serializeMapDocument(world, []);
+    document.fluids!.settledCache!.terrainFingerprint = "stale";
+
+    const imported = createMapStateFromDocument(document);
+    expect(imported.fluidLoad).toEqual({ cacheStatus: "rebuilt", settled: true });
+    expect(imported.world.getFluid(8, 1, 8).source).toBe(true);
+  });
+
+  it("rejects fluid sources in solid terrain and retired terrain ids", () => {
+    const base = serializeMapDocument(createFlatVoxelWorld(), []);
+    const solidSource = structuredClone(base);
+    solidSource.fluids!.sources = [{ x: 0, y: 0, z: 0, fluidId: 1 }];
+    solidSource.fluids!.settledCache = undefined;
+    expect(parseMapDocument(solidSource)).toMatchObject({ ok: false, error: expect.stringContaining("solid terrain") });
+
+    const retiredBlock = structuredClone(base) as unknown as Record<string, unknown>;
+    retiredBlock.edits = [{ x: 1, y: 1, z: 1, blockId: 6 }];
+    expect(parseMapDocument(retiredBlock)).toMatchObject({ ok: false, error: "Unknown block id: 6." });
+
+    const retiredShape = structuredClone(base) as unknown as Record<string, unknown>;
+    retiredShape.edits = [{ x: 1, y: 1, z: 1, blockId: BLOCK_IDS.Ground, shapeId: 22 }];
+    expect(parseMapDocument(retiredShape)).toMatchObject({ ok: false, error: "Unknown shape id: 22." });
   });
 });
