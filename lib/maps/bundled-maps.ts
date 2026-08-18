@@ -295,6 +295,30 @@ export function createPortfolioPrimaryFlatMapDefinition(): MapDefinition {
   return loadBundledMapDefinition(portfolioPrimaryFlatMap, "portfolio-primary-flat.map.json");
 }
 
+export function createPortfolioNorthSceneryMapDefinition(): MapDefinition {
+  const map = createBlankMapDefinition({
+    id: "portfolio-scenery-north",
+    name: "Portfolio North Scenery",
+    kind: "portfolio",
+    runtimeMode: "dynamic-voxel",
+    flatBaseLayer: true,
+  });
+
+  return {
+    ...map,
+    description: "Editable voxel source for the northern scenery region.",
+    spawnPoints: [],
+    cameraPresets: [],
+    defaultSpawnId: undefined,
+    defaultCameraPresetId: undefined,
+    metadata: {
+      createdAt: PRIMARY_FLAT_CREATED_AT,
+      updatedAt: PRIMARY_FLAT_CREATED_AT,
+      authoringVersion: "world-regions-phase-4",
+    },
+  };
+}
+
 function loadBundledMapDefinition(input: unknown, source: string): MapDefinition {
   const validation = validateMapDefinition(input);
   if (!validation.ok) {
