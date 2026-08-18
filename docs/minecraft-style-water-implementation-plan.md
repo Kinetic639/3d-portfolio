@@ -2,7 +2,7 @@
 
 - [x] Phase 0: Lock water mechanics and scope
 - [x] Phase 1: Introduce the fluid data model
-- [ ] Phase 2: Implement the deterministic water solver
+- [x] Phase 2: Implement the deterministic water solver
 - [ ] Phase 3: Build the dedicated water mesher
 - [ ] Phase 4: Add the stylized water renderer
 - [ ] Phase 5: Integrate liquid authoring into the editor
@@ -276,6 +276,15 @@ For 49,152 cells, three one-byte arrays consume approximately 147 KB. The comple
 - New `lib/fluids/water-rules.ts`
 - New test fixtures under `lib/fluids/__tests__` or the repository's established test layout
 
+### Implementation Status
+
+Phase 2 is implemented in `fluid-scheduler.ts`, `water-rules.ts`, and
+`water-simulator.ts`. The simulator performs one initial source discovery scan
+when attached to a world. Subsequent updates rebuild only the graph reachable
+from authored sources and the previously managed fluid cells; they do not scan
+all world cells. Rendering, persistence, and editor playback controls remain in
+their later phases.
+
 ### Scheduler
 
 Use a deterministic queue with cell deduplication:
@@ -328,21 +337,21 @@ Derived water must disappear when it loses all valid incoming support:
 
 ### Required Solver Tests
 
-- [ ] One source spreads seven cells on a flat supported channel.
-- [ ] The eighth horizontal cell remains dry.
-- [ ] Water flows downward without a vertical distance limit inside world bounds.
-- [ ] Flow level resets appropriately after reaching a lower supported elevation.
-- [ ] Water selects the nearest downward opening.
-- [ ] Equal downward routes both receive flow.
-- [ ] Walls and closed solid faces block flow.
-- [ ] An enclosed basin fills only according to available source rules.
-- [ ] Removing the only source causes derived water to recede.
-- [ ] Two supported neighboring sources create a source when enabled.
-- [ ] Infinite-source creation does not occur when disabled.
-- [ ] Fluid behavior is correct across chunk boundaries.
-- [ ] Fluid drains at configured open world boundaries.
-- [ ] Replaying the same input produces byte-identical output.
-- [ ] The solver always terminates for representative worlds.
+- [x] One source spreads seven cells on a flat supported channel.
+- [x] The eighth horizontal cell remains dry.
+- [x] Water flows downward without a vertical distance limit inside world bounds.
+- [x] Flow level resets appropriately after reaching a lower supported elevation.
+- [x] Water selects the nearest downward opening.
+- [x] Equal downward routes both receive flow.
+- [x] Walls and closed solid faces block flow.
+- [x] An enclosed basin fills only according to available source rules.
+- [x] Removing the only source causes derived water to recede.
+- [x] Two supported neighboring sources create a source when enabled.
+- [x] Infinite-source creation does not occur when disabled.
+- [x] Fluid behavior is correct across chunk boundaries.
+- [x] Fluid drains at configured open world boundaries.
+- [x] Replaying the same input produces byte-identical output.
+- [x] The solver always terminates for representative worlds.
 
 ### Exit Criteria
 
