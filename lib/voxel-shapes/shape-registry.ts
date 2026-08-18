@@ -1,7 +1,7 @@
 import { DEFAULT_ROTATION, DEFAULT_STATE, ROTATIONS, SHAPE_IDS, type CellRotation, type ShapeId } from "./shape-ids";
 
-export type ShapeCategory = "terrain" | "transition" | "structure" | "roof" | "utility" | "fluid";
-export type RenderLayer = "opaque" | "water";
+export type ShapeCategory = "terrain" | "transition" | "structure" | "roof" | "utility";
+export type RenderLayer = "opaque";
 export type FaceDirection = "px" | "nx" | "py" | "ny" | "pz" | "nz";
 export type Axis = "x" | "y" | "z";
 
@@ -820,16 +820,6 @@ function terrainDiagonalBankFaces(rotation: CellRotation): ShapeFace[] {
   ], rotation);
 }
 
-function waterFaces(state: number): ShapeFace[] {
-  const top = -0.5 + (Math.max(0, Math.min(15, state)) + 1) / 16;
-  return [{
-    direction: "py",
-    normal: FACE_NORMALS.py,
-    occlusion: "none",
-    corners: [[-0.48, top, 0.48], [0.48, top, 0.48], [0.48, top, -0.48], [-0.48, top, -0.48]],
-  }];
-}
-
 function axisBounds(
   rotation: CellRotation,
   state: number,
@@ -894,7 +884,6 @@ const BASE_SHAPE_REGISTRY = {
   [SHAPE_IDS.PIPE_SHORT]: makeBoxShape({ id: SHAPE_IDS.PIPE_SHORT, key: "pipe-short", name: "Short Pipe", category: "utility", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: -0.28, maxX: 0.28, minY: -0.18, maxY: 0.18, minZ: -0.18, maxZ: 0.18 } }),
   [SHAPE_IDS.PIPE_LONG]: makeBoxShape({ id: SHAPE_IDS.PIPE_LONG, key: "pipe-long", name: "Long Pipe", category: "utility", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: (rotation, state) => axisBounds(rotation, state, 0.18) }),
   [SHAPE_IDS.PIPE_CORNER]: makeBoxShape({ id: SHAPE_IDS.PIPE_CORNER, key: "pipe-corner", name: "Pipe Corner", category: "utility", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: -0.5, maxX: 0.18, minY: -0.18, maxY: 0.18, minZ: -0.18, maxZ: 0.5 } }),
-  [SHAPE_IDS.WATER]: { ...makeBoxShape({ id: SHAPE_IDS.WATER, key: "water", name: "Water", category: "fluid", renderLayer: "water", solid: false, blocksMovement: false, supportsPrefabs: false, walkable: false, fluid: true, bounds: (_r, state) => ({ ...FULL_BOUNDS, maxY: -0.5 + (Math.max(0, Math.min(15, state)) + 1) / 16 }), surfaceHeight: (_r, state) => -0.5 + (Math.max(0, Math.min(15, state)) + 1) / 16 }), faces: (_rotation, state) => waterFaces(state) },
   [SHAPE_IDS.TERRAIN_CORNER]: { id: SHAPE_IDS.TERRAIN_CORNER, key: "terrain-corner", name: "Terrain Corner", category: "terrain", supportedRotations: ALL_ROTATIONS, renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: true, walkable: true, fluid: false, revealCompatible: true, bounds: () => FULL_BOUNDS, faces: terrainCornerFaces, surfaceAt: (x, z, rotation) => flatSurface(rotateLocal(x, z, rotation).x <= 0 && rotateLocal(x, z, rotation).z <= 0 ? 0.5 : 0, true, true) },
   [SHAPE_IDS.ROOF_HOLLOW]: { ...makeBoxShape({ id: SHAPE_IDS.ROOF_HOLLOW, key: "roof-hollow", name: "Hollow Roof", category: "roof", renderLayer: "opaque", solid: true, blocksMovement: true, supportsPrefabs: false, walkable: false, fluid: false, bounds: FULL_BOUNDS }), faces: hollowRoofFaces },
   [SHAPE_IDS.RUBBLE_SMALL]: { ...makeBoxShape({ id: SHAPE_IDS.RUBBLE_SMALL, key: "rubble-small", name: "Small Rubble", category: "terrain", renderLayer: "opaque", solid: true, blocksMovement: false, supportsPrefabs: false, walkable: false, fluid: false, bounds: { minX: -0.28, maxX: 0.28, minY: -0.5, maxY: -0.08, minZ: -0.28, maxZ: 0.28 } }), faces: (rotation) => rotateFaces(rubbleFaces("small"), rotation) },
@@ -973,39 +962,12 @@ export const SHAPE_REGISTRY = Object.fromEntries(
 
 export const SHAPE_DEFINITIONS = Object.values(SHAPE_REGISTRY);
 
-// An earlier pass moved walls/roofs/fences/pipes/wooden walls/retaining
-// walls/cave-formation dressing out of the terrain shape picker into
-// placeable-object prefabs, but those prefabs were only ever built as crude
-// single-box bounding-volume approximations (losing every shape's real
-// silhouette — sloped roofs, stepped pillars, board-and-brace fences, rock
-// clusters, all rendered as plain cubes) and the split itself needs more
-// thought before it's reintroduced. That prefab conversion has been backed
-// out; these are terrain shapes again. Water is the one deliberate keeper
-// from that pass — it stays hidden here because it's exposed through a
-// single dedicated water tool instead of appearing as an ordinary terrain
-// shape (see the "Water" control in ShapeControls).
-//
-// These remain fully defined in SHAPE_REGISTRY/getShapeDefinition regardless
-// of membership here — hiding a shape from the terrain editor's picker via
-// TERRAIN_PALETTE_SHAPE_DEFINITIONS below never affects loading/rendering
-// existing map data that references it.
-export const PALETTE_HIDDEN_SHAPE_IDS: ReadonlySet<ShapeId> = new Set([
-  SHAPE_IDS.WATER,
-]);
-
-// The shape list the terrain editor's shape picker should render. Everything
-// else in SHAPE_DEFINITIONS remains a valid, fully-functional shape for
-// loading/rendering existing map data — it just can't be newly selected from
-// the Terrain tool.
-export const TERRAIN_PALETTE_SHAPE_DEFINITIONS = SHAPE_DEFINITIONS.filter((shape) => !PALETTE_HIDDEN_SHAPE_IDS.has(shape.id));
+export const TERRAIN_PALETTE_SHAPE_DEFINITIONS = SHAPE_DEFINITIONS;
 
 export function getShapeDefinition(shapeId: number): ShapeDefinition {
   return SHAPE_REGISTRY[shapeId as ShapeId] ?? SHAPE_REGISTRY[SHAPE_IDS.CUBE];
 }
 
-export function isWaterShape(shapeId: number) {
-  return shapeId === SHAPE_IDS.WATER;
-}
 
 export function getDefaultShapeState(shapeId: ShapeId) {
   void shapeId;

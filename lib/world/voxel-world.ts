@@ -6,7 +6,6 @@ import {
   normalizeRotation,
   normalizeShapeId,
   normalizeState,
-  SHAPE_IDS,
   type CellRotation,
   type ShapeId,
 } from "@/lib/voxel-shapes/shape-ids";
@@ -23,6 +22,19 @@ import {
   type WorldPosition,
 } from "./world-config";
 import { computeExpansionDelay, isLoaderPlatformTopCell } from "./reveal";
+import {
+  EMPTY_FLUID_CELL,
+  FLUID_FLAGS,
+  FLUID_IDS,
+  decodeFluidCell,
+  encodeFluidFlags,
+  isKnownFluidId,
+  isValidFluidCell,
+  type FluidCell,
+  type FluidId,
+  type FluidLayerSnapshot,
+} from "@/lib/fluids/fluid-types";
+import { canTerrainStateContainFluid } from "@/lib/fluids/fluid-containment";
 
 export type ChunkCoordinate = {
   chunkX: number;
@@ -76,6 +88,9 @@ export type WorldStats = {
   airCells: number;
   nonAirBlocks: number;
   zoneAssignments: number;
+  fluidCells: number;
+  fluidSources: number;
+  fallingFluidCells: number;
   renderedInstances: number;
   chunks: number;
 };
@@ -90,8 +105,12 @@ export class VoxelWorld {
   readonly shapes: Uint8Array;
   readonly rotations: Uint8Array;
   readonly states: Uint8Array;
+  readonly fluidTypes: Uint8Array;
+  readonly fluidLevels: Uint8Array;
+  readonly fluidFlags: Uint8Array;
   readonly dirtyChunks = new Set<string>();
   readonly dirtyZoneChunks = new Set<string>();
+  readonly dirtyFluidChunks = new Set<string>();
 
   constructor(
     config: WorldConfig = WORLD_CONFIG,
@@ -100,6 +119,9 @@ export class VoxelWorld {
     shapes?: Uint8Array,
     rotations?: Uint8Array,
     states?: Uint8Array,
+    fluidTypes?: Uint8Array,
+    fluidLevels?: Uint8Array,
+    fluidFlags?: Uint8Array,
   ) {
     this.config = config;
     const cellCount = config.width * config.depth * config.height;
@@ -109,9 +131,13 @@ export class VoxelWorld {
     this.shapes = shapes ?? new Uint8Array(cellCount);
     this.rotations = rotations ?? new Uint8Array(cellCount);
     this.states = states ?? new Uint8Array(cellCount);
+    this.fluidTypes = normalizeFluidArray("type", fluidTypes, cellCount);
+    this.fluidLevels = normalizeFluidArray("level", fluidLevels, cellCount);
+    this.fluidFlags = normalizeFluidArray("flags", fluidFlags, cellCount);
     if (this.zones.length !== zoneCount) {
       throw new RangeError(`Zone layer must contain ${zoneCount} columns.`);
     }
+    validateFluidArrays(this.fluidTypes, this.fluidLevels, this.fluidFlags, this.blocks, this.shapes);
   }
 
   isInsideWorld(x: number, y: number, z: number) {
@@ -193,6 +219,86 @@ export class VoxelWorld {
     };
   }
 
+  getFluid(x: number, y: number, z: number): FluidCell {
+    const index = this.getIndex(x, y, z);
+    if (index === null) return { ...EMPTY_FLUID_CELL };
+    return decodeFluidCell(this.fluidTypes[index], this.fluidLevels[index], this.fluidFlags[index]);
+  }
+
+  canContainFluid(x: number, y: number, z: number, fluidId: FluidId) {
+    const index = this.getIndex(x, y, z);
+    if (index === null || fluidId === FLUID_IDS.None || !isKnownFluidId(fluidId)) return false;
+    return canTerrainStateContainFluid(
+      this.blocks[index] as BlockId,
+      normalizeShapeId(this.shapes[index]),
+      fluidId,
+    );
+  }
+
+  setFluid(x: number, y: number, z: number, fluid: FluidCell) {
+    const index = this.getIndex(x, y, z);
+    if (index === null || !isValidFluidCell(fluid)) return false;
+    if (fluid.type !== FLUID_IDS.None && !this.canContainFluid(x, y, z, fluid.type)) return false;
+
+    const nextFlags = encodeFluidFlags(fluid);
+    if (
+      this.fluidTypes[index] === fluid.type &&
+      this.fluidLevels[index] === fluid.level &&
+      this.fluidFlags[index] === nextFlags
+    ) {
+      return true;
+    }
+
+    this.fluidTypes[index] = fluid.type;
+    this.fluidLevels[index] = fluid.level;
+    this.fluidFlags[index] = nextFlags;
+    this.markFluidChunkDirtyForCell(x, z);
+    return true;
+  }
+
+  setFluidSource(x: number, y: number, z: number, fluidId: FluidId) {
+    if (fluidId === FLUID_IDS.None) return false;
+    return this.setFluid(x, y, z, { type: fluidId, level: 0, source: true, falling: false });
+  }
+
+  clearFluid(x: number, y: number, z: number) {
+    return this.setFluid(x, y, z, { ...EMPTY_FLUID_CELL });
+  }
+
+  cloneFluidLayer(): FluidLayerSnapshot {
+    return {
+      types: new Uint8Array(this.fluidTypes),
+      levels: new Uint8Array(this.fluidLevels),
+      flags: new Uint8Array(this.fluidFlags),
+    };
+  }
+
+  restoreFluidLayer(snapshot: FluidLayerSnapshot) {
+    validateFluidLayerSnapshot(snapshot, this.blocks, this.shapes);
+    this.fluidTypes.set(snapshot.types);
+    this.fluidLevels.set(snapshot.levels);
+    this.fluidFlags.set(snapshot.flags);
+    this.markAllFluidChunksDirty();
+  }
+
+  clone() {
+    const cloned = new VoxelWorld(
+      this.config,
+      new Uint16Array(this.blocks),
+      new Uint8Array(this.zones),
+      new Uint8Array(this.shapes),
+      new Uint8Array(this.rotations),
+      new Uint8Array(this.states),
+      this.fluidTypes,
+      this.fluidLevels,
+      this.fluidFlags,
+    );
+    this.dirtyChunks.forEach((chunkId) => cloned.dirtyChunks.add(chunkId));
+    this.dirtyZoneChunks.forEach((chunkId) => cloned.dirtyZoneChunks.add(chunkId));
+    this.dirtyFluidChunks.forEach((chunkId) => cloned.dirtyFluidChunks.add(chunkId));
+    return cloned;
+  }
+
   setBlock(x: number, y: number, z: number, blockId: BlockId) {
     const index = this.getIndex(x, y, z);
 
@@ -209,9 +315,9 @@ export class VoxelWorld {
       this.shapes[index] = DEFAULT_SHAPE_ID;
       this.rotations[index] = DEFAULT_ROTATION;
       this.states[index] = DEFAULT_STATE;
-    } else if (this.shapes[index] === SHAPE_IDS.WATER && blockId !== BLOCK_IDS.Water) {
-      this.shapes[index] = DEFAULT_SHAPE_ID;
-      this.states[index] = DEFAULT_STATE;
+    }
+    if (this.fluidTypes[index] !== FLUID_IDS.None && !this.canContainFluid(x, y, z, this.fluidTypes[index] as FluidId)) {
+      this.clearFluid(x, y, z);
     }
     this.markChunkDirtyForCell(x, z);
 
@@ -225,6 +331,9 @@ export class VoxelWorld {
     if (this.blocks[index] === BLOCK_IDS.Air && normalizedShape !== DEFAULT_SHAPE_ID) return false;
     if (this.shapes[index] === normalizedShape) return true;
     this.shapes[index] = normalizedShape;
+    if (this.fluidTypes[index] !== FLUID_IDS.None && !this.canContainFluid(x, y, z, this.fluidTypes[index] as FluidId)) {
+      this.clearFluid(x, y, z);
+    }
     this.markChunkDirtyForCell(x, z);
     return true;
   }
@@ -272,6 +381,9 @@ export class VoxelWorld {
     this.shapes[index] = shapeId;
     this.rotations[index] = rotation;
     this.states[index] = state;
+    if (this.fluidTypes[index] !== FLUID_IDS.None && !this.canContainFluid(cell.x, cell.y, cell.z, this.fluidTypes[index] as FluidId)) {
+      this.clearFluid(cell.x, cell.y, cell.z);
+    }
     this.setZone(cell.x, cell.y, cell.z, zoneId);
     this.markChunkDirtyForCell(cell.x, cell.z);
     return true;
@@ -432,10 +544,29 @@ export class VoxelWorld {
     this.dirtyZoneChunks.clear();
   }
 
+  markFluidChunkDirtyForCell(x: number, z: number) {
+    this.markChunkSetDirtyForCell(this.dirtyFluidChunks, x, z);
+  }
+
+  markAllFluidChunksDirty() {
+    for (let chunkZ = 0; chunkZ < CHUNKS_PER_AXIS; chunkZ += 1) {
+      for (let chunkX = 0; chunkX < CHUNKS_PER_AXIS; chunkX += 1) {
+        this.dirtyFluidChunks.add(this.getChunkId(chunkX, chunkZ));
+      }
+    }
+  }
+
+  clearDirtyFluidChunks() {
+    this.dirtyFluidChunks.clear();
+  }
+
   getStats(): WorldStats {
     let nonAirBlocks = 0;
     let renderedInstances = 0;
     let zoneAssignments = 0;
+    let fluidCells = 0;
+    let fluidSources = 0;
+    let fallingFluidCells = 0;
 
     for (let index = 0; index < this.blocks.length; index += 1) {
       const blockId = this.blocks[index];
@@ -444,6 +575,11 @@ export class VoxelWorld {
       }
       if (isRenderableBlock(blockId)) {
         renderedInstances += 1;
+      }
+      if (this.fluidTypes[index] !== FLUID_IDS.None) {
+        fluidCells += 1;
+        if ((this.fluidFlags[index] & FLUID_FLAGS.Source) !== 0) fluidSources += 1;
+        if ((this.fluidFlags[index] & FLUID_FLAGS.Falling) !== 0) fallingFluidCells += 1;
       }
     }
 
@@ -458,6 +594,9 @@ export class VoxelWorld {
       airCells: this.blocks.length - nonAirBlocks,
       nonAirBlocks,
       zoneAssignments,
+      fluidCells,
+      fluidSources,
+      fallingFluidCells,
       renderedInstances,
       chunks: WORLD_CHUNK_COUNT,
     };
@@ -593,6 +732,25 @@ export class VoxelWorld {
 
     return { chunkX, chunkZ };
   }
+
+  private markChunkSetDirtyForCell(target: Set<string>, x: number, z: number) {
+    const chunk = this.getChunkCoordinates(x, z);
+    if (!chunk) return;
+
+    target.add(this.getChunkId(chunk.chunkX, chunk.chunkZ));
+    if (x % this.config.chunkSize === 0 && chunk.chunkX > 0) {
+      target.add(this.getChunkId(chunk.chunkX - 1, chunk.chunkZ));
+    }
+    if (x % this.config.chunkSize === this.config.chunkSize - 1 && chunk.chunkX < CHUNKS_PER_AXIS - 1) {
+      target.add(this.getChunkId(chunk.chunkX + 1, chunk.chunkZ));
+    }
+    if (z % this.config.chunkSize === 0 && chunk.chunkZ > 0) {
+      target.add(this.getChunkId(chunk.chunkX, chunk.chunkZ - 1));
+    }
+    if (z % this.config.chunkSize === this.config.chunkSize - 1 && chunk.chunkZ < CHUNKS_PER_AXIS - 1) {
+      target.add(this.getChunkId(chunk.chunkX, chunk.chunkZ + 1));
+    }
+  }
 }
 
 export function createFlatVoxelWorld() {
@@ -639,11 +797,57 @@ function normalizeZoneLayer(config: WorldConfig, zones?: Uint8Array) {
   return columns;
 }
 
+function normalizeFluidArray(name: string, values: Uint8Array | undefined, cellCount: number) {
+  if (!values) return new Uint8Array(cellCount);
+  if (values.length !== cellCount) {
+    throw new RangeError(`Fluid ${name} array must contain ${cellCount} cells.`);
+  }
+  return new Uint8Array(values);
+}
+
+function validateFluidArrays(
+  types: Uint8Array,
+  levels: Uint8Array,
+  flags: Uint8Array,
+  blocks?: Uint16Array,
+  shapes?: Uint8Array,
+) {
+  for (let index = 0; index < types.length; index += 1) {
+    const cell = decodeFluidCell(types[index], levels[index], flags[index]);
+    const emptyCellHasData = types[index] === FLUID_IDS.None && (levels[index] !== 0 || flags[index] !== 0);
+    const invalidContainment = blocks && shapes && types[index] !== FLUID_IDS.None && !canTerrainStateContainFluid(
+      blocks[index] as BlockId,
+      normalizeShapeId(shapes[index]),
+      types[index] as FluidId,
+    );
+    if (
+      !isKnownFluidId(types[index]) ||
+      emptyCellHasData ||
+      !isValidFluidCell(cell) ||
+      flags[index] > (FLUID_FLAGS.Source | FLUID_FLAGS.Falling) ||
+      invalidContainment
+    ) {
+      throw new RangeError(`Invalid fluid state at cell index ${index}.`);
+    }
+  }
+}
+
+function validateFluidLayerSnapshot(snapshot: FluidLayerSnapshot, blocks: Uint16Array, shapes: Uint8Array) {
+  const cellCount = blocks.length;
+  if (snapshot.types.length !== cellCount || snapshot.levels.length !== cellCount || snapshot.flags.length !== cellCount) {
+    throw new RangeError(`Fluid snapshot arrays must contain ${cellCount} cells.`);
+  }
+  validateFluidArrays(snapshot.types, snapshot.levels, snapshot.flags, blocks, shapes);
+}
+
 export const EXPECTED_WORLD_STATS = {
   logicalCells: WORLD_CELL_COUNT,
   airCells: WORLD_AIR_CELL_COUNT,
   nonAirBlocks: WORLD_SURFACE_CELL_COUNT,
   renderedInstances: WORLD_SURFACE_CELL_COUNT,
+  fluidCells: 0,
+  fluidSources: 0,
+  fallingFluidCells: 0,
   chunks: WORLD_CHUNK_COUNT,
   instancesPerFlatChunk: CHUNK_SURFACE_CELL_COUNT,
 } as const;

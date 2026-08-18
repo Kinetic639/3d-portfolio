@@ -10,6 +10,8 @@ import type { GridCoordinate } from "@/lib/world/world-config";
 import type { TerrainCellMutation } from "./terrain-brushes";
 import type { ZoneColumnChange } from "./zone-tools";
 import { DEFAULT_ROTATION, DEFAULT_SHAPE_ID, DEFAULT_STATE, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
+import { EMPTY_FLUID_CELL, type FluidCell } from "@/lib/fluids/fluid-types";
+import { canTerrainStateContainFluid } from "@/lib/fluids/fluid-containment";
 
 export type EditorTool =
   | "select"
@@ -58,6 +60,7 @@ type CellData = {
   rotation: CellRotation;
   state: number;
   zoneId: number;
+  fluid: FluidCell;
 };
 
 type ZoneChange = {
@@ -204,7 +207,7 @@ export class MapEditorSession {
       cells: [{
         coordinate,
         before: this.captureCell(coordinate),
-        after: { blockId, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getZone(coordinate.x, coordinate.y, coordinate.z) },
+        after: { blockId, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getZone(coordinate.x, coordinate.y, coordinate.z), fluid: { ...EMPTY_FLUID_CELL } },
       }],
     });
   }
@@ -215,7 +218,7 @@ export class MapEditorSession {
       cells: [{
         coordinate,
         before: this.captureCell(coordinate),
-        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(coordinate.x, coordinate.z) },
+        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(coordinate.x, coordinate.z), fluid: this.world.getFluid(coordinate.x, coordinate.y, coordinate.z) },
       }],
     });
   }
@@ -242,7 +245,7 @@ export class MapEditorSession {
       cells: [{
         coordinate: target,
         before: this.captureCell(target),
-        after: { blockId, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getZone(target.x, target.y, target.z) },
+        after: { blockId, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getZone(target.x, target.y, target.z), fluid: { ...EMPTY_FLUID_CELL } },
       }],
     });
   }
@@ -270,7 +273,7 @@ export class MapEditorSession {
       cells: [{
         coordinate: target,
         before: this.captureCell(target),
-        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(target.x, target.z) },
+        after: { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(target.x, target.z), fluid: this.world.getFluid(target.x, target.y, target.z) },
       }],
     });
   }
@@ -284,7 +287,7 @@ export class MapEditorSession {
       const before = this.captureCell(cellCoordinate);
       const afterBlock = y <= coordinate.y ? targetBlock : BLOCK_IDS.Air;
       const after = afterBlock === BLOCK_IDS.Air
-        ? { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(cellCoordinate.x, cellCoordinate.z) }
+        ? { blockId: BLOCK_IDS.Air, shapeId: DEFAULT_SHAPE_ID, rotation: DEFAULT_ROTATION, state: DEFAULT_STATE, zoneId: this.world.getColumnZone(cellCoordinate.x, cellCoordinate.z), fluid: before.fluid }
         : { ...before, blockId: afterBlock };
       cells.push({ coordinate: cellCoordinate, before, after });
     }
@@ -326,6 +329,7 @@ export class MapEditorSession {
             rotation: mutation.beforeRotation,
             state: mutation.beforeState,
             zoneId: mutation.beforeZone,
+            fluid: this.world.getFluid(mutation.coordinate.x, mutation.coordinate.y, mutation.coordinate.z),
           },
           after: {
             blockId: mutation.afterBlock,
@@ -333,6 +337,9 @@ export class MapEditorSession {
             rotation: mutation.afterRotation,
             state: mutation.afterState,
             zoneId: mutation.afterZone,
+            fluid: canTerrainStateContainFluid(mutation.afterBlock, mutation.afterShape, this.world.getFluid(mutation.coordinate.x, mutation.coordinate.y, mutation.coordinate.z).type)
+              ? this.world.getFluid(mutation.coordinate.x, mutation.coordinate.y, mutation.coordinate.z)
+              : { ...EMPTY_FLUID_CELL },
           },
         })),
       zones: uniqueMutations
@@ -519,6 +526,7 @@ export class MapEditorSession {
         ...change.coordinate,
         ...change[side],
       });
+      this.world.setFluid(change.coordinate.x, change.coordinate.y, change.coordinate.z, change[side].fluid);
     }
 
     for (const change of command.zones ?? []) {
@@ -559,6 +567,7 @@ export class MapEditorSession {
       rotation: this.world.getRotation(coordinate.x, coordinate.y, coordinate.z),
       state: this.world.getState(coordinate.x, coordinate.y, coordinate.z),
       zoneId: this.world.getZone(coordinate.x, coordinate.y, coordinate.z),
+      fluid: this.world.getFluid(coordinate.x, coordinate.y, coordinate.z),
     };
   }
 
@@ -584,6 +593,7 @@ function collectDocumentCellChanges(before: MapDocument, after: MapDocument): Ce
       rotation: baseWorld.getRotation(coordinate.x, coordinate.y, coordinate.z),
       state: baseWorld.getState(coordinate.x, coordinate.y, coordinate.z),
       zoneId: 0,
+      fluid: { ...EMPTY_FLUID_CELL },
     };
     const beforeEdit = beforeMap.get(key);
     const afterEdit = afterMap.get(key);
@@ -604,6 +614,7 @@ function editToCellData(edit: MapDocument["edits"][number], fallback: CellData):
     rotation: edit.rotation ?? fallback.rotation,
     state: edit.state ?? fallback.state,
     zoneId: fallback.zoneId,
+    fluid: fallback.fluid,
   };
 }
 
@@ -614,6 +625,10 @@ function sameCellData(left: CellData, right: CellData) {
     left.rotation === right.rotation &&
     left.state === right.state &&
     left.zoneId === right.zoneId
+    && left.fluid.type === right.fluid.type
+    && left.fluid.level === right.fluid.level
+    && left.fluid.source === right.fluid.source
+    && left.fluid.falling === right.fluid.falling
   );
 }
 

@@ -5,6 +5,7 @@ import { createFlatVoxelWorld } from "@/lib/world/voxel-world";
 import { MapEditorSession } from "./map-editor";
 import { createTerrainMutations } from "./terrain-brushes";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
+import { EMPTY_FLUID_CELL, FLUID_IDS } from "@/lib/fluids/fluid-types";
 
 describe("map editor session", () => {
   it("paints only the intended logical cell", () => {
@@ -134,6 +135,24 @@ describe("map editor session", () => {
     expect(editor.getSnapshot().redoDepth).toBe(0);
   });
 
+  it("restores displaced fluid when a terrain edit is undone", () => {
+    const editor = new MapEditorSession();
+    const coordinate = { x: 4, y: 1, z: 5 };
+    editor.world.setFluidSource(coordinate.x, coordinate.y, coordinate.z, FLUID_IDS.Water);
+
+    editor.addBlock(coordinate, BLOCK_IDS.Stone);
+    expect(editor.world.getFluid(coordinate.x, coordinate.y, coordinate.z)).toEqual(EMPTY_FLUID_CELL);
+
+    editor.undo();
+    expect(editor.world.getFluid(coordinate.x, coordinate.y, coordinate.z)).toMatchObject({
+      type: FLUID_IDS.Water,
+      source: true,
+    });
+
+    editor.redo();
+    expect(editor.world.getFluid(coordinate.x, coordinate.y, coordinate.z)).toEqual(EMPTY_FLUID_CELL);
+  });
+
   it("resets to the original flat world", () => {
     const editor = new MapEditorSession();
     editor.erase({ x: 4, y: 0, z: 5 });
@@ -195,7 +214,7 @@ describe("map editor session", () => {
       shapeId: SHAPE_IDS.STAIR,
       rotation: ROTATIONS.EAST,
       state: 3,
-      zoneId: 2,
+      zoneId: 0,
     });
   });
 });

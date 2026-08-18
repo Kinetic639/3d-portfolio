@@ -306,9 +306,6 @@ const PRIMITIVES: PrimitiveType[] = ["box", "cylinder", "sphere", "plane", "plat
 const COLLISION_MODES: CollisionMode[] = ["none", "blocking", "walkable", "trigger"];
 const NODE_TYPES: NavigationNodeType[] = ["walk", "route-junction", "wait-point", "look-at", "character-spawn", "bird-perch"];
 type ShapePickerCategory = ShapeCategory | "all";
-// "fluid" is omitted: its only member is water, which is exposed through the
-// dedicated water tool below rather than as an ordinary terrain-palette
-// entry — see PALETTE_HIDDEN_SHAPE_IDS in shape-registry.ts.
 const SHAPE_CATEGORIES: ShapePickerCategory[] = ["all", "terrain", "transition", "structure", "roof", "utility"];
 const TERRAIN_MATERIAL_OPTIONS = [
   {
@@ -316,10 +313,7 @@ const TERRAIN_MATERIAL_OPTIONS = [
     displayName: getBlockDefinition(BLOCK_IDS.Ground).displayName,
     developmentColor: getBlockDefinition(BLOCK_IDS.Ground).developmentColor,
   },
-  // Water is deliberately excluded here — it is painted as one atomic action
-  // (material + shape together) via the dedicated "Water" control in
-  // ShapeControls, not as an ordinary standalone material.
-  ...RENDERABLE_BLOCK_DEFINITIONS.filter((block) => block.id !== BLOCK_IDS.Ground && block.id !== BLOCK_IDS.Water),
+  ...RENDERABLE_BLOCK_DEFINITIONS.filter((block) => block.id !== BLOCK_IDS.Ground),
 ];
 const MENU_GROUPS = ["file", "edit", "view", "map", "settings", "help"] as const;
 const COLLAPSED_SIDE_DOCK_WIDTH = 32;
@@ -1060,10 +1054,7 @@ function TerrainPlacementSettings({ props }: { props: MapEditorToolbarProps }) {
           ))}
         </div>
       ) : null}
-      {visibleShape === SHAPE_IDS.WATER ? (
-        <label>Water level<input type="range" min={0} max={15} value={shapeStateValue} onChange={(event) => props.onShapeStateChange(setShapePitch(Number(event.target.value), pitch))} /></label>
-      ) : null}
-      {(visibleShape !== SHAPE_IDS.SLAB && visibleShape !== SHAPE_IDS.WATER && !usesAxisState) ? (
+      {(visibleShape !== SHAPE_IDS.SLAB && !usesAxisState) ? (
         <label>State<input type="number" min={0} max={15} value={shapeStateValue} onChange={(event) => props.onShapeStateChange(setShapePitch(Number(event.target.value), pitch))} /></label>
       ) : null}
       <ActionButton icon="select" disabled={!props.selected} onClick={props.onEyedropperCell}>Eyedropper</ActionButton>
@@ -1118,17 +1109,6 @@ function ShapeControls({ props }: { props: MapEditorToolbarProps }) {
         setCategory(nextCategory);
         if (nextCategory !== "all") props.onShapeCategoryChange(nextCategory);
       }}>{SHAPE_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-      <button
-        type="button"
-        aria-pressed={props.paintBlockId === BLOCK_IDS.Water && props.activeShapeId === SHAPE_IDS.WATER}
-        className={props.paintBlockId === BLOCK_IDS.Water && props.activeShapeId === SHAPE_IDS.WATER ? "active" : ""}
-        onClick={() => {
-          props.onPaintBlockChange(BLOCK_IDS.Water);
-          props.onShapeChange(SHAPE_IDS.WATER);
-        }}
-      >
-        Water
-      </button>
       <input aria-label="Search block shapes" placeholder="Search block shapes" value={query} onChange={(event) => setQuery(event.target.value)} />
       <div className="editor-shape-list" role="listbox" aria-label="Shape selector">
         {visibleShapes.map((shape) => (

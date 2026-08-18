@@ -2160,9 +2160,7 @@ function ExperienceScene({
         setActiveShapeCategory(category);
         const nextShape = getShapeDefinition(activeShapeId).category === category
           ? activeShapeId
-          : category === "fluid"
-            ? SHAPE_IDS.WATER
-            : category === "transition"
+          : category === "transition"
               ? SHAPE_IDS.STAIR
               : category === "structure"
                 ? SHAPE_IDS.WALL
@@ -2171,14 +2169,12 @@ function ExperienceScene({
                   : SHAPE_IDS.CUBE;
         setActiveShapeId(nextShape);
         setActiveShapeState(DEFAULT_STATE);
-        if (nextShape === SHAPE_IDS.WATER) setPaintBlockId(BLOCK_IDS.Water);
       },
       onShapeChange: (shapeId) => {
         const shape = getShapeDefinition(shapeId);
         setActiveShapeId(shape.id);
         setActiveShapeCategory(shape.category);
         setActiveShapeState(DEFAULT_STATE);
-        if (shape.id === SHAPE_IDS.WATER) setPaintBlockId(BLOCK_IDS.Water);
       },
       onCellRotationChange: setActiveRotation,
       onShapeStateChange: (state) => setActiveShapeState(Math.max(0, Math.min(255, Math.floor(state) || 0))),
@@ -2954,16 +2950,6 @@ function SurfaceTerrainChunks({
       }),
     [gridLineColor],
   );
-  const waterMaterial = useMemo(
-    () =>
-      new THREE.MeshBasicMaterial({
-        vertexColors: true,
-        side: THREE.FrontSide,
-        transparent: true,
-        opacity: 0.78,
-      }),
-    [],
-  );
   const warmupMaterial = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -2980,12 +2966,11 @@ function SurfaceTerrainChunks({
   useEffect(() => {
     return () => {
       material.dispose();
-      waterMaterial.dispose();
       neutralMaterial.dispose();
       gridLineMaterial.dispose();
       warmupMaterial.dispose();
     };
-  }, [gridLineMaterial, material, neutralMaterial, warmupMaterial, waterMaterial]);
+  }, [gridLineMaterial, material, neutralMaterial, warmupMaterial]);
 
   return (
     <group visible={visible}>
@@ -2993,7 +2978,7 @@ function SurfaceTerrainChunks({
         <SurfaceTerrainChunkMesh
           key={chunk.id}
           chunk={chunk}
-          material={warmup ? warmupMaterial : neutral ? neutralMaterial : chunk.materialFamily === "water" ? waterMaterial : material}
+          material={warmup ? warmupMaterial : neutral ? neutralMaterial : material}
           gridLineMaterial={gridLineMaterial}
           gridLinesVisible={gridLinesVisible}
         />
@@ -5197,13 +5182,13 @@ function getTerrainBrushOperation(tool: EditorTool): TerrainBrushOperation | nul
 }
 
 function getActiveTerrainBlockId(blockId: BlockId, shapeId: ShapeId): BlockId {
-  return shapeId === SHAPE_IDS.WATER ? BLOCK_IDS.Water : blockId === BLOCK_IDS.Water ? BLOCK_IDS.Ground : blockId;
+  void shapeId;
+  return blockId;
 }
 
 function getTerrainMutationBlockId(tool: EditorTool, operation: TerrainBrushOperation, blockId: BlockId, shapeId: ShapeId, applyMaterialToAddedBlocks = true): BlockId {
   if (operation === "paint-path") return BLOCK_IDS.Path;
   if (tool === "add") {
-    if (shapeId === SHAPE_IDS.WATER) return BLOCK_IDS.Water;
     return applyMaterialToAddedBlocks ? getActiveTerrainBlockId(blockId, shapeId) : BLOCK_IDS.Ground;
   }
   return getActiveTerrainBlockId(blockId, shapeId);

@@ -3,6 +3,7 @@ import { BLOCK_IDS } from "./block-registry";
 import { getTerrainSurfaceAt, getTerrainSurfaceAtWorld } from "./surface-query";
 import { createFlatVoxelWorld } from "./voxel-world";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
+import { FLUID_IDS } from "@/lib/fluids/fluid-types";
 
 describe("shape-aware terrain surface queries", () => {
   it("returns the full cube top surface", () => {
@@ -28,16 +29,17 @@ describe("shape-aware terrain surface queries", () => {
     expect(upper.valid && upper.surfaceY).toBe(2);
   });
 
-  it("reports water as fluid but not solid support", () => {
+  it("keeps fluid independent from the supporting terrain surface", () => {
     const world = createFlatVoxelWorld();
-    world.setCell({ x: 31, y: 1, z: 31, blockId: BLOCK_IDS.Water, shapeId: SHAPE_IDS.WATER, rotation: ROTATIONS.NORTH, state: 15, zoneId: 0 });
+    world.setFluidSource(31, 1, 31, FLUID_IDS.Water);
     const surface = getTerrainSurfaceAt(world, 31, 31);
 
     expect(surface.valid).toBe(true);
     if (!surface.valid) return;
-    expect(surface.fluid).toBe(true);
-    expect(surface.solidSupport).toBe(false);
-    expect(surface.walkable).toBe(false);
+    expect(surface.fluid).toBe(false);
+    expect(surface.solidSupport).toBe(true);
+    expect(surface.walkable).toBe(true);
+    expect(world.getFluid(31, 1, 31).source).toBe(true);
   });
 
   it("works from negative and positive centered world coordinates", () => {
