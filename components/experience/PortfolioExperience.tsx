@@ -1,7 +1,7 @@
 "use client";
 
 import { Canvas, type ThreeEvent, useFrame, useLoader, useThree } from "@react-three/fiber";
-import { MapControls, Text, TransformControls } from "@react-three/drei";
+import { MapControls, Text, TransformControls, useAnimations, useGLTF } from "@react-three/drei";
 import gsap from "gsap";
 import { Compass, LockKeyhole, RotateCcw, UnlockKeyhole } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -17,9 +17,9 @@ import { buildSurfaceChunkMesh, type SurfaceChunkMeshData } from "@/lib/terrain/
 import { buildZoneOverlayChunkMeshes, buildZoneOverlayMeshes, type ZoneOverlayChunkMeshData } from "@/lib/terrain/zone-overlay";
 import { BLOCK_IDS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import { parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
-import { WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
+import { WORLD_CONFIG, type GridCoordinate, type WorldPosition } from "@/lib/world/world-config";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
-import { getTerrainSurfaceAt } from "@/lib/world/surface-query";
+import { getTerrainSurfaceAt, getTerrainSurfaceAtWorldPosition } from "@/lib/world/surface-query";
 import { MapEditorSession, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
 import { createMapPresetWorld, type MapPresetId } from "@/lib/editor/map-presets";
 import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
@@ -1086,6 +1086,8 @@ function ExperienceScene({
   const [entityPopPreviewCount, setEntityPopPreviewCount] = useState(0);
   const [entityPopAnimationId, setEntityPopAnimationId] = useState<string | null>(null);
   const [runtimeObjectReveal, setRuntimeObjectReveal] = useState<RuntimeObjectRevealState>("hidden");
+  const [soldierSelected, setSoldierSelected] = useState(false);
+  const [soldierDestination, setSoldierDestination] = useState<WorldPosition | null>(null);
   const [collisionMode, setCollisionMode] = useState<CollisionMode>("blocking");
   const [entityColor, setEntityColor] = useState("#9ca3af");
   const [entityName, setEntityName] = useState("Placeholder");
@@ -2800,6 +2802,24 @@ function ExperienceScene({
     uniforms.uTime.value = clock.elapsedTime;
   });
 
+  const soldierSurface = getTerrainSurfaceAt(editorSession.world, 36, 34);
+  const handleSoldierTerrainClick = useCallback((event: ThreeEvent<MouseEvent>) => {
+    if (!soldierSelected || editorAvailable || phase !== "explore" || event.delta > POINTER_CLICK_MAX_DISTANCE_PX) {
+      return;
+    }
+
+    const destination = getTerrainSurfaceAtWorldPosition(editorSession.world, event.point);
+    if (!destination.valid || !destination.walkable || destination.fluid) {
+      return;
+    }
+
+    event.stopPropagation();
+    setSoldierDestination(destination.worldPosition);
+  }, [editorAvailable, editorSession.world, phase, soldierSelected]);
+  const resolveSoldierSurface = useCallback((x: number, z: number) => (
+    getTerrainSurfaceAtWorldPosition(editorSession.world, { x, z })
+  ), [editorSession.world]);
+
   return (
     <>
       <color attach="background" args={[editorAvailable ? mapBackgroundColor : "#edf1ed"]} />
@@ -2809,6 +2829,7 @@ function ExperienceScene({
         chunks={terrain.chunks}
         uniforms={uniforms}
         visible={activeRenderMode === "instanced"}
+        onTerrainClick={handleSoldierTerrainClick}
       />
       <SurfaceTerrainChunks
         chunks={terrain.surfaceChunks}
@@ -2819,8 +2840,28 @@ function ExperienceScene({
         neutralColor={zoneNeutralTerrainColor}
         gridLinesVisible={editorAvailable && zoneGridLinesVisible}
         gridLineColor={zoneGridLineColor}
+        onTerrainClick={handleSoldierTerrainClick}
       />
       <WorldEntryItem visible={phase === "ready"} position={LOADER_ORIGIN_WORLD} onActivate={startExpansion} />
+      {soldierSurface.valid ? (
+        <AnimatedSoldier
+          position={[
+            soldierSurface.worldPosition.x,
+            soldierSurface.worldPosition.y,
+            soldierSurface.worldPosition.z,
+          ]}
+          visible={(editorAvailable || runtimeObjectReveal !== "hidden") && isLayerVisible(layerStates, "entities")}
+          selected={soldierSelected}
+          destination={soldierDestination}
+          resolveSurface={resolveSoldierSurface}
+          onSelect={() => {
+            if (!editorAvailable && phase === "explore") {
+              setSoldierSelected(true);
+            }
+          }}
+          onArrive={() => setSoldierDestination(null)}
+        />
+      ) : null}
       <ConstrainedMapControls
         enabled={benchmarkMode ? benchmarkInputEnabled : isInteractivePhase(phase) && !entityTransformDragging}
         phase={phase}
@@ -3002,10 +3043,12 @@ function TerrainChunks({
   chunks,
   uniforms,
   visible,
+  onTerrainClick,
 }: {
   chunks: TerrainChunk[];
   uniforms: TerrainUniforms;
   visible: boolean;
+  onTerrainClick: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const geometry = useMemo(() => createOpenBottomBlockGeometry(1.01, 1.01, 1.01), []);
   const material = useMemo(
@@ -3033,6 +3076,7 @@ function TerrainChunks({
           chunk={chunk}
           geometry={geometry}
           material={material}
+          onTerrainClick={onTerrainClick}
         />
       ))}
     </group>
@@ -3103,6 +3147,7 @@ function SurfaceTerrainChunks({
   neutralColor,
   gridLinesVisible,
   gridLineColor,
+  onTerrainClick,
 }: {
   chunks: SurfaceChunkMeshData[];
   uniforms: TerrainUniforms;
@@ -3112,6 +3157,7 @@ function SurfaceTerrainChunks({
   neutralColor: string;
   gridLinesVisible: boolean;
   gridLineColor: string;
+  onTerrainClick: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const terrainTextures = useLoader(THREE.TextureLoader, [...TERRAIN_TEXTURE_URLS]);
   const textureStrips = useMemo(() => [
@@ -3214,6 +3260,7 @@ function SurfaceTerrainChunks({
           material={warmup ? warmupMaterial : neutral ? neutralMaterial : chunk.materialFamily === "water" ? waterMaterial : material}
           gridLineMaterial={gridLineMaterial}
           gridLinesVisible={gridLinesVisible}
+          onTerrainClick={onTerrainClick}
         />
       ))}
     </group>
@@ -3225,11 +3272,13 @@ function SurfaceTerrainChunkMesh({
   material,
   gridLineMaterial,
   gridLinesVisible,
+  onTerrainClick,
 }: {
   chunk: SurfaceChunkMeshData;
   material: THREE.Material;
   gridLineMaterial: THREE.Material;
   gridLinesVisible: boolean;
+  onTerrainClick: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const geometry = useMemo(() => {
     const nextGeometry = new THREE.BufferGeometry();
@@ -3278,6 +3327,7 @@ function SurfaceTerrainChunkMesh({
           portfolioSurfaceTriangleToCell: chunk.triangleToCell,
         }}
         frustumCulled
+        onClick={onTerrainClick}
       />
       {gridLinesVisible ? (
         <lineSegments
@@ -3290,6 +3340,124 @@ function SurfaceTerrainChunkMesh({
     </group>
   );
 }
+
+function AnimatedSoldier({
+  position,
+  visible,
+  selected,
+  destination,
+  resolveSurface,
+  onSelect,
+  onArrive,
+}: {
+  position: [number, number, number];
+  visible: boolean;
+  selected: boolean;
+  destination: WorldPosition | null;
+  resolveSurface: (x: number, z: number) => ReturnType<typeof getTerrainSurfaceAtWorldPosition>;
+  onSelect: () => void;
+  onArrive: () => void;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const [spawnPosition] = useState(position);
+  const { scene, animations } = useGLTF("/models/characters/Soldier.glb");
+  const { actions } = useAnimations(animations, groupRef);
+  const onArriveRef = useRef(onArrive);
+
+  useEffect(() => {
+    onArriveRef.current = onArrive;
+  }, [onArrive]);
+
+  useEffect(() => {
+    scene.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+  }, [scene]);
+
+  useEffect(() => {
+    const nextAction = destination ? actions.Walk : actions.Idle;
+    if (!nextAction) {
+      return;
+    }
+
+    const previousAction = destination ? actions.Idle : actions.Walk;
+    previousAction?.fadeOut(0.18);
+    nextAction.reset().setLoop(THREE.LoopRepeat, Infinity).fadeIn(0.18).play();
+    return () => {
+      nextAction.fadeOut(0.18);
+    };
+  }, [actions, destination]);
+
+  useFrame((_, delta) => {
+    const soldier = groupRef.current;
+    if (!soldier || !destination) {
+      return;
+    }
+
+    const offsetX = destination.x - soldier.position.x;
+    const offsetZ = destination.z - soldier.position.z;
+    const remainingDistance = Math.hypot(offsetX, offsetZ);
+    const step = 2.1 * delta;
+
+    if (remainingDistance <= step) {
+      soldier.position.set(destination.x, destination.y, destination.z);
+      onArriveRef.current();
+      return;
+    }
+
+    const directionX = offsetX / remainingDistance;
+    const directionZ = offsetZ / remainingDistance;
+    const nextX = soldier.position.x + directionX * step;
+    const nextZ = soldier.position.z + directionZ * step;
+    const nextSurface = resolveSurface(nextX, nextZ);
+    if (!nextSurface.valid || !nextSurface.walkable || nextSurface.fluid) {
+      onArriveRef.current();
+      return;
+    }
+
+    soldier.position.set(nextX, nextSurface.worldPosition.y, nextZ);
+    // Soldier.glb is authored facing -Z, opposite Three.js's +Z direction convention here.
+    const targetRotation = Math.atan2(directionX, directionZ) + Math.PI;
+    soldier.rotation.y = dampAngle(soldier.rotation.y, targetRotation, 12, delta);
+  });
+
+  const handleSelect = (event: ThreeEvent<MouseEvent>) => {
+    if (event.delta > POINTER_CLICK_MAX_DISTANCE_PX) {
+      return;
+    }
+    event.stopPropagation();
+    onSelect();
+  };
+
+  return (
+    <group
+      ref={groupRef}
+      position={spawnPosition}
+      rotation={[0, Math.PI, 0]}
+      visible={visible}
+      userData={{ portfolioCharacterId: "soldier", activeAnimation: destination ? "Walk" : "Idle" }}
+      onClick={handleSelect}
+    >
+      <primitive object={scene} />
+      {selected ? (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.025, 0]}>
+          <ringGeometry args={[0.48, 0.57, 32]} />
+          <meshBasicMaterial color="#f0b83f" transparent opacity={0.95} depthWrite={false} />
+        </mesh>
+      ) : null}
+    </group>
+  );
+}
+
+function dampAngle(current: number, target: number, smoothing: number, delta: number) {
+  const difference = normalizeAngleRadians(target - current);
+  return current + difference * (1 - Math.exp(-smoothing * delta));
+}
+
+useGLTF.preload("/models/characters/Soldier.glb");
 
 function WorldEntryItem({
   visible,
@@ -3438,10 +3606,12 @@ function TerrainChunkMesh({
   chunk,
   geometry,
   material,
+  onTerrainClick,
 }: {
   chunk: TerrainChunk;
   geometry: THREE.BufferGeometry;
   material: THREE.ShaderMaterial;
+  onTerrainClick: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const chunkGeometry = useMemo(() => {
@@ -3497,6 +3667,7 @@ function TerrainChunkMesh({
       ref={meshRef}
       args={[chunkGeometry, material, CHUNK_MAX_INSTANCE_COUNT]}
       frustumCulled={false}
+      onClick={onTerrainClick}
     />
   );
 }
