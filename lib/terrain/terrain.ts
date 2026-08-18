@@ -2,6 +2,7 @@ import { createFlatVoxelWorld, type RenderChunk, type RenderableCell, type Voxel
 import { BLOCK_IDS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import type { CellRotation, ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import { buildSurfaceChunkMeshes, type SurfaceChunkMeshData } from "./surface-mesher";
+import { buildWaterChunkMeshes, type WaterChunkMeshData } from "./water-mesher";
 import {
   CHUNK_SURFACE_CELL_COUNT,
   CHUNKS_PER_AXIS,
@@ -54,6 +55,7 @@ export type TerrainData = {
   world: VoxelWorld;
   chunks: TerrainChunk[];
   surfaceChunks: SurfaceChunkMeshData[];
+  waterChunks: WaterChunkMeshData[];
   centerCells: TerrainCell[];
   instanceCount: number;
   logicalCellCount: number;
@@ -62,6 +64,9 @@ export type TerrainData = {
   surfaceQuadCount: number;
   surfaceTriangleCount: number;
   surfaceBuildMs: number;
+  waterQuadCount: number;
+  waterTriangleCount: number;
+  waterBuildMs: number;
 };
 
 const CENTER_MIN = WORLD_CONFIG.width / 2 - 1;
@@ -86,12 +91,14 @@ export function createTerrainDataFromWorld(world: VoxelWorld): TerrainData {
   const stats = world.getStats();
   const chunks = world.createRenderChunks().map(toTerrainChunk);
   const surfaceBuild = buildSurfaceChunkMeshes(world);
+  const waterBuild = buildWaterChunkMeshes(world);
   const centerCells = chunks.flatMap((chunk) => chunk.cells.filter((cell) => cell.isCenterLoaderBlock));
 
   return {
     world,
     chunks,
     surfaceChunks: surfaceBuild.chunks,
+    waterChunks: waterBuild.chunks,
     centerCells,
     instanceCount: stats.renderedInstances,
     logicalCellCount: stats.logicalCells,
@@ -100,6 +107,9 @@ export function createTerrainDataFromWorld(world: VoxelWorld): TerrainData {
     surfaceQuadCount: surfaceBuild.chunks.reduce((sum, chunk) => sum + chunk.visibleQuads, 0),
     surfaceTriangleCount: surfaceBuild.chunks.reduce((sum, chunk) => sum + chunk.triangles, 0),
     surfaceBuildMs: surfaceBuild.totalBuildMs,
+    waterQuadCount: waterBuild.chunks.reduce((sum, chunk) => sum + chunk.visibleQuads, 0),
+    waterTriangleCount: waterBuild.chunks.reduce((sum, chunk) => sum + chunk.triangles, 0),
+    waterBuildMs: waterBuild.totalBuildMs,
   };
 }
 

@@ -14,6 +14,7 @@ import {
   type TerrainChunk,
 } from "@/lib/terrain/terrain";
 import { buildSurfaceChunkMesh, type SurfaceChunkMeshData } from "@/lib/terrain/surface-mesher";
+import { buildWaterChunkMesh, type WaterChunkMeshData } from "@/lib/terrain/water-mesher";
 import { buildZoneOverlayChunkMeshes, buildZoneOverlayMeshes, type ZoneOverlayChunkMeshData } from "@/lib/terrain/zone-overlay";
 import { BLOCK_IDS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import { parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
@@ -439,6 +440,73 @@ const SURFACE_FRAGMENT_SHADER = `
     color += vec3(0.035, 0.028, 0.018);
 
     gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
+const WATER_VERTEX_SHADER = `
+  uniform float uExpansionProgress;
+  uniform float uTime;
+
+  attribute vec2 aFlowVector;
+  attribute float aFalling;
+  attribute float aFoam;
+  attribute float aRevealDelay;
+
+  varying vec2 vUv;
+  varying vec2 vFlowVector;
+  varying float vFalling;
+  varying float vFoam;
+  varying vec3 vNormal;
+  varying vec3 vWorldPosition;
+
+  void main() {
+    float reveal = clamp((uExpansionProgress - aRevealDelay) / 0.18, 0.0, 1.0);
+    vec3 transformed = position;
+    bool topSurface = normal.y > 0.5;
+    if (topSurface) {
+      float ripple = sin((position.x + position.z) * 7.0 + uTime * 2.1) * 0.012;
+      ripple += sin(position.x * 11.0 - position.z * 5.0 + uTime * 1.4) * 0.007;
+      transformed.y += ripple * reveal;
+    }
+    transformed.y -= (1.0 - reveal) * 0.34;
+
+    vUv = uv;
+    vFlowVector = aFlowVector;
+    vFalling = aFalling;
+    vFoam = aFoam;
+    vNormal = normalize(normalMatrix * normal);
+    vWorldPosition = transformed;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);
+  }
+`;
+
+const WATER_FRAGMENT_SHADER = `
+  uniform float uTime;
+
+  varying vec2 vUv;
+  varying vec2 vFlowVector;
+  varying float vFalling;
+  varying float vFoam;
+  varying vec3 vNormal;
+  varying vec3 vWorldPosition;
+
+  void main() {
+    vec2 direction = length(vFlowVector) > 0.05 ? normalize(vFlowVector) : vec2(0.18, 0.08);
+    vec2 animatedUv = vUv + direction * uTime * mix(0.035, 0.15, vFalling);
+    float bands = sin((animatedUv.x + animatedUv.y) * 22.0 + uTime * 1.7);
+    float crossBands = sin((animatedUv.x - animatedUv.y) * 13.0 - uTime * 1.1);
+    float pattern = smoothstep(0.28, 0.92, bands * 0.5 + crossBands * 0.22 + 0.55);
+
+    vec3 deepColor = vec3(0.035, 0.32, 0.43);
+    vec3 brightColor = vec3(0.12, 0.66, 0.73);
+    vec3 color = mix(deepColor, brightColor, pattern * 0.48 + max(vNormal.y, 0.0) * 0.18);
+    float edgeInk = pow(1.0 - abs(dot(normalize(vNormal), vec3(0.0, 1.0, 0.0))), 1.6);
+    color = mix(color, vec3(0.015, 0.055, 0.065), edgeInk * 0.68);
+    float foamLine = smoothstep(0.58, 0.9, pattern + vFoam * 0.58);
+    color = mix(color, vec3(0.72, 0.94, 0.9), foamLine * vFoam * 0.58);
+
+    float alpha = mix(0.72, 0.88, edgeInk) + foamLine * vFoam * 0.06;
+    gl_FragColor = vec4(color, clamp(alpha, 0.0, 0.92));
   }
 `;
 
@@ -1398,7 +1466,8 @@ function ExperienceScene({
   };
 
   const replaceRebuiltChunks = (rebuiltChunks: ReturnType<MapEditorSession["applyTool"]>["rebuiltChunks"]) => {
-    if (rebuiltChunks.length === 0) {
+    const dirtyFluidChunkIds = [...editorSession.world.dirtyFluidChunks];
+    if (rebuiltChunks.length === 0 && dirtyFluidChunkIds.length === 0) {
       if (editorSession.world.dirtyZoneChunks.size > 0) {
         replaceZoneOverlayChunks([...editorSession.world.dirtyZoneChunks]);
         editorSession.world.clearDirtyZoneChunks();
@@ -1412,6 +1481,13 @@ function ExperienceScene({
     const startedAt = performance.now();
     const rebuiltTerrainChunks = new Map(rebuiltChunks.map((chunk) => [chunk.id, toTerrainChunk(chunk)]));
     const rebuiltSurfaceChunks = new Map(rebuiltChunks.map((chunk) => [chunk.id, buildSurfaceChunkMesh(editorSession.world, chunk.chunkX, chunk.chunkZ)]));
+    const waterChunkIds = [...new Set([...rebuiltChunks.map((chunk) => chunk.id), ...dirtyFluidChunkIds])];
+    const rebuiltWaterChunks = new Map(waterChunkIds.flatMap((chunkId) => {
+      const coordinates = parseChunkId(chunkId);
+      if (!coordinates) return [];
+      const mesh = buildWaterChunkMesh(editorSession.world, coordinates.chunkX, coordinates.chunkZ);
+      return [[mesh.id, mesh] as const];
+    }));
     // eslint-disable-next-line react-hooks/purity
     const rebuildMs = Number((performance.now() - startedAt).toFixed(3));
     incrementEditorPerfCounter("terrainChunkRebuilds", rebuiltChunks.length);
@@ -1420,6 +1496,7 @@ function ExperienceScene({
       ...currentTerrain,
       chunks: currentTerrain.chunks.map((chunk) => rebuiltTerrainChunks.get(chunk.id) ?? chunk),
       surfaceChunks: currentTerrain.surfaceChunks.map((chunk) => rebuiltSurfaceChunks.get(chunk.id) ?? chunk),
+      waterChunks: currentTerrain.waterChunks.map((chunk) => rebuiltWaterChunks.get(chunk.id) ?? chunk),
       instanceCount: editorSession.world.getStats().renderedInstances,
       airCellCount: editorSession.world.getStats().airCells,
       nonAirBlockCount: editorSession.world.getStats().nonAirBlocks,
@@ -1431,9 +1508,18 @@ function ExperienceScene({
         (sum, chunk) => sum + (rebuiltSurfaceChunks.get(chunk.id)?.triangles ?? chunk.triangles),
         0,
       ),
+      waterQuadCount: currentTerrain.waterChunks.reduce(
+        (sum, chunk) => sum + (rebuiltWaterChunks.get(chunk.id)?.visibleQuads ?? chunk.visibleQuads),
+        0,
+      ),
+      waterTriangleCount: currentTerrain.waterChunks.reduce(
+        (sum, chunk) => sum + (rebuiltWaterChunks.get(chunk.id)?.triangles ?? chunk.triangles),
+        0,
+      ),
     }));
     replaceZoneOverlayChunks([...new Set([...rebuiltChunks.map((chunk) => chunk.id), ...editorSession.world.dirtyZoneChunks])]);
     editorSession.world.clearDirtyZoneChunks();
+    editorSession.world.clearDirtyFluidChunks();
     setLastRebuiltChunks([...rebuiltTerrainChunks.keys()]);
     setLastChunkRebuildMs(rebuildMs);
     setEditorRevision((revision) => revision + 1);
@@ -2838,6 +2924,11 @@ function ExperienceScene({
         gridLineColor={zoneGridLineColor}
         onTerrainClick={handleSoldierTerrainClick}
       />
+      <WaterTerrainChunks
+        chunks={terrain.waterChunks}
+        uniforms={uniforms}
+        visible
+      />
       <WorldEntryItem visible={phase === "ready"} position={LOADER_ORIGIN_WORLD} onActivate={startExpansion} />
       {soldierSurface.valid ? (
         <AnimatedSoldier
@@ -3323,6 +3414,67 @@ function SurfaceTerrainChunkMesh({
         />
       ) : null}
     </group>
+  );
+}
+
+function WaterTerrainChunks({
+  chunks,
+  uniforms,
+  visible,
+}: {
+  chunks: WaterChunkMeshData[];
+  uniforms: TerrainUniforms;
+  visible: boolean;
+}) {
+  const material = useMemo(() => new THREE.ShaderMaterial({
+    uniforms,
+    vertexShader: WATER_VERTEX_SHADER,
+    fragmentShader: WATER_FRAGMENT_SHADER,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.FrontSide,
+  }), [uniforms]);
+
+  useEffect(() => () => material.dispose(), [material]);
+
+  return (
+    <group visible={visible} renderOrder={4}>
+      {chunks.map((chunk) => (
+        chunk.indices.length > 0 ? <WaterTerrainChunkMesh key={chunk.id} chunk={chunk} material={material} /> : null
+      ))}
+    </group>
+  );
+}
+
+function WaterTerrainChunkMesh({ chunk, material }: { chunk: WaterChunkMeshData; material: THREE.Material }) {
+  const geometry = useMemo(() => {
+    const nextGeometry = new THREE.BufferGeometry();
+    nextGeometry.setAttribute("position", new THREE.BufferAttribute(chunk.positions, 3));
+    nextGeometry.setAttribute("normal", new THREE.BufferAttribute(chunk.normals, 3));
+    nextGeometry.setAttribute("uv", new THREE.BufferAttribute(chunk.uvs, 2));
+    nextGeometry.setAttribute("aFlowVector", new THREE.BufferAttribute(chunk.flowVectors, 2));
+    nextGeometry.setAttribute("aFalling", new THREE.BufferAttribute(chunk.fallingFlags, 1));
+    nextGeometry.setAttribute("aFoam", new THREE.BufferAttribute(chunk.foamFactors, 1));
+    nextGeometry.setAttribute("aRevealDelay", new THREE.BufferAttribute(chunk.revealDelays, 1));
+    nextGeometry.setIndex(new THREE.BufferAttribute(chunk.indices, 1));
+    nextGeometry.computeBoundingBox();
+    nextGeometry.computeBoundingSphere();
+    return nextGeometry;
+  }, [chunk]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  return (
+    <mesh
+      geometry={geometry}
+      material={material}
+      renderOrder={4}
+      frustumCulled
+      userData={{
+        portfolioWaterChunkId: chunk.id,
+        portfolioWaterTriangleToCell: chunk.triangleToCell,
+      }}
+    />
   );
 }
 

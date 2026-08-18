@@ -3,8 +3,8 @@
 - [x] Phase 0: Lock water mechanics and scope
 - [x] Phase 1: Introduce the fluid data model
 - [x] Phase 2: Implement the deterministic water solver
-- [ ] Phase 3: Build the dedicated water mesher
-- [ ] Phase 4: Add the stylized water renderer
+- [x] Phase 3: Build the dedicated water mesher
+- [x] Phase 4: Add the stylized water renderer
 - [ ] Phase 5: Integrate liquid authoring into the editor
 - [ ] Phase 6: Add map persistence, migration, and baking
 - [ ] Phase 7: Integrate settled water into portfolio runtime
@@ -368,6 +368,13 @@ Derived water must disappear when it loses all valid incoming support:
 - `lib/terrain/surface-mesher.ts`
 - Mesher unit tests
 
+### Implementation Status
+
+Water now builds into independent chunk meshes with smoothed top corners,
+exposed shore and waterfall sides, internal-face removal, flow vectors, falling
+flags, foam factors, and triangle-to-cell mappings. Chunk-edge heights are
+sampled from world coordinates so neighboring chunks produce matching seams.
+
 ### Mesh Separation
 
 Water must use dedicated chunk meshes rather than sharing the opaque surface chunk's material classification.
@@ -419,13 +426,13 @@ Derive a horizontal flow vector from neighboring surface heights:
 
 ### Required Mesher Tests
 
-- [ ] Adjacent full water produces a flat crack-free surface.
-- [ ] Flow levels produce consistent slopes.
-- [ ] Chunk-boundary corners match exactly.
-- [ ] Internal water faces are removed.
-- [ ] Exposed shore and waterfall sides are generated.
-- [ ] Falling flags and flow vectors map to the correct faces.
-- [ ] Triangle-to-cell picking remains correct.
+- [x] Adjacent full water produces a flat crack-free surface.
+- [x] Flow levels produce consistent slopes.
+- [x] Chunk-boundary corners match exactly.
+- [x] Internal water faces are removed.
+- [x] Exposed shore and waterfall sides are generated.
+- [x] Falling flags and flow vectors map to the correct faces.
+- [x] Triangle-to-cell picking remains correct.
 
 ### Exit Criteria
 
@@ -440,6 +447,15 @@ Derive a horizontal flow vector from neighboring surface heights:
 - Prefer extracting water rendering into a focused component/module instead of enlarging the existing file further
 - `public/textures/water/`
 - Shader tests or visual regression coverage where practical
+
+### Implementation Status
+
+The portfolio runtime now renders all non-empty water chunks with one shared
+transparent `ShaderMaterial`. Procedural directional bands distinguish still,
+flowing, and falling water; shoreline foam and dark side accents support the
+graphic outlined art direction. Water uses a stable render order, does not write
+depth, updates only the existing shared time uniform, and disposes material and
+geometry GPU resources on replacement or unmount.
 
 ### Material Strategy
 
