@@ -2579,11 +2579,8 @@ function ExperienceScene({
         setEditorMessage({ type: preview.leaksAtBoundary ? "error" : "info", text: preview.leaksAtBoundary ? "Basin preview reaches an open boundary." : `${preview.cells.length} basin cells ready.` });
       },
       onWaterConfirmBasin: () => {
-        if (!waterBasinPreview || waterBasinPreview.cells.length === 0) return;
-        runWaterAction(
-          () => editorSession.applyWaterSources(waterBasinPreview.cells, { infiniteSources: infiniteWaterSources, settle: true }),
-          waterBasinPreview.leaksAtBoundary ? "Open basin region filled and settled." : "Basin filled and settled.",
-        );
+        if (!selectedCell || !waterBasinPreview || waterBasinPreview.cells.length === 0 || waterBasinPreview.leaksAtBoundary) return;
+        runWaterAction(() => editorSession.fillWaterBasin(selectedCell, selectedCell.y, infiniteWaterSources), "Basin filled and settled.");
         setWaterBasinPreview(null);
       },
       onWaterCancelBasin: () => setWaterBasinPreview(null),
