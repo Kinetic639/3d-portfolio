@@ -45,9 +45,6 @@ yarn-error.log*
 **/temp/
 **/.tmp-*.mjs
 
-# downloaded visual reference captured during prototype work
-/portfolio-prototype/public/20260819210011936/
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
