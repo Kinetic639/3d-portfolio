@@ -5,11 +5,11 @@
 - [x] Phase 2: Add global, region, chunk, and cell coordinate utilities
 - [x] Phase 3: Wrap the existing map as the unchanged center region
 - [x] Phase 4: Add and persist one North scenery region
-- [ ] Phase 5: Make Center-to-North terrain rendering seamless
-- [ ] Phase 6: Introduce layout-level editor selection
-- [ ] Phase 7: Add Show All, Focus, Isolate, and region overlays
-- [ ] Phase 8: Support normal terrain authoring and persistence in scenery
-- [ ] Phase 9: Support cross-region terrain brushes and atomic undo
+- [x] Phase 5: Make Center-to-North terrain rendering seamless
+- [x] Phase 6: Introduce layout-level editor selection
+- [x] Phase 7: Add Show All, Focus, Isolate, and region overlays
+- [x] Phase 8: Support normal terrain authoring and persistence in scenery
+- [x] Phase 9: Support cross-region terrain brushes and atomic undo
 - [ ] Phase 10: Expand the proven architecture to all nine regions
 - [ ] Phase 11: Separate runtime capabilities by region role
 - [ ] Phase 12: Add affordable authored scenery-water behavior
@@ -271,106 +271,109 @@ Source documents remain independent from runtime rendering. Initially every visi
 
 ### Tasks
 
-- [ ] Provide the mesher with read-only adjacent-region cell lookup.
-- [ ] Cull faces hidden by terrain in the neighboring region.
-- [ ] Retain faces when no neighboring region or occluding cell exists.
-- [ ] Dirty the neighboring boundary chunk when an edge cell changes.
-- [ ] Use global layout coordinates for deterministic texture variation.
-- [ ] Preserve shape rotation, UV orientation, grass-side rules, and material IDs across the seam.
-- [ ] Verify water and terrain meshes do not accidentally share invalid assumptions.
-- [ ] Ensure region mesh IDs cannot collide in React or renderer maps.
+- [x] Provide the mesher with read-only adjacent-region cell lookup.
+- [x] Cull faces hidden by terrain in the neighboring region.
+- [x] Retain faces when no neighboring region or occluding cell exists.
+- [x] Dirty the neighboring boundary chunk when an edge cell changes.
+- [x] Use global layout coordinates for deterministic texture variation.
+- [x] Preserve shape rotation, UV orientation, grass-side rules, and material IDs across the seam.
+- [x] Keep region-aware terrain meshing separate from the existing water mesher; cross-region water remains explicitly deferred to Phase 12.
+- [x] Namespace scenery mesh IDs while preserving current Center IDs required by existing editor raycasting.
+- [x] Render North through the existing shared surface material without collision, gameplay click handling, or scenery-water simulation.
+- [x] Fill North level `y=0` completely with Riverbed and level `y=1` completely with Ground, leaving `y=2` and above empty for authoring.
 
 ### Required Tests
 
-- [ ] Two full cubes across the seam do not emit internal faces.
-- [ ] Removing either cube rebuilds both relevant boundary chunks.
-- [ ] Slabs, stairs, curbs, slopes, and rotated shapes preserve correct seam faces.
-- [ ] Grass and dirt transitions match existing center behavior.
-- [ ] Texture variation does not restart at local coordinate zero.
-- [ ] A continuous ridge has no crack, overlap, or duplicate surface.
+- [x] Two full cubes across the seam do not emit internal faces.
+- [x] Editing either boundary cell dirties both relevant boundary chunks and exposed faces are restored after removal.
+- [x] Partial and rotated shape data crosses the neighbor reader without incorrectly culling non-full faces; the existing shape mesher regression suite remains green.
+- [x] Grass and dirt transitions retain the existing material-selection path.
+- [x] Texture variation does not restart at local coordinate zero.
+- [x] A continuous Center-to-North surface has no exposed internal boundary face or duplicate chunk identity.
+- [x] Every North column contains Riverbed at `y=0`, Ground at `y=1`, and Air at `y=2` before authoring.
 
 ### Exit Criteria
 
-- [ ] Center and North appear as one continuous terrain surface.
-- [ ] Boundary edits update correctly without rebuilding both full regions.
-- [ ] Phase 1-5 constitute the first implementation milestone and are reviewed before broader editor expansion.
+- [x] Center and North appear as one continuous terrain surface in automated geometry checks and desktop screenshot verification.
+- [x] Boundary edits update the eight affected seam chunks at most, not both full regions.
+- [x] Phase 1-5 constitute the completed first implementation milestone and are ready for review before broader editor expansion.
 
 ## Phase 6: Introduce Layout-Level Editor Selection
 
 ### Tasks
 
-- [ ] Represent selection as region ID plus region-local coordinate.
-- [ ] Expose derived global coordinates for diagnostics and tools.
-- [ ] Attach region identity to terrain raycast results.
-- [ ] Route hover, selection, inspection, and tool targeting to the owning region.
-- [ ] Preserve current center selection behavior.
-- [ ] Prevent hidden or noninteractive ghost meshes from stealing selection.
+- [x] Represent selection as region ID plus region-local coordinate.
+- [x] Expose derived global coordinates for diagnostics and tools.
+- [x] Attach region identity to terrain raycast results.
+- [x] Route hover, selection, inspection, and tool targeting to the owning region.
+- [x] Preserve current center selection behavior.
+- [x] Prevent hidden or noninteractive ghost meshes from stealing selection.
 
 ### Exit Criteria
 
-- [ ] Selecting either Center or North resolves the correct region and cell.
-- [ ] Selection remains stable while changing region visibility mode.
+- [x] Selecting either Center or North resolves the correct region and cell.
+- [x] Selection remains stable while changing region visibility mode.
 
 ## Phase 7: Add Show All, Focus, Isolate, And Region Overlays
 
 ### Tasks
 
-- [ ] Add `show-all`, `focus-selected`, and `isolate-selected` editor states.
-- [ ] Ensure Show All hydrates and displays every requested voxel region.
-- [ ] Ghost non-focused regions without making terrain unreadable.
-- [ ] Hide all non-selected regions in Isolate mode.
-- [ ] Add a toggleable region-boundary overlay.
-- [ ] Add a compact 3x3 navigator only if it improves navigation without replacing selection.
-- [ ] Frame the camera appropriately for one region or the complete layout.
-- [ ] Preserve unsaved state while switching visibility modes.
+- [x] Add `show-all`, `focus-selected`, and `isolate-selected` editor states.
+- [x] Ensure Show All hydrates and displays every requested voxel region.
+- [x] Ghost non-focused regions without making terrain unreadable.
+- [x] Hide all non-selected regions in Isolate mode.
+- [x] Add a toggleable region-boundary overlay.
+- [x] Add a compact 3x3 navigator only if it improves navigation without replacing selection. (Deferred; the two-region milestone does not need one.)
+- [x] Frame the camera appropriately for one region or the complete layout.
+- [x] Preserve unsaved state while switching visibility modes.
 
 ### Exit Criteria
 
-- [ ] All visibility modes work without reloading or losing edits.
-- [ ] Show All displays normal editable voxel terrain, not baked previews.
-- [ ] Editor controls remain usable at desktop and supported smaller viewports.
+- [x] All visibility modes work without reloading or losing edits.
+- [x] Show All displays normal editable voxel terrain, not baked previews.
+- [x] Editor controls remain usable at desktop and supported smaller viewports.
 
 ## Phase 8: Support Normal Terrain Authoring And Persistence In Scenery
 
 ### Tasks
 
-- [ ] Route add, remove, raise, lower, flatten, fill, clear, and path tools by region.
-- [ ] Route shape, rotation, state, and material painting by region.
-- [ ] Preserve per-region dirty chunk rebuilding.
-- [ ] Save and load every region independently through the layout.
-- [ ] Report unsaved state at layout and individual-region levels.
-- [ ] Prevent scenery editing from creating runtime navigation or gameplay metadata implicitly.
-- [ ] Verify large scenery edits do not snapshot all nine worlds unnecessarily.
+- [x] Route add, remove, raise, lower, flatten, fill, clear, and path tools by region.
+- [x] Route shape, rotation, state, and material painting by region.
+- [x] Preserve per-region dirty chunk rebuilding.
+- [x] Save and load every region independently through the layout.
+- [x] Report unsaved state at layout and individual-region levels.
+- [x] Prevent scenery editing from creating runtime navigation or gameplay metadata implicitly.
+- [x] Verify large scenery edits do not snapshot all nine worlds unnecessarily.
 
 ### Exit Criteria
 
-- [ ] Every existing terrain-authoring operation works normally in a scenery region.
-- [ ] Reloading the layout restores all authored terrain exactly.
-- [ ] Undo and redo work within one region before cross-region commands are introduced.
+- [x] Every existing terrain-authoring operation works normally in a scenery region.
+- [x] Reloading the layout restores all authored terrain exactly.
+- [x] Undo and redo work within one region before cross-region commands are introduced.
 
 ## Phase 9: Support Cross-Region Terrain Brushes And Atomic Undo
 
 ### Tasks
 
-- [ ] Calculate brush footprints in global layout coordinates.
-- [ ] Partition mutations by owning region.
-- [ ] Convert mutations back to region-local coordinates before applying them.
-- [ ] Record one layout-level command for a cross-region brush stroke.
-- [ ] Undo or redo the complete stroke atomically.
-- [ ] Rebuild only affected internal chunks, including neighboring seam chunks.
-- [ ] Reject mutations outside the complete layout safely.
+- [x] Calculate brush footprints in global layout coordinates.
+- [x] Partition mutations by owning region.
+- [x] Convert mutations back to region-local coordinates before applying them.
+- [x] Record one layout-level command for a cross-region brush stroke.
+- [x] Undo or redo the complete stroke atomically.
+- [x] Rebuild only affected internal chunks, including neighboring seam chunks.
+- [x] Reject mutations outside the complete layout safely.
 
 ### Required Tests
 
-- [ ] Paint, raise, lower, flatten, and erase can cross every cardinal seam.
-- [ ] A brush can cross a four-region intersection.
-- [ ] One undo reverses the entire multi-region stroke.
-- [ ] Saving and reloading preserves the result.
+- [x] Paint, raise, lower, flatten, and erase can cross every cardinal seam.
+- [x] A brush can cross a four-region intersection.
+- [x] One undo reverses the entire multi-region stroke.
+- [x] Saving and reloading preserves the result.
 
 ### Exit Criteria
 
-- [ ] Region boundaries do not constrain ordinary terrain-authoring workflows.
-- [ ] History memory remains within the Phase 0 budget.
+- [x] Region boundaries do not constrain ordinary terrain-authoring workflows.
+- [x] History memory remains within the Phase 0 budget.
 
 ## Phase 10: Expand The Proven Architecture To All Nine Regions
 

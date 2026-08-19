@@ -163,6 +163,10 @@ export type EditorInspectorState = {
   selectedWorldPosition: WorldPosition | null;
   selectedChunk: { chunkX: number; chunkZ: number } | null;
   selectedLocal: { localX: number; localZ: number } | null;
+  selectedRegionId?: "center" | "north" | null;
+  regionVisibilityMode?: "show-all" | "focus" | "isolate";
+  regionBoundariesVisible?: boolean;
+  onRegionBoundariesVisibleChange?: (visible: boolean) => void;
   dirtyChunks: number;
   lastRebuiltChunks: string[];
   blockEditCount: number;
@@ -277,6 +281,7 @@ export type MapEditorToolbarProps = EditorInspectorState & {
   onLayerVisibilityChange: (id: EditorLayerId, visible: boolean) => void;
   onLayerLockChange: (id: EditorLayerId, locked: boolean) => void;
   onCleanPreviewChange: (enabled: boolean) => void;
+  onRegionVisibilityModeChange?: (mode: "show-all" | "focus" | "isolate") => void;
 };
 
 export type EditorViewportLayoutState = {
@@ -745,6 +750,12 @@ function MainToolbar({ props, commands, layout, setWorkspace, toggleCleanPreview
           </button>
         ))}
       </div>
+      <div className="editor-workspaces" role="group" aria-label="Region visibility">
+        <button type="button" className={(props.regionVisibilityMode ?? "show-all") === "show-all" ? "active" : ""} onClick={() => props.onRegionVisibilityModeChange?.("show-all")}>All</button>
+        <button type="button" disabled={!props.selectedRegionId} className={props.regionVisibilityMode === "focus" ? "active" : ""} onClick={() => props.onRegionVisibilityModeChange?.("focus")}>Focus</button>
+        <button type="button" disabled={!props.selectedRegionId} className={props.regionVisibilityMode === "isolate" ? "active" : ""} onClick={() => props.onRegionVisibilityModeChange?.("isolate")}>Isolate</button>
+        <button type="button" className={props.regionBoundariesVisible ? "active" : ""} onClick={() => props.onRegionBoundariesVisibleChange?.(!props.regionBoundariesVisible)}>Bounds</button>
+      </div>
       <IconButton command={commands.find((command) => command.id === "file.save-draft")} />
       <ActionButton icon="preview" className={layout.cleanPreview ? "active" : ""} title="Clean Preview (Shift+Space)" onClick={toggleCleanPreview}>Preview</ActionButton>
       <button type="button" onClick={() => commands.find((command) => command.id === "map.validate")?.execute()}>
@@ -1061,6 +1072,7 @@ function TerrainSelectionDetails({ props }: { props: MapEditorToolbarProps }) {
   return (
     <Section title="Selected Terrain">
       <dl className="editor-mini-summary">
+        <KeyValue label="Region" value={props.selectedRegionId ?? "-"} mono />
         <KeyValue label="Grid" value={formatCoordinate(props.selected)} mono />
         <KeyValue label="World" value={props.selectedWorldPosition ? formatVector(props.selectedWorldPosition) : "-"} mono />
         <KeyValue label="Hovered" value={formatCoordinate(props.hovered)} mono />
@@ -1784,7 +1796,7 @@ function AssetPreviewDialog({
 function StatusBar({ props, workspace }: { props: MapEditorToolbarProps; workspace: EditorWorkspace }) {
   const metrics = useEditorStatusMetrics();
 
-  return <footer className="editor-status-bar"><span>{workspace}</span><span>{TOOL_LABELS[props.tool]}</span><span>{formatCoordinate(props.hovered)}</span><span>{props.selectedEntityIds.length || (props.selected ? 1 : 0)} selected</span><span>Zone {props.zoneId}</span><span>{formatPerformance(metrics?.fps ?? null, metrics?.frameMs ?? null)}</span><span>{props.autosaveStatus}</span></footer>;
+  return <footer className="editor-status-bar"><span>{workspace}</span><span>{TOOL_LABELS[props.tool]}</span><span>{props.selectedRegionId ?? "no region"}</span><span>{formatCoordinate(props.hovered)}</span><span>{props.selectedEntityIds.length || (props.selected ? 1 : 0)} selected</span><span>Zone {props.zoneId}</span><span>{formatPerformance(metrics?.fps ?? null, metrics?.frameMs ?? null)}</span><span>{props.autosaveStatus}</span></footer>;
 }
 
 function useEditorStatusMetrics() {

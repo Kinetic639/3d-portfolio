@@ -296,27 +296,35 @@ export function createPortfolioPrimaryFlatMapDefinition(): MapDefinition {
 }
 
 export function createPortfolioNorthSceneryMapDefinition(): MapDefinition {
-  const map = createBlankMapDefinition({
+  const world = new VoxelWorld();
+  for (let z = 0; z < WORLD_CONFIG.depth; z += 1) {
+    for (let x = 0; x < WORLD_CONFIG.width; x += 1) {
+      world.setBlock(x, 0, z, BLOCK_IDS.Riverbed);
+      world.setBlock(x, 1, z, BLOCK_IDS.Ground);
+    }
+  }
+  world.clearDirtyChunks();
+
+  return createMapDefinitionFromWorld({
     id: "portfolio-scenery-north",
     name: "Portfolio North Scenery",
+    description: "Editable voxel source for the northern scenery region with a protected riverbed foundation.",
     kind: "portfolio",
     runtimeMode: "dynamic-voxel",
-    flatBaseLayer: true,
-  });
-
-  return {
-    ...map,
-    description: "Editable voxel source for the northern scenery region.",
+    world,
+    zones: [],
+    markers: [],
+    entities: [],
+    navigation: { nodes: [], edges: [], routes: [] },
     spawnPoints: [],
     cameraPresets: [],
-    defaultSpawnId: undefined,
-    defaultCameraPresetId: undefined,
+    presentation: { legendVisible: false },
     metadata: {
       createdAt: PRIMARY_FLAT_CREATED_AT,
       updatedAt: PRIMARY_FLAT_CREATED_AT,
-      authoringVersion: "world-regions-phase-4",
+      authoringVersion: "world-regions-phase-5",
     },
-  };
+  });
 }
 
 function loadBundledMapDefinition(input: unknown, source: string): MapDefinition {

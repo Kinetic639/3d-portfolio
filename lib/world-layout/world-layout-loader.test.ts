@@ -50,6 +50,27 @@ describe("world layout loading and persistence", () => {
     }
   });
 
+  it("provides two complete North foundation levels for river carving", async () => {
+    const north = await resolveMapDefinition(NORTH_SCENERY_MAP_ID, { includeDevelopment: true });
+    const loaded = loadWorldLayoutStateSync(
+      createNorthPrototypeWorldLayout(),
+      (mapId) => mapId === NORTH_SCENERY_MAP_ID ? north : createBlankMapDefinition({ id: mapId, name: mapId }),
+      ["north"],
+    );
+    const state = loaded.regions.north;
+
+    expect(state?.status).toBe("ready");
+    if (state?.status === "ready") {
+      for (let z = 0; z < 64; z += 1) {
+        for (let x = 0; x < 64; x += 1) {
+          expect(state.region.world.getBlock(x, 0, z)).toBe(BLOCK_IDS.Riverbed);
+          expect(state.region.world.getBlock(x, 1, z)).toBe(BLOCK_IDS.Ground);
+          expect(state.region.world.getBlock(x, 2, z)).toBe(BLOCK_IDS.Air);
+        }
+      }
+    }
+  });
+
   it("round-trips the layout and a North map draft without modifying Center", () => {
     const storage = createMemoryStorage();
     const layout = createNorthPrototypeWorldLayout();
