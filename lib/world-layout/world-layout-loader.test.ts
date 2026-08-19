@@ -5,13 +5,29 @@ import { cloneMapDefinition, createBlankMapDefinition } from "@/lib/maps/map-def
 import { loadMapDraft, loadMapStateSync, resolveMapDefinition, saveMapDraft } from "@/lib/maps/map-registry";
 import {
   createDefaultCenterOnlyWorldLayout,
+  createCompleteWorldLayout,
   createNorthPrototypeWorldLayout,
   loadWorldLayoutStateSync,
   NORTH_SCENERY_MAP_ID,
 } from "./world-layout-loader";
+import { WORLD_REGION_IDS } from "./world-layout-types";
 import { loadWorldLayoutDraft, saveWorldLayoutDraft } from "./world-layout-document";
 
 describe("world layout loading and persistence", () => {
+  it("hydrates all nine independently authored regions", () => {
+    const layout = createCompleteWorldLayout();
+    const loaded = loadWorldLayoutStateSync(
+      layout,
+      (mapId) => loadMapStateSync(mapId, { includeDevelopment: true }).definition,
+      WORLD_REGION_IDS,
+    );
+
+    expect(layout.regions).toHaveLength(9);
+    for (const regionId of WORLD_REGION_IDS) {
+      expect(loaded.regions[regionId]?.status).toBe("ready");
+    }
+  });
+
   it("wraps the existing authored map as an unchanged center region", () => {
     const existing = loadMapStateSync("portfolio-primary-flat", { includeDevelopment: true });
     const layout = createDefaultCenterOnlyWorldLayout();

@@ -18,6 +18,7 @@ import { groundEntityOnTerrain } from "@/lib/prefabs/prefab-placement";
 import type { PrefabDefinition, PrefabVariantDefinition } from "@/lib/prefabs/prefab-types";
 import { ROTATIONS, SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import portfolioPrimaryFlatMap from "./portfolio-primary-flat.map.json";
+import type { WorldRegionId } from "@/lib/world-layout/world-layout-types";
 
 const PHASE4_CREATED_AT = "2026-08-01T00:00:00.000Z";
 const PHASE5_CREATED_AT = "2026-08-02T00:00:00.000Z";
@@ -296,6 +297,10 @@ export function createPortfolioPrimaryFlatMapDefinition(): MapDefinition {
 }
 
 export function createPortfolioNorthSceneryMapDefinition(): MapDefinition {
+  return createPortfolioSceneryMapDefinition("north");
+}
+
+export function createPortfolioSceneryMapDefinition(regionId: Exclude<WorldRegionId, "center">): MapDefinition {
   const world = new VoxelWorld();
   for (let z = 0; z < WORLD_CONFIG.depth; z += 1) {
     for (let x = 0; x < WORLD_CONFIG.width; x += 1) {
@@ -306,9 +311,9 @@ export function createPortfolioNorthSceneryMapDefinition(): MapDefinition {
   world.clearDirtyChunks();
 
   return createMapDefinitionFromWorld({
-    id: "portfolio-scenery-north",
-    name: "Portfolio North Scenery",
-    description: "Editable voxel source for the northern scenery region with a protected riverbed foundation.",
+    id: `portfolio-scenery-${regionId}`,
+    name: `Portfolio ${regionId.split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join(" ")} Scenery`,
+    description: `Editable voxel source for the ${regionId} scenery region with a protected riverbed foundation.`,
     kind: "portfolio",
     runtimeMode: "dynamic-voxel",
     world,
@@ -322,7 +327,7 @@ export function createPortfolioNorthSceneryMapDefinition(): MapDefinition {
     metadata: {
       createdAt: PRIMARY_FLAT_CREATED_AT,
       updatedAt: PRIMARY_FLAT_CREATED_AT,
-      authoringVersion: "world-regions-phase-5",
+      authoringVersion: "world-regions-phase-10",
     },
   });
 }

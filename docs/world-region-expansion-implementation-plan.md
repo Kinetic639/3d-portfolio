@@ -10,7 +10,7 @@
 - [x] Phase 7: Add Show All, Focus, Isolate, and region overlays
 - [x] Phase 8: Support normal terrain authoring and persistence in scenery
 - [x] Phase 9: Support cross-region terrain brushes and atomic undo
-- [ ] Phase 10: Expand the proven architecture to all nine regions
+- [x] Phase 10: Expand the proven architecture to all nine regions
 - [ ] Phase 11: Separate runtime capabilities by region role
 - [ ] Phase 12: Add affordable authored scenery-water behavior
 - [ ] Phase 13: Extend the center-originating reveal across the layout
@@ -379,19 +379,19 @@ Source documents remain independent from runtime rendering. Initially every visi
 
 ### Tasks
 
-- [ ] Add the remaining seven region documents and layout entries.
-- [ ] Generalize seam lookup to all cardinal neighboring pairs.
-- [ ] Validate corner-region placement and mesh identity.
-- [ ] Support Show All, Focus, and Isolate across all nine regions.
-- [ ] Add load progress and region-specific error reporting.
-- [ ] Avoid synchronous remeshing of all regions after a local edit.
-- [ ] Ensure all nine can be hydrated together in editor mode.
+- [x] Add the remaining seven region documents and layout entries.
+- [x] Generalize seam lookup to all cardinal neighboring pairs.
+- [x] Validate corner-region placement and mesh identity.
+- [x] Support Show All, Focus, and Isolate across all nine regions.
+- [x] Add load progress and region-specific error reporting.
+- [x] Avoid synchronous remeshing of all regions after a local edit.
+- [x] Ensure all nine can be hydrated together in editor mode.
 
 ### Exit Criteria
 
-- [ ] The editor displays a continuous 192x192 voxel landscape.
-- [ ] Every region is independently editable and persistent.
-- [ ] No visible seam identifies the nine-region structure.
+- [x] The editor displays a continuous 192x192 voxel landscape.
+- [x] Every region is independently editable and persistent.
+- [x] No visible seam identifies the nine-region structure.
 
 ## Phase 11: Separate Runtime Capabilities By Region Role
 

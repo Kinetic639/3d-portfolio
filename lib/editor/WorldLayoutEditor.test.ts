@@ -39,6 +39,71 @@ describe("world layout editor", () => {
     expect(north.world.getBlock(10, 2, 63)).toBe(BLOCK_IDS.Stone);
   });
 
+  it("groups immediately applied drag samples into one undo command", () => {
+    const center = new MapEditorSession(new VoxelWorld());
+    const editor = new WorldLayoutEditorSession({ center });
+
+    editor.beginTerrainStroke("paint stroke");
+    for (const x of [10, 11, 12]) {
+      const mutations = createLayoutTerrainMutations({
+        sessions: { center },
+        operation: "fill",
+        centers: [{ x, y: 2, z: 10 }],
+        settings: DEFAULT_TERRAIN_BRUSH,
+        blockId: BLOCK_IDS.Stone,
+        zoneId: 0,
+      });
+      editor.applyTerrainMutations("paint stroke", mutations);
+      expect(center.world.getBlock(x, 2, 10)).toBe(BLOCK_IDS.Stone);
+    }
+    editor.endTerrainStroke();
+
+    expect(editor.undoDepth).toBe(1);
+    editor.undo();
+    for (const x of [10, 11, 12]) expect(center.world.getBlock(x, 2, 10)).toBe(BLOCK_IDS.Air);
+  });
+
+  it("keeps layout terrain history isolated from ordinary map-session history", () => {
+    const center = new MapEditorSession(new VoxelWorld());
+    const editor = new WorldLayoutEditorSession({ center });
+    const mutations = createLayoutTerrainMutations({
+      sessions: { center },
+      operation: "fill",
+      centers: [{ x: 10, y: 2, z: 10 }],
+      settings: DEFAULT_TERRAIN_BRUSH,
+      blockId: BLOCK_IDS.Stone,
+      zoneId: 0,
+    });
+    editor.applyTerrainMutations("fill", mutations);
+    center.applyTool("add", { x: 12, y: 0, z: 12 }, BLOCK_IDS.Ground, 0);
+
+    editor.undo();
+    expect(center.world.getBlock(10, 2, 10)).toBe(BLOCK_IDS.Air);
+    expect(center.world.getBlock(12, 0, 12)).toBe(BLOCK_IDS.Ground);
+    center.undo();
+    expect(center.world.getBlock(12, 0, 12)).toBe(BLOCK_IDS.Air);
+  });
+
+  it("does not raise overlapping brush columns more than once per drag stroke", () => {
+    const center = new MapEditorSession(new VoxelWorld());
+    for (let x = 8; x <= 13; x += 1) center.world.setBlock(x, 0, 10, BLOCK_IDS.Ground);
+    const editor = new WorldLayoutEditorSession({ center });
+    editor.beginTerrainStroke("raise stroke");
+    for (const x of [10, 11]) {
+      editor.applyTerrainMutations("raise", createLayoutTerrainMutations({
+        sessions: { center },
+        operation: "raise",
+        centers: [{ x, y: 0, z: 10 }],
+        settings: { ...DEFAULT_TERRAIN_BRUSH, shape: "square", size: 3 },
+        blockId: BLOCK_IDS.Ground,
+        zoneId: 0,
+      }));
+    }
+    editor.endTerrainStroke();
+
+    for (let x = 9; x <= 12; x += 1) expect(center.world.getHighestNonAirY(x, 10)).toBe(1);
+  });
+
   it.each([
     ["north", { x: 20, y: 2, z: 0 }],
     ["south", { x: 20, y: 2, z: 63 }],

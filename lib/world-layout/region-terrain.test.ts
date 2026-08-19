@@ -3,8 +3,27 @@ import { BLOCK_IDS } from "@/lib/world/block-registry";
 import { VoxelWorld } from "@/lib/world/voxel-world";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 import { buildRegionSurfaceMeshes, markRegionTerrainDirtyForCell } from "./region-terrain";
+import type { WorldRegionId } from "./world-layout-types";
 
 describe("region terrain seams", () => {
+  it.each([
+    ["north", { x: 4, z: 0 }, { x: 4, z: 63 }, "nz", "pz"],
+    ["south", { x: 4, z: 63 }, { x: 4, z: 0 }, "pz", "nz"],
+    ["west", { x: 0, z: 4 }, { x: 63, z: 4 }, "nx", "px"],
+    ["east", { x: 63, z: 4 }, { x: 0, z: 4 }, "px", "nx"],
+  ] as const)("culls hidden faces across the Center-to-%s boundary", (regionId, centerCell, neighborCell, centerDirection, neighborDirection) => {
+    const center = new VoxelWorld();
+    const neighbor = new VoxelWorld();
+    center.setBlock(centerCell.x, 2, centerCell.z, BLOCK_IDS.Ground);
+    neighbor.setBlock(neighborCell.x, 2, neighborCell.z, BLOCK_IDS.Ground);
+    const worlds = { center, [regionId]: neighbor };
+
+    const centerChunks = buildRegionSurfaceMeshes("center", worlds).chunks;
+    const neighborChunks = buildRegionSurfaceMeshes(regionId, worlds).chunks;
+    expect(centerChunks.flatMap((chunk) => chunk.faceMappings)).not.toContainEqual({ cellIndex: center.getIndex(centerCell.x, 2, centerCell.z), direction: centerDirection });
+    expect(neighborChunks.flatMap((chunk) => chunk.faceMappings)).not.toContainEqual({ cellIndex: neighbor.getIndex(neighborCell.x, 2, neighborCell.z), direction: neighborDirection });
+  });
+
   it("culls hidden faces across the Center-to-North boundary", () => {
     const center = new VoxelWorld();
     const north = new VoxelWorld();
@@ -69,5 +88,21 @@ describe("region terrain seams", () => {
     expect(north.dirtyChunks).toEqual(new Set(["chunk-0-3"]));
     expect(center.dirtyChunks).toEqual(new Set(["chunk-0-0"]));
   });
-});
 
+  it("places every corner region at a unique continuous world position", () => {
+    const regionIds = ["north-west", "north-east", "south-west", "south-east"] as const;
+    const worlds = Object.fromEntries(regionIds.map((id) => {
+      const world = new VoxelWorld();
+      world.setBlock(0, 2, 0, BLOCK_IDS.Ground);
+      return [id, world];
+    })) as Partial<Record<WorldRegionId, VoxelWorld>>;
+
+    const corners = regionIds.map((regionId) => {
+      const chunk = buildRegionSurfaceMeshes(regionId, worlds).chunks[0];
+      return [chunk.id, chunk.boundingBox.min.x, chunk.boundingBox.min.z];
+    });
+
+    expect(new Set(corners.map(([id]) => id)).size).toBe(4);
+    expect(new Set(corners.map(([, x, z]) => `${x},${z}`)).size).toBe(4);
+  });
+});

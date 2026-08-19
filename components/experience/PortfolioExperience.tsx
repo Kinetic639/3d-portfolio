@@ -15,10 +15,11 @@ import {
 } from "@/lib/terrain/terrain";
 import { buildSurfaceChunkMesh, type SurfaceChunkMeshData } from "@/lib/terrain/surface-mesher";
 import { buildRegionSurfaceChunkMesh, buildRegionSurfaceMeshes } from "@/lib/world-layout/region-terrain";
-import { NORTH_SCENERY_MAP_ID } from "@/lib/world-layout/world-layout-loader";
+import { createCompleteWorldLayout, getSceneryMapId, SCENERY_REGION_IDS } from "@/lib/world-layout/world-layout-loader";
+import { createWorldLayoutPackage, parseWorldLayoutPackage } from "@/lib/world-layout/world-layout-package";
 import { globalCellToRegionCell, regionCellToGlobalCell, regionCellToWorldPosition, worldPositionToRegionCell } from "@/lib/world-layout/world-layout-coordinates";
 import { getWorldRegionSlot } from "@/lib/world-layout/world-region";
-import type { WorldRegionId } from "@/lib/world-layout/world-layout-types";
+import { WORLD_REGION_IDS, type WorldRegionId } from "@/lib/world-layout/world-layout-types";
 import { buildWaterChunkMesh, getWaterFlowVector, type WaterChunkMeshData } from "@/lib/terrain/water-mesher";
 import { buildZoneOverlayChunkMeshes, buildZoneOverlayMeshes, type ZoneOverlayChunkMeshData } from "@/lib/terrain/zone-overlay";
 import { BLOCK_IDS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
@@ -27,7 +28,7 @@ import { WORLD_CONFIG, type GridCoordinate, type WorldPosition } from "@/lib/wor
 import type { VoxelWorld } from "@/lib/world/voxel-world";
 import { getTerrainSurfaceAt, getTerrainSurfaceAtWorldPosition } from "@/lib/world/surface-query";
 import { MapEditorSession, type BasinFillPreview, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
-import { WorldLayoutEditorSession, createLayoutTerrainMutations, type LayoutEditorActionResult } from "@/lib/editor/world-layout-editor";
+import { WorldLayoutEditorSession, createLayoutTerrainMutations, getLayoutTerrainFootprint, type LayoutEditorActionResult } from "@/lib/editor/world-layout-editor";
 import { createMapPresetWorld, type MapPresetId } from "@/lib/editor/map-presets";
 import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
 import { EDITOR_MIN_ZOOM_DISTANCE_FLOOR } from "@/lib/editor/editor-layout-store";
@@ -56,8 +57,6 @@ import { resolvePrefabInstance } from "@/lib/prefabs/prefab-resolver";
 import type { ResolvedPrefabPart } from "@/lib/prefabs/prefab-types";
 import {
   DEFAULT_TERRAIN_BRUSH,
-  createTerrainMutations,
-  getTerrainOperationFootprint,
   type BrushShape,
   type TerrainBrushOperation,
   type TerrainBrushSettings,
@@ -1204,46 +1203,63 @@ function ExperienceScene({
   const [previewRevision, setPreviewRevision] = useState(0);
   const [editorRevision, setEditorRevision] = useState(0);
   const [autosaveStatus, setAutosaveStatus] = useState("local idle");
-  const northInitialState = useMemo(() => {
-    const bundled = loadMapStateSync(NORTH_SCENERY_MAP_ID, { includeDevelopment: true });
-    if (typeof window === "undefined") return bundled;
-    const draft = loadMapDraft(window.localStorage, NORTH_SCENERY_MAP_ID);
-    return draft ? createLoadedMapState(draft) : bundled;
+  const sceneryLoad = useMemo(() => {
+    const states: Partial<Record<Exclude<WorldRegionId, "center">, ReturnType<typeof createLoadedMapState>>> = {};
+    const errors: string[] = [];
+    for (const regionId of SCENERY_REGION_IDS) {
+      const mapId = getSceneryMapId(regionId);
+      try {
+        const bundled = loadMapStateSync(mapId, { includeDevelopment: true });
+        const draft = typeof window === "undefined" ? null : loadMapDraft(window.localStorage, mapId);
+        states[regionId] = draft ? createLoadedMapState(draft) : bundled;
+      } catch (error) {
+        errors.push(`${regionId}: ${error instanceof Error ? error.message : String(error)}`);
+        states[regionId] = createLoadedMapState(createBlankMapDefinition({ id: mapId, name: `${regionId} recovery`, flatBaseLayer: true }));
+      }
+    }
+    return { states, errors };
   }, []);
-  const [northEditorSession] = useState(
-    () => new MapEditorSession(northInitialState.world, northInitialState.entities, northInitialState.definition.fluids.settings),
-  );
-  const northSceneryWorld = northEditorSession.world;
-  const layoutEditorSession = useMemo(
-    () => new WorldLayoutEditorSession({ center: editorSession, north: northEditorSession }),
-    [editorSession, northEditorSession],
-  );
+  const sceneryInitialStates = sceneryLoad.states;
+  const [sceneryDefinitions, setSceneryDefinitions] = useState(() => Object.fromEntries(SCENERY_REGION_IDS.map((regionId) => (
+    [regionId, sceneryInitialStates[regionId]!.definition]
+  ))) as Record<Exclude<WorldRegionId, "center">, MapDefinition>);
+  useEffect(() => {
+    if (sceneryLoad.errors.length > 0) {
+      setEditorMessage({ type: "error", text: `Region load failed: ${sceneryLoad.errors.join(" | ")}` });
+    } else if (editorEnabled) {
+      setAutosaveStatus(`regions ${WORLD_REGION_IDS.length}/${WORLD_REGION_IDS.length} loaded`);
+    }
+  }, [editorEnabled, sceneryLoad.errors]);
+  const [sceneryEditorSessions] = useState(() => Object.fromEntries(SCENERY_REGION_IDS.map((regionId) => {
+    const state = sceneryInitialStates[regionId]!;
+    return [regionId, new MapEditorSession(state.world, state.entities, state.definition.fluids.settings)];
+  })) as Record<Exclude<WorldRegionId, "center">, MapEditorSession>);
+  const regionSessions = useMemo(() => ({ center: editorSession, ...sceneryEditorSessions }), [editorSession, sceneryEditorSessions]);
+  const regionWorlds = useMemo(() => Object.fromEntries(WORLD_REGION_IDS.map((regionId) => [regionId, regionSessions[regionId].world])) as Record<WorldRegionId, VoxelWorld>, [regionSessions]);
+  const layoutEditorSession = useMemo(() => new WorldLayoutEditorSession(regionSessions), [regionSessions]);
   const [regionVisibilityMode, setRegionVisibilityMode] = useState<"show-all" | "focus" | "isolate">("show-all");
   const [regionBoundariesVisible, setRegionBoundariesVisible] = useState(true);
-  const [northSurfaceChunks, setNorthSurfaceChunks] = useState(
-    () => buildRegionSurfaceMeshes("north", { center: editorSession.world, north: northSceneryWorld }).chunks,
-  );
+  const [layoutSurfaceChunks, setLayoutSurfaceChunks] = useState(() => Object.fromEntries(WORLD_REGION_IDS.map((regionId) => (
+    [regionId, buildRegionSurfaceMeshes(regionId, regionWorlds, regionId !== "center").chunks]
+  ))) as Record<WorldRegionId, SurfaceChunkMeshData[]>);
+  const layoutSurfaceWorldsRef = useRef(regionWorlds);
+  useEffect(() => {
+    if (layoutSurfaceWorldsRef.current === regionWorlds) return;
+    layoutSurfaceWorldsRef.current = regionWorlds;
+    setLayoutSurfaceChunks(Object.fromEntries(WORLD_REGION_IDS.map((regionId) => (
+      [regionId, buildRegionSurfaceMeshes(regionId, regionWorlds, regionId !== "center").chunks]
+    ))) as Record<WorldRegionId, SurfaceChunkMeshData[]>);
+  }, [regionWorlds]);
   const visibleSurfaceChunks = useMemo(() => {
     void editorRevision;
     if (activeMapId !== DEFAULT_AUTHORED_MAP_ID) return terrain.surfaceChunks;
 
-    const worlds = { center: editorSession.world, north: northSceneryWorld };
-    const centerBoundary = new Map<number, SurfaceChunkMeshData>();
-    const northBoundary = new Map<number, SurfaceChunkMeshData>();
-    for (let chunkX = 0; chunkX < WORLD_CONFIG.width / WORLD_CONFIG.chunkSize; chunkX += 1) {
-      centerBoundary.set(chunkX, buildRegionSurfaceChunkMesh("center", worlds, chunkX, 0, false));
-      northBoundary.set(chunkX, buildRegionSurfaceChunkMesh("north", worlds, chunkX, 3));
-    }
-
-    return [
-      ...terrain.surfaceChunks.map((chunk) => chunk.chunkZ === 0 ? centerBoundary.get(chunk.chunkX)! : chunk),
-      ...northSurfaceChunks.map((chunk) => chunk.chunkZ === 3 ? northBoundary.get(chunk.chunkX)! : chunk),
-    ].filter((chunk) => {
+    return WORLD_REGION_IDS.flatMap((regionId) => layoutSurfaceChunks[regionId]).filter((chunk) => {
       if (regionVisibilityMode !== "isolate" || !selectedCell) return true;
       const selectedRegion = globalCellToRegionCell(selectedCell)?.regionId ?? "center";
-      return selectedRegion === "north" ? chunk.id.startsWith("north:") : !chunk.id.startsWith("north:");
+      return getSurfaceChunkRegionId(chunk.id) === selectedRegion;
     });
-  }, [activeMapId, editorRevision, editorSession.world, northSceneryWorld, northSurfaceChunks, regionVisibilityMode, selectedCell, terrain.surfaceChunks]);
+  }, [activeMapId, editorRevision, layoutSurfaceChunks, regionVisibilityMode, selectedCell, terrain.surfaceChunks]);
   const uniforms = useMemo<TerrainUniforms>(
     () => ({
       uExpansionProgress: { value: 0 },
@@ -1279,14 +1295,14 @@ function ExperienceScene({
   }, [currentMap.id, currentMap.zones, zoneId]);
   const dynamicStats = editorSession.world.getStats();
   const snapshot = editorSession.getSnapshot();
-  const northSnapshot = northEditorSession.getSnapshot();
+  const scenerySnapshots = SCENERY_REGION_IDS.map((regionId) => sceneryEditorSessions[regionId].getSnapshot());
   const zoneAssignmentCounts = useMemo(
     () => countZoneAssignments(editorSession.world),
     [editorSession.world, snapshot.zoneAssignmentCount],
   );
   const selectedRegionCell = selectedCell ? globalCellToRegionCell(selectedCell) : null;
   const selectedRegionId = selectedRegionCell?.regionId ?? null;
-  const selectedRegionWorld = selectedRegionId === "north" ? northSceneryWorld : editorSession.world;
+  const selectedRegionWorld = selectedRegionId ? regionWorlds[selectedRegionId] : editorSession.world;
   const selectedRegionCoordinate = selectedRegionCell?.local ?? null;
   const selectedWorldPosition = selectedRegionCell
     ? regionCellToWorldPosition(selectedRegionCell.regionId, selectedRegionCell.local)
@@ -1324,13 +1340,24 @@ function ExperienceScene({
         }
         return getZoneBrushFootprint(hoveredCell, effectiveBrushSettings).length;
       }
-      if (!getTerrainBrushOperation(tool)) {
-        return 0;
-      }
+      const operation = getTerrainBrushOperation(tool);
+      if (!operation) return 0;
       void previewRevision;
-      return hoveredCell ? getToolPreviewFootprint(hoveredCell, tool, effectiveBrushSettings, editorSession.world, getTerrainMutationBlockId(tool, getTerrainBrushOperation(tool)!, paintBlockId, activeShapeId, applyMaterialToAddedBlocks), zoneId).length : 0;
+      if (!hoveredCell) return 0;
+      const mutations = createLayoutTerrainMutations({
+        sessions: regionSessions,
+        operation,
+        centers: [hoveredCell],
+        settings: effectiveBrushSettings,
+        blockId: getTerrainMutationBlockId(tool, operation, paintBlockId, activeShapeId, applyMaterialToAddedBlocks),
+        shapeId: operation === "paint-path" || operation === "remove-path" ? undefined : activeShapeId,
+        rotation: activeRotation,
+        state: activeShapeState,
+        zoneId,
+      });
+      return Object.values(mutations).reduce((sum, regionMutations) => sum + (regionMutations?.length ?? 0), 0);
     },
-    [activeShapeId, applyMaterialToAddedBlocks, editorSession.world, effectiveBrushSettings, hoveredCell, paintBlockId, previewRevision, tool, zoneId, zoneRectangleAnchor, zoneSelectionMode],
+    [activeRotation, activeShapeId, activeShapeState, applyMaterialToAddedBlocks, effectiveBrushSettings, hoveredCell, paintBlockId, previewRevision, regionSessions, tool, zoneId, zoneRectangleAnchor, zoneSelectionMode],
   );
   const editorPanelSignature = useMemo(() => JSON.stringify({
     available: editorAvailable,
@@ -1360,6 +1387,7 @@ function ExperienceScene({
     selectedRegionId,
     regionVisibilityMode,
     regionBoundariesVisible,
+    regionLoadSummary: `${WORLD_REGION_IDS.length - sceneryLoad.errors.length} / ${WORLD_REGION_IDS.length} loaded`,
     selectedBlockId,
     selectedShapeId,
     selectedRotation,
@@ -1520,9 +1548,9 @@ function ExperienceScene({
     fluidSettings: { ...currentMap.fluids.settings, infiniteSources: infiniteWaterSources },
   });
 
-  const createNorthMapDefinition = () => createMapDefinitionFromWorld({
-    ...northInitialState.definition,
-    world: northEditorSession.world,
+  const createSceneryMapDefinition = (regionId: Exclude<WorldRegionId, "center">) => createMapDefinitionFromWorld({
+    ...sceneryDefinitions[regionId],
+    world: sceneryEditorSessions[regionId].world,
     zones: [],
     markers: [],
     entities: [],
@@ -1530,9 +1558,9 @@ function ExperienceScene({
     navigation: { nodes: [], edges: [], routes: [] },
     spawnPoints: [],
     cameraPresets: [],
-    presentation: northInitialState.definition.presentation,
+    presentation: sceneryDefinitions[regionId].presentation,
     metadata: {
-      ...northInitialState.definition.metadata,
+      ...sceneryDefinitions[regionId].metadata,
       updatedAt: new Date().toISOString(),
     },
   });
@@ -1541,6 +1569,7 @@ function ExperienceScene({
     const editableMap = normalizeEditableMap(map);
     const document = mapDefinitionToDocument(editableMap);
     const result = editorSession.replaceWithDocument(document, markSaved);
+    regionWorlds.center = editorSession.world;
     const nextTerrain = createTerrainDataFromWorld(editorSession.world);
     const nextZoneOverlay = buildZoneOverlayMeshes(editorSession.world);
 
@@ -1618,25 +1647,70 @@ function ExperienceScene({
     setLastRebuiltChunks([...rebuiltTerrainChunks.keys()]);
     setLastChunkRebuildMs(rebuildMs);
     setEditorRevision((revision) => revision + 1);
+    replaceRegionRebuiltChunks("center", rebuiltChunks);
   };
 
-  const replaceNorthRebuiltChunks = (rebuiltChunks: ReturnType<MapEditorSession["applyTool"]>["rebuiltChunks"]) => {
+  const replaceRegionRebuiltChunks = (regionId: WorldRegionId, rebuiltChunks: ReturnType<MapEditorSession["applyTool"]>["rebuiltChunks"]) => {
     if (rebuiltChunks.length === 0) return;
-    const worlds = { center: editorSession.world, north: northSceneryWorld };
-    const replacements = new Map(rebuiltChunks.map((chunk) => {
-      const mesh = buildRegionSurfaceChunkMesh("north", worlds, chunk.chunkX, chunk.chunkZ);
-      return [mesh.id, mesh] as const;
-    }));
-    setNorthSurfaceChunks((chunks) => chunks.map((chunk) => replacements.get(chunk.id) ?? chunk));
-    setLastRebuiltChunks([...replacements.keys()]);
+    const chunkCount = WORLD_CONFIG.width / WORLD_CONFIG.chunkSize;
+    const requests = new Map<WorldRegionId, Set<string>>();
+    const request = (id: WorldRegionId, chunkX: number, chunkZ: number) => {
+      let regionRequests = requests.get(id);
+      if (!regionRequests) {
+        regionRequests = new Set();
+        requests.set(id, regionRequests);
+      }
+      regionRequests.add(`${chunkX},${chunkZ}`);
+    };
+    const slot = getWorldRegionSlot(regionId);
+    const adjacentRegion = (offsetX: number, offsetZ: number) => WORLD_REGION_IDS.find((candidate) => {
+      const offset = getWorldRegionSlot(candidate).offset;
+      return offset.x === slot.offset.x + offsetX && offset.z === slot.offset.z + offsetZ;
+    });
+    for (const chunk of rebuiltChunks) {
+      request(regionId, chunk.chunkX, chunk.chunkZ);
+      if (chunk.chunkX === 0) {
+        const adjacent = adjacentRegion(-1, 0);
+        if (adjacent) request(adjacent, chunkCount - 1, chunk.chunkZ);
+      }
+      if (chunk.chunkX === chunkCount - 1) {
+        const adjacent = adjacentRegion(1, 0);
+        if (adjacent) request(adjacent, 0, chunk.chunkZ);
+      }
+      if (chunk.chunkZ === 0) {
+        const adjacent = adjacentRegion(0, -1);
+        if (adjacent) request(adjacent, chunk.chunkX, chunkCount - 1);
+      }
+      if (chunk.chunkZ === chunkCount - 1) {
+        const adjacent = adjacentRegion(0, 1);
+        if (adjacent) request(adjacent, chunk.chunkX, 0);
+      }
+    }
+    const replacements = new Map<WorldRegionId, Map<string, SurfaceChunkMeshData>>();
+    for (const [id, chunkKeys] of requests) {
+      const regionReplacements = new Map<string, SurfaceChunkMeshData>();
+      for (const key of chunkKeys) {
+        const [chunkX, chunkZ] = key.split(",").map(Number);
+        const mesh = buildRegionSurfaceChunkMesh(id, regionWorlds, chunkX, chunkZ, id !== "center");
+        regionReplacements.set(mesh.id, mesh);
+      }
+      replacements.set(id, regionReplacements);
+    }
+    setLayoutSurfaceChunks((current) => Object.fromEntries(WORLD_REGION_IDS.map((id) => {
+      const regionReplacements = replacements.get(id);
+      return [id, regionReplacements ? current[id].map((chunk) => regionReplacements.get(chunk.id) ?? chunk) : current[id]];
+    })) as Record<WorldRegionId, SurfaceChunkMeshData[]>);
+    setLastRebuiltChunks([...replacements.values()].flatMap((entries) => [...entries.keys()]));
     setEditorRevision((revision) => revision + 1);
   };
 
   const applyLayoutEditorResult = (result: LayoutEditorActionResult) => {
-    const centerResult = result.byRegion.center;
-    const northResult = result.byRegion.north;
-    if (centerResult) replaceRebuiltChunks(centerResult.rebuiltChunks);
-    if (northResult) replaceNorthRebuiltChunks(northResult.rebuiltChunks);
+    for (const regionId of WORLD_REGION_IDS) {
+      const regionResult = result.byRegion[regionId];
+      if (!regionResult) continue;
+      if (regionId === "center") replaceRebuiltChunks(regionResult.rebuiltChunks);
+      else replaceRegionRebuiltChunks(regionId, regionResult.rebuiltChunks);
+    }
     if (result.changed) setPreviewRevision((revision) => revision + 1);
   };
 
@@ -1694,7 +1768,7 @@ function ExperienceScene({
       setEditorMessage({ type: "error", text: "The selected cell is outside the authored world layout." });
       return;
     }
-    const regionSession = regionCell.regionId === "north" ? northEditorSession : editorSession;
+    const regionSession = regionSessions[regionCell.regionId];
     const brushOperation = getTerrainBrushOperation(tool);
 
     if (tool === "select") {
@@ -1707,7 +1781,7 @@ function ExperienceScene({
 
     if (brushOperation) {
       const mutations = createLayoutTerrainMutations({
-        sessions: { center: editorSession, north: northEditorSession },
+        sessions: regionSessions,
         operation: brushOperation,
         centers: [coordinate],
         settings: effectiveBrushSettings,
@@ -1791,7 +1865,7 @@ function ExperienceScene({
     const brushOperation = getTerrainBrushOperation(tool);
     if (brushOperation) {
       const mutations = createLayoutTerrainMutations({
-        sessions: { center: editorSession, north: northEditorSession },
+        sessions: regionSessions,
         operation: brushOperation,
         centers: coordinates,
         settings: effectiveBrushSettings,
@@ -1968,8 +2042,16 @@ function ExperienceScene({
     if (!window.confirm("Reset unsaved editor changes to the last saved draft/export?")) {
       return;
     }
-    const result = editorSession.resetToDocument(editorSession.savedDocument);
-    replaceRebuiltChunks(result.rebuiltChunks);
+    for (const regionId of WORLD_REGION_IDS) {
+      const session = regionSessions[regionId];
+      const result = session.resetToDocument(session.savedDocument);
+      regionWorlds[regionId] = session.world;
+      if (regionId === "center") replaceRebuiltChunks(result.rebuiltChunks);
+    }
+    layoutEditorSession.clearHistory();
+    setLayoutSurfaceChunks(Object.fromEntries(WORLD_REGION_IDS.map((regionId) => (
+      [regionId, buildRegionSurfaceMeshes(regionId, regionWorlds, regionId !== "center").chunks]
+    ))) as Record<WorldRegionId, SurfaceChunkMeshData[]>);
     setSelectedCell(null);
     setSelectedMarkerId(null);
     setSelectedEntityIds([]);
@@ -1981,6 +2063,7 @@ function ExperienceScene({
       return;
     }
     const result = editorSession.resetToFlatMap();
+    regionWorlds.center = editorSession.world;
     replaceRebuiltChunks(result.rebuiltChunks);
     setSelectedCell(null);
     setSelectedMarkerId(null);
@@ -1996,6 +2079,7 @@ function ExperienceScene({
 
     const presetWorld = createMapPresetWorld(nextPresetId);
     const result = editorSession.replaceWithDocument(serializeMapDocument(presetWorld, []), true);
+    regionWorlds.center = editorSession.world;
     const nextTerrain = createTerrainDataFromWorld(editorSession.world);
     const nextZoneOverlay = buildZoneOverlayMeshes(editorSession.world);
     setTerrain(nextTerrain);
@@ -2121,10 +2205,9 @@ function ExperienceScene({
 
   const handleSaveDraft = () => {
     const saved = normalizeEditableMap(saveMapDraft(localStorage, createCurrentMapDefinition()));
-    saveMapDraft(localStorage, createNorthMapDefinition());
+    for (const regionId of SCENERY_REGION_IDS) saveMapDraft(localStorage, createSceneryMapDefinition(regionId));
     setCurrentMap(saved);
-    editorSession.markSaved();
-    northEditorSession.markSaved();
+    for (const session of Object.values(regionSessions)) session.markSaved();
     setAutosaveStatus(`draft saved ${new Date().toLocaleTimeString()}`);
     setEditorRevision((revision) => revision + 1);
   };
@@ -2138,27 +2221,54 @@ function ExperienceScene({
   };
 
   const handleExport = () => {
-    const mapDefinition = createCurrentMapDefinition();
-    const blob = new Blob([`${JSON.stringify(mapDefinition, null, 2)}\n`], { type: "application/json" });
+    const mapsByRegion = Object.fromEntries(WORLD_REGION_IDS.map((regionId) => [
+      regionId,
+      regionId === "center" ? createCurrentMapDefinition() : createSceneryMapDefinition(regionId),
+    ])) as Record<WorldRegionId, MapDefinition>;
+    const layoutPackage = createWorldLayoutPackage(createCompleteWorldLayout(), mapsByRegion);
+    const blob = new Blob([`${JSON.stringify(layoutPackage, null, 2)}\n`], { type: "application/json" });
     const link = window.document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `${mapDefinition.id}.map.v1.json`;
+    link.download = `${layoutPackage.layout.id}.world-layout.v1.json`;
     link.click();
     URL.revokeObjectURL(link.href);
-    editorSession.markSaved();
+    for (const session of Object.values(regionSessions)) session.markSaved();
     setAutosaveStatus("exported");
     setEditorRevision((revision) => revision + 1);
   };
 
   const handleImport = async (file: File) => {
-    const currentSnapshot = editorSession.getSnapshot();
-    if (currentSnapshot.hasUnsavedChanges && !window.confirm("Replace unsaved editor changes with the imported map?")) {
+    const hasLayoutChanges = Object.values(regionSessions).some((session) => session.getSnapshot().hasUnsavedChanges);
+    if (hasLayoutChanges && !window.confirm("Replace unsaved editor changes with the imported world?")) {
       return;
     }
 
     try {
       const input = JSON.parse(await file.text());
-      if (isMapDefinitionLike(input)) {
+      if (input?.kind === "world-layout-package") {
+        const parsedPackage = parseWorldLayoutPackage(input);
+        if (!parsedPackage.ok) {
+          setEditorMessage({ type: "error", text: parsedPackage.errors.join(" ") });
+          return;
+        }
+        const definitions = {} as Record<Exclude<WorldRegionId, "center">, MapDefinition>;
+        for (const reference of parsedPackage.package.layout.regions) {
+          const definition = parsedPackage.package.maps[reference.mapId];
+          if (reference.id === "center") continue;
+          const session = sceneryEditorSessions[reference.id];
+          session.replaceWithDocument(mapDefinitionToDocument(definition), true);
+          regionWorlds[reference.id] = session.world;
+          definitions[reference.id] = definition;
+        }
+        setSceneryDefinitions(definitions);
+        const centerReference = parsedPackage.package.layout.regions.find((region) => region.id === "center")!;
+        replaceLoadedMap(parsedPackage.package.maps[centerReference.mapId], true, "Complete world layout imported.");
+        regionWorlds.center = editorSession.world;
+        layoutEditorSession.clearHistory();
+        setLayoutSurfaceChunks(Object.fromEntries(WORLD_REGION_IDS.map((regionId) => (
+          [regionId, buildRegionSurfaceMeshes(regionId, regionWorlds, regionId !== "center").chunks]
+        ))) as Record<WorldRegionId, SurfaceChunkMeshData[]>);
+      } else if (isMapDefinitionLike(input)) {
         const validation = validateMapDefinition(input);
         if (!validation.ok) {
           setEditorMessage({ type: "error", text: validation.errors.join(" ") });
@@ -2198,7 +2308,8 @@ function ExperienceScene({
 
   const handleClearDraft = () => {
     deleteMapDraft(localStorage, currentMap.id);
-    setAutosaveStatus("draft cleared");
+    for (const regionId of SCENERY_REGION_IDS) deleteMapDraft(localStorage, getSceneryMapId(regionId));
+    setAutosaveStatus("all region drafts cleared");
   };
 
   const handleRemoveMarker = () => {
@@ -2498,17 +2609,18 @@ function ExperienceScene({
       selectedWorldPosition,
       selectedChunk,
       selectedLocal,
-      selectedRegionId: selectedRegionId === "north" ? "north" : selectedRegionId === "center" ? "center" : null,
+      selectedRegionId,
       regionVisibilityMode,
       regionBoundariesVisible,
-      dirtyChunks: editorSession.world.dirtyChunks.size + northSceneryWorld.dirtyChunks.size,
+      regionLoadSummary: `${WORLD_REGION_IDS.length - sceneryLoad.errors.length} / ${WORLD_REGION_IDS.length} loaded`,
+      dirtyChunks: Object.values(regionWorlds).reduce((sum, world) => sum + world.dirtyChunks.size, 0),
       lastRebuiltChunks,
-      blockEditCount: snapshot.blockEditCount + northSnapshot.blockEditCount,
+      blockEditCount: snapshot.blockEditCount + scenerySnapshots.reduce((sum, regionSnapshot) => sum + regionSnapshot.blockEditCount, 0),
       zoneAssignmentCount: snapshot.zoneAssignmentCount,
       entityAnchorCount: snapshot.entityAnchorCount,
       undoDepth: layoutEditorSession.undoDepth + mapHistoryRef.current.undo.length,
       redoDepth: layoutEditorSession.redoDepth + mapHistoryRef.current.redo.length,
-      hasUnsavedChanges: snapshot.hasUnsavedChanges || northSnapshot.hasUnsavedChanges,
+      hasUnsavedChanges: snapshot.hasUnsavedChanges || scenerySnapshots.some((regionSnapshot) => regionSnapshot.hasUnsavedChanges),
       autosaveStatus,
       message: editorMessage,
       selectedMarkerId,
@@ -2821,10 +2933,14 @@ function ExperienceScene({
         }
 
         const result = editorSession.replaceWithDocument(mapDefinitionToDocument(savedDraft), true);
+        regionWorlds.center = editorSession.world;
         const nextTerrain = createTerrainDataFromWorld(editorSession.world);
         const nextZoneOverlay = buildZoneOverlayMeshes(editorSession.world);
         setCurrentMap(normalizeEditableMap(savedDraft));
         setTerrain(nextTerrain);
+        setLayoutSurfaceChunks(Object.fromEntries(WORLD_REGION_IDS.map((regionId) => (
+          [regionId, buildRegionSurfaceMeshes(regionId, regionWorlds, regionId !== "center").chunks]
+        ))) as Record<WorldRegionId, SurfaceChunkMeshData[]>);
         setZoneOverlay(nextZoneOverlay);
         setLastRebuiltChunks(result.rebuiltChunkIds);
         setLastChunkRebuildMs(nextTerrain.surfaceBuildMs);
@@ -2845,7 +2961,7 @@ function ExperienceScene({
 
     const timer = window.setTimeout(() => {
       saveMapDraft(localStorage, createCurrentMapDefinition());
-      saveMapDraft(localStorage, createNorthMapDefinition());
+      for (const regionId of SCENERY_REGION_IDS) saveMapDraft(localStorage, createSceneryMapDefinition(regionId));
       setAutosaveStatus("local saved");
     }, 450);
 
@@ -3163,10 +3279,10 @@ function ExperienceScene({
         gridLinesVisible={editorAvailable && zoneGridLinesVisible}
         gridLineColor={zoneGridLineColor}
         onTerrainClick={handleSoldierTerrainClick}
-        isChunkInteractive={(chunk) => !chunk.id.startsWith("north:")}
+        isChunkInteractive={(chunk) => getSurfaceChunkRegionId(chunk.id) === "center"}
         isChunkGhosted={(chunk) => {
           if (regionVisibilityMode !== "focus" || !selectedRegionId) return false;
-          return selectedRegionId === "north" ? !chunk.id.startsWith("north:") : chunk.id.startsWith("north:");
+          return getSurfaceChunkRegionId(chunk.id) !== selectedRegionId;
         }}
       />
       <RegionBoundaryOverlay visible={editorAvailable && regionBoundariesVisible && isLayerVisible(layerStates, "developmentHelpers")} />
@@ -3205,7 +3321,7 @@ function ExperienceScene({
         enabled={benchmarkMode ? benchmarkInputEnabled : isInteractivePhase(phase) && !entityTransformDragging}
         phase={phase}
         editorMinZoomDistance={editorAvailable ? editorMinZoomDistance : undefined}
-        editorBounds={editorAvailable ? { minX: -36, maxX: 36, minZ: -100, maxZ: 36 } : undefined}
+        editorBounds={editorAvailable ? { minX: -100, maxX: 100, minZ: -100, maxZ: 100 } : undefined}
         focusPreset={activeCameraPreset}
         reducedMotion={reducedMotion}
         onFocusComplete={markExpanding}
@@ -3221,23 +3337,31 @@ function ExperienceScene({
         surfaceChunks={visibleSurfaceChunks}
         waterChunks={terrain.waterChunks}
         entities={currentMap.entities}
-        worlds={{ center: editorSession.world, north: northSceneryWorld }}
+        worlds={regionWorlds}
         hoveredCell={hoveredCell}
         onHoverCell={setHoveredCell}
         onZoneRectangleAnchor={setZoneRectangleAnchor}
+        onTerrainStrokeStart={(strokeTool) => {
+          if (getTerrainBrushOperation(strokeTool)) layoutEditorSession.beginTerrainStroke(`${strokeTool} stroke`);
+        }}
+        onTerrainStrokeEnd={() => {
+          if (layoutEditorSession.endTerrainStroke()) setEditorRevision((revision) => revision + 1);
+        }}
         onEditCell={handleEditorCell}
         onEditCells={handleEditorCells}
       />
       <BrushFootprintIndicator
-        coordinate={hoveredCell ? globalCellToRegionCell(hoveredCell)?.local ?? null : null}
+        coordinate={hoveredCell}
         tool={tool}
         zoneEditMode={zoneEditMode}
         zoneSelectionMode={zoneSelectionMode}
         zoneRectangleAnchor={zoneRectangleAnchor}
         settings={effectiveBrushSettings}
-        world={hoveredCell && globalCellToRegionCell(hoveredCell)?.regionId === "north" ? northSceneryWorld : editorSession.world}
-        regionId={hoveredCell ? globalCellToRegionCell(hoveredCell)?.regionId ?? "center" : "center"}
+        sessions={regionSessions}
         blockId={paintBlockId}
+        shapeId={activeShapeId}
+        rotation={activeRotation}
+        state={activeShapeState}
         zoneId={zoneId}
         revision={previewRevision}
         visible={editorAvailable && tool !== "entity" && tool !== "add" && !cleanPreview && isLayerVisible(layerStates, "developmentHelpers")}
@@ -4151,6 +4275,8 @@ function EditorInteractionOverlay({
   hoveredCell,
   onHoverCell,
   onZoneRectangleAnchor,
+  onTerrainStrokeStart,
+  onTerrainStrokeEnd,
   onEditCell,
   onEditCells,
 }: {
@@ -4166,6 +4292,8 @@ function EditorInteractionOverlay({
   hoveredCell: GridCoordinate | null;
   onHoverCell: (coordinate: GridCoordinate | null) => void;
   onZoneRectangleAnchor: (coordinate: GridCoordinate | null) => void;
+  onTerrainStrokeStart: (tool: EditorTool) => void;
+  onTerrainStrokeEnd: () => void;
   onEditCell: (coordinate: GridCoordinate) => void;
   onEditCells: (coordinates: GridCoordinate[]) => void;
 }) {
@@ -4274,6 +4402,7 @@ function EditorInteractionOverlay({
         zoneRectangleAnchorRef.current = currentHover;
         onZoneRectangleAnchor(currentHover);
       } else if (shouldStartContinuousTerrainStroke(tool, event)) {
+        onTerrainStrokeStart(tool);
         brushActive.current = true;
         continuousStrokeTool.current = tool;
         brushedCellKeys.current.clear();
@@ -4333,6 +4462,7 @@ function EditorInteractionOverlay({
         if (!shouldApplyStrokeImmediately(tool, zoneSelectionMode)) {
           onEditCells(brushedCells.current);
         }
+        onTerrainStrokeEnd();
         brushedCellKeys.current.clear();
         brushedCells.current = [];
         continuousStrokeTool.current = null;
@@ -4365,6 +4495,7 @@ function EditorInteractionOverlay({
     };
 
     const handlePointerCancel = () => {
+      if (brushActive.current) onTerrainStrokeEnd();
       brushActive.current = false;
       zoneRectangleAnchorRef.current = null;
       onZoneRectangleAnchor(null);
@@ -4386,7 +4517,7 @@ function EditorInteractionOverlay({
       window.removeEventListener("pointerup", handlePointerUp, { capture: true });
       window.removeEventListener("pointercancel", handlePointerCancel, { capture: true });
     };
-  }, [camera, chunkById, editorEnabled, gl.domElement, onEditCell, onEditCells, onHoverCell, onZoneRectangleAnchor, raycaster, renderMode, surfaceChunkById, tool, waterChunkById, worlds, zoneSelectionMode]);
+  }, [camera, chunkById, editorEnabled, gl.domElement, onEditCell, onEditCells, onHoverCell, onTerrainStrokeEnd, onTerrainStrokeStart, onZoneRectangleAnchor, raycaster, renderMode, surfaceChunkById, tool, waterChunkById, worlds, zoneSelectionMode]);
 
   useEffect(() => {
     shouldRaycast.current = true;
@@ -4472,7 +4603,7 @@ function getHoveredEditorCell(
     const surfaceChunk = surfaceChunkById.get(chunkId);
     const cellIndex = surfaceChunk?.triangleToCell[hit.faceIndex];
     if (cellIndex !== undefined) {
-      const regionId: WorldRegionId = chunkId.startsWith("north:") ? "north" : "center";
+      const regionId = getSurfaceChunkRegionId(chunkId);
       const local = worlds[regionId]?.getCoordinates(cellIndex);
       const coordinate = local ? regionCellToGlobalCell(regionId, local) : null;
       if (coordinate) {
@@ -4495,6 +4626,13 @@ function getHoveredEditorCell(
   }
 
   return null;
+}
+
+function getSurfaceChunkRegionId(chunkId: string): WorldRegionId {
+  const separator = chunkId.indexOf(":");
+  if (separator < 0) return "center";
+  const candidate = chunkId.slice(0, separator) as WorldRegionId;
+  return WORLD_REGION_IDS.includes(candidate) ? candidate : "center";
 }
 
 function hasHoveredEditorEntity(
@@ -4667,9 +4805,11 @@ function BrushFootprintIndicator({
   zoneSelectionMode,
   zoneRectangleAnchor,
   settings,
-  world,
-  regionId,
+  sessions,
   blockId,
+  shapeId,
+  rotation,
+  state,
   zoneId,
   revision,
   visible,
@@ -4681,38 +4821,83 @@ function BrushFootprintIndicator({
   zoneSelectionMode: ZoneSelectionMode;
   zoneRectangleAnchor: GridCoordinate | null;
   settings: TerrainBrushSettings;
-  world: MapEditorSession["world"];
-  regionId: WorldRegionId;
+  sessions: Readonly<Record<WorldRegionId, MapEditorSession>>;
   blockId: BlockId;
+  shapeId: ShapeId;
+  rotation: CellRotation;
+  state: number;
   zoneId: number;
   revision: number;
   visible: boolean;
   color: string;
 }) {
-  const toGlobalCoordinate = (cell: GridCoordinate) => regionCellToGlobalCell(regionId, cell)!;
-  const flattenCells = useMemo(
+  type LayoutPreviewCell = { global: GridCoordinate; local: GridCoordinate; regionId: WorldRegionId };
+  type LayoutFlattenPreviewCell = LayoutPreviewCell & { action: FlattenPreviewAction; hasSurface: boolean };
+  const operation = getTerrainBrushOperation(tool);
+  const terrainPreview = useMemo<LayoutPreviewCell[]>(() => {
+    void revision;
+    if (!coordinate || !operation || operation === "flatten") return [];
+    if (operation === "raise") {
+      return getLayoutTerrainFootprint(coordinate, settings, operation).flatMap((global) => {
+        const resolved = globalCellToRegionCell(global);
+        if (!resolved) return [];
+        const topY = sessions[resolved.regionId].world.getHighestNonAirY(resolved.local.x, resolved.local.z);
+        if (topY === null) return [];
+        const local = { ...resolved.local, y: topY };
+        return [{ global: regionCellToGlobalCell(resolved.regionId, local)!, local, regionId: resolved.regionId }];
+      });
+    }
+    const mutations = createLayoutTerrainMutations({
+      sessions,
+      operation,
+      centers: [coordinate],
+      settings,
+      blockId: operation === "paint-path" ? BLOCK_IDS.Path : blockId,
+      shapeId: operation === "paint-path" || operation === "remove-path" ? undefined : shapeId,
+      rotation,
+      state,
+      zoneId,
+    });
+    return Object.entries(mutations).flatMap(([regionId, regionMutations]) => (
+      (regionMutations ?? []).flatMap((mutation) => {
+        const global = regionCellToGlobalCell(regionId as WorldRegionId, mutation.coordinate);
+        return global ? [{ global, local: mutation.coordinate, regionId: regionId as WorldRegionId }] : [];
+      })
+    ));
+  }, [blockId, coordinate, operation, revision, rotation, sessions, settings, shapeId, state, zoneId]);
+  const flattenCells = useMemo<LayoutFlattenPreviewCell[]>(() => {
+    void revision;
+    if (!coordinate || operation !== "flatten") return [];
+    const desiredY = Math.max(0, Math.min(WORLD_CONFIG.height - 1, coordinate.y));
+    return getLayoutTerrainFootprint(coordinate, settings, operation).flatMap((global) => {
+      const resolved = globalCellToRegionCell(global);
+      if (!resolved) return [];
+      const topY = sessions[resolved.regionId].world.getHighestNonAirY(resolved.local.x, resolved.local.z);
+      const action: FlattenPreviewAction = topY === null || topY < desiredY ? "raise" : topY > desiredY ? "lower" : "unchanged";
+      const local = { ...resolved.local, y: topY ?? desiredY };
+      return [{ global: regionCellToGlobalCell(resolved.regionId, local)!, local, regionId: resolved.regionId, action, hasSurface: topY !== null }];
+    });
+  }, [coordinate, operation, revision, sessions, settings]);
+  const cells = useMemo<LayoutPreviewCell[]>(
     () => {
       void revision;
-      return tool === "flatten" && coordinate
-        ? getFlattenPreviewCells(coordinate, settings, world)
-        : [];
-    },
-    [coordinate, revision, settings, tool, world],
-  );
-  const cells = useMemo(
-    () => {
-      void revision;
-      if (tool === "flatten") {
-        return [];
-      }
       if (tool === "zone" && coordinate) {
-        return zoneSelectionMode === "rectangle" && zoneRectangleAnchor
+        const globals = zoneSelectionMode === "rectangle" && zoneRectangleAnchor
           ? getZoneRectangleFootprint(zoneRectangleAnchor, coordinate)
           : getZoneBrushFootprint(coordinate, settings);
+        return globals.flatMap((global) => {
+          const resolved = globalCellToRegionCell(global);
+          return resolved ? [{ global, local: resolved.local, regionId: resolved.regionId }] : [];
+        });
       }
-      return coordinate ? getToolPreviewFootprint(coordinate, tool, settings, world, blockId, zoneId) : [];
+      if (terrainPreview.length > 0 || operation === "flatten") return terrainPreview;
+      if (!coordinate || !operation) return [];
+      return getLayoutTerrainFootprint(coordinate, settings, operation).flatMap((global) => {
+        const resolved = globalCellToRegionCell(global);
+        return resolved && sessions[resolved.regionId] ? [{ global, local: resolved.local, regionId: resolved.regionId }] : [];
+      });
     },
-    [blockId, coordinate, revision, settings, tool, world, zoneId, zoneRectangleAnchor, zoneSelectionMode],
+    [coordinate, operation, revision, sessions, settings, terrainPreview, tool, zoneRectangleAnchor, zoneSelectionMode],
   );
   const previewStyle = getBrushPreviewStyle(tool);
   const zonePreviewColor = zoneEditMode === "erase" ? "#facc15" : color;
@@ -4721,17 +4906,17 @@ function BrushFootprintIndicator({
       {flattenCells.map((cell) => (
         cell.hasSurface ? (
           <SurfaceBrushCellIndicator
-            key={`${cell.coordinate.x}-${cell.coordinate.y}-${cell.coordinate.z}-${cell.action}`}
-            coordinate={cell.coordinate}
-            world={world}
-            regionId={regionId}
+            key={`${cell.global.x}-${cell.global.y}-${cell.global.z}-${cell.action}`}
+            coordinate={cell.local}
+            world={sessions[cell.regionId].world}
+            regionId={cell.regionId}
             visible={visible}
             color={FLATTEN_PREVIEW_COLORS[cell.action]}
           />
         ) : (
           <SelectionIndicator
-            key={`${cell.coordinate.x}-${cell.coordinate.y}-${cell.coordinate.z}-${cell.action}`}
-            coordinate={toGlobalCoordinate(cell.coordinate)}
+            key={`${cell.global.x}-${cell.global.y}-${cell.global.z}-${cell.action}`}
+            coordinate={cell.global}
             visible={visible}
             color={FLATTEN_PREVIEW_COLORS[cell.action]}
             filled
@@ -4741,18 +4926,18 @@ function BrushFootprintIndicator({
       {cells.map((cell) => (
         previewStyle === "cube" ? (
           <SelectionIndicator
-            key={`${cell.x}-${cell.y}-${cell.z}`}
-            coordinate={toGlobalCoordinate(cell)}
+            key={`${cell.global.x}-${cell.global.y}-${cell.global.z}`}
+            coordinate={cell.global}
             visible={visible}
             color={color}
             filled={tool !== "add"}
           />
         ) : (
           <SurfaceBrushCellIndicator
-            key={`${cell.x}-${cell.y}-${cell.z}`}
-            coordinate={cell}
-            world={world}
-            regionId={regionId}
+            key={`${cell.global.x}-${cell.global.y}-${cell.global.z}`}
+            coordinate={cell.local}
+            world={sessions[cell.regionId].world}
+            regionId={cell.regionId}
             visible={visible}
             color={tool === "zone" ? zonePreviewColor : color}
           />
@@ -4826,13 +5011,11 @@ function SurfaceBrushCellIndicator({
 
 function RegionBoundaryOverlay({ visible }: { visible: boolean }) {
   const geometry = useMemo(() => {
-    const points = [
-      -32, 12.05, 32, 32, 12.05, 32,
-      32, 12.05, 32, 32, 12.05, -96,
-      32, 12.05, -96, -32, 12.05, -96,
-      -32, 12.05, -96, -32, 12.05, 32,
-      -32, 12.05, -32, 32, 12.05, -32,
-    ];
+    const points: number[] = [];
+    for (const coordinate of [-96, -32, 32, 96]) {
+      points.push(coordinate, 12.05, -96, coordinate, 12.05, 96);
+      points.push(-96, 12.05, coordinate, 96, 12.05, coordinate);
+    }
     const nextGeometry = new THREE.BufferGeometry();
     nextGeometry.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
     return nextGeometry;
@@ -6293,46 +6476,6 @@ function getEffectiveTerrainBrushSettings(tool: EditorTool, settings: TerrainBru
   };
 }
 
-function getToolPreviewFootprint(
-  coordinate: GridCoordinate,
-  tool: EditorTool,
-  settings: TerrainBrushSettings,
-  world: MapEditorSession["world"],
-  blockId: BlockId,
-  zoneId: number,
-): GridCoordinate[] {
-  const operation = getTerrainBrushOperation(tool);
-  if (!operation) {
-    return [{ ...coordinate }];
-  }
-
-  if (operation === "raise") {
-    const footprint = getTerrainOperationFootprint(coordinate, operation, settings);
-    return footprint.flatMap((cell) => {
-      const topY = world.getHighestNonAirY(cell.x, cell.z);
-      return topY === null ? [] : [{ x: cell.x, y: topY, z: cell.z }];
-    });
-  }
-
-  if (operation === "flatten") {
-    return getFlattenPreviewCells(coordinate, settings, world).map((cell) => cell.coordinate);
-  }
-
-  const mutations = createTerrainMutations({
-    world,
-    operation,
-    center: coordinate,
-    settings,
-    blockId: operation === "paint-path" ? BLOCK_IDS.Path : blockId,
-    zoneId,
-  });
-  if (mutations.length > 0) {
-    return mutations.map((mutation) => mutation.coordinate);
-  }
-
-  return getTerrainOperationFootprint(coordinate, operation, settings);
-}
-
 type FlattenPreviewAction = "raise" | "lower" | "unchanged";
 
 const FLATTEN_PREVIEW_COLORS: Record<FlattenPreviewAction, string> = {
@@ -6340,27 +6483,6 @@ const FLATTEN_PREVIEW_COLORS: Record<FlattenPreviewAction, string> = {
   lower: "#ef4444",
   unchanged: "#94a3b8",
 };
-
-function getFlattenPreviewCells(
-  coordinate: GridCoordinate,
-  settings: TerrainBrushSettings,
-  world: MapEditorSession["world"],
-): Array<{ coordinate: GridCoordinate; action: FlattenPreviewAction; hasSurface: boolean }> {
-  const desiredY = Math.max(0, Math.min(world.config.height - 1, coordinate.y));
-  return getTerrainOperationFootprint(coordinate, "flatten", settings).map((cell) => {
-    const topY = world.getHighestNonAirY(cell.x, cell.z);
-    const action: FlattenPreviewAction = topY === null || topY < desiredY
-      ? "raise"
-      : topY > desiredY
-        ? "lower"
-        : "unchanged";
-    return {
-      coordinate: { x: cell.x, y: topY ?? desiredY, z: cell.z },
-      action,
-      hasSurface: topY !== null,
-    };
-  });
-}
 
 function getBrushPreviewStyle(tool: EditorTool): "surface" | "cube" {
   return tool === "add" || tool === "erase" || tool === "clear" ? "cube" : "surface";
@@ -6443,9 +6565,8 @@ function getPointerGestureDistance(start: { x: number; y: number }, event: Point
 }
 
 function shouldApplyStrokeImmediately(tool: EditorTool, zoneSelectionMode: ZoneSelectionMode) {
-  void tool;
-  void zoneSelectionMode;
-  return false;
+  if (tool === "waterSource" || tool === "waterRemove") return false;
+  return tool !== "zone" || zoneSelectionMode === "brush";
 }
 
 function getStrokeBrushKey(tool: EditorTool, coordinate: GridCoordinate) {

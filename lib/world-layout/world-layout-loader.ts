@@ -8,9 +8,15 @@ import type {
   WorldRegionReference,
 } from "./world-layout-types";
 import { createCenterOnlyWorldLayout, validateWorldLayoutDefinition } from "./world-region";
+import { WORLD_REGION_IDS } from "./world-layout-types";
 
 export const DEFAULT_WORLD_LAYOUT_ID = "portfolio-world";
 export const NORTH_SCENERY_MAP_ID = "portfolio-scenery-north";
+export const SCENERY_REGION_IDS = WORLD_REGION_IDS.filter((id): id is Exclude<WorldRegionId, "center"> => id !== "center");
+
+export function getSceneryMapId(regionId: Exclude<WorldRegionId, "center">) {
+  return `portfolio-scenery-${regionId}`;
+}
 
 export type MapDefinitionResolver = (mapId: string) => MapDefinition;
 
@@ -31,6 +37,19 @@ export function createNorthPrototypeWorldLayout(): WorldLayoutDefinition {
       { id: "center", role: "playable", mapId: DEFAULT_AUTHORED_MAP_ID },
       { id: "north", role: "scenery", mapId: NORTH_SCENERY_MAP_ID },
     ],
+  };
+}
+
+export function createCompleteWorldLayout(): WorldLayoutDefinition {
+  return {
+    schemaVersion: 1,
+    id: DEFAULT_WORLD_LAYOUT_ID,
+    name: "Portfolio World",
+    regions: WORLD_REGION_IDS.map((id) => ({
+      id,
+      role: id === "center" ? "playable" as const : "scenery" as const,
+      mapId: id === "center" ? DEFAULT_AUTHORED_MAP_ID : getSceneryMapId(id),
+    })),
   };
 }
 

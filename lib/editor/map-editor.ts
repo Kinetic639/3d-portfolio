@@ -314,7 +314,7 @@ export class MapEditorSession {
     return this.applyCommand({ label: "Flatten", cells });
   }
 
-  applyTerrainMutations(label: string, mutations: TerrainCellMutation[]): EditorActionResult {
+  applyTerrainMutations(label: string, mutations: TerrainCellMutation[], recordHistory = true): EditorActionResult {
     const merged = new Map<string, TerrainCellMutation>();
     for (const mutation of mutations) {
       const key = coordinateKey(mutation.coordinate);
@@ -368,7 +368,7 @@ export class MapEditorSession {
           before: mutation.beforeZone,
           after: mutation.afterZone,
         })),
-    });
+    }, recordHistory);
   }
 
   applyZoneColumnChanges(label: string, changes: ZoneColumnChange[]): EditorActionResult {
@@ -634,21 +634,17 @@ export class MapEditorSession {
     return this.applyCommand({ label, cells });
   }
 
-  private applyCommand(command: EditorCommand): EditorActionResult {
-    const hasCellChange = command.cells?.some((change) => !sameCellData(change.before, change.after)) ?? false;
-    const hasZoneChange = command.zones?.some((change) => change.before !== change.after) ?? false;
-    const hasEntityChange = command.entities
-      ? JSON.stringify(command.entities.before) !== JSON.stringify(command.entities.after)
-      : false;
-
-    if (!hasCellChange && !hasZoneChange && !hasEntityChange) {
+  private applyCommand(command: EditorCommand, recordHistory = true): EditorActionResult {
+    if (!hasCommandChanges(command)) {
       return { changed: false, rebuiltChunkIds: [], rebuiltChunks: [] };
     }
 
     this.applyCommandState(command, "after");
-    this.undoStack.push(command);
-    this.trimHistory();
-    this.redoStack = [];
+    if (recordHistory) {
+      this.undoStack.push(command);
+      this.trimHistory();
+      this.redoStack = [];
+    }
     this.markDocumentDirty();
 
     return this.flushDirtyChunks();
@@ -766,6 +762,15 @@ function sameCellData(left: CellData, right: CellData) {
     && Boolean(left.fluid.authored) === Boolean(right.fluid.authored)
   );
 }
+
+function hasCommandChanges(command: EditorCommand) {
+  return (
+    (command.cells?.some((change) => !sameCellData(change.before, change.after)) ?? false)
+    || (command.zones?.some((change) => change.before !== change.after) ?? false)
+    || (command.entities ? JSON.stringify(command.entities.before) !== JSON.stringify(command.entities.after) : false)
+  );
+}
+
 
 function cloneFluidSnapshot(snapshot: FluidLayerSnapshot): FluidLayerSnapshot {
   return {

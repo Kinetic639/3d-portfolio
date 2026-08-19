@@ -73,6 +73,7 @@ import { BUILT_IN_PREFABS, listPrefabCategories } from "@/lib/prefabs/prefab-lib
 import type { PrefabCategory, PrefabDefinition, PrefabVariantDefinition } from "@/lib/prefabs/prefab-types";
 import { BLOCK_IDS, RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
+import type { WorldRegionId } from "@/lib/world-layout/world-layout-types";
 import { getShapeDefinition, getShapePitch, getShapeStateValue, setShapePitch, TERRAIN_PALETTE_SHAPE_DEFINITIONS, type ShapeCategory } from "@/lib/voxel-shapes/shape-registry";
 import { SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import type { FluidCell } from "@/lib/fluids/fluid-types";
@@ -163,9 +164,10 @@ export type EditorInspectorState = {
   selectedWorldPosition: WorldPosition | null;
   selectedChunk: { chunkX: number; chunkZ: number } | null;
   selectedLocal: { localX: number; localZ: number } | null;
-  selectedRegionId?: "center" | "north" | null;
+  selectedRegionId?: WorldRegionId | null;
   regionVisibilityMode?: "show-all" | "focus" | "isolate";
   regionBoundariesVisible?: boolean;
+  regionLoadSummary?: string;
   onRegionBoundariesVisibleChange?: (visible: boolean) => void;
   dirtyChunks: number;
   lastRebuiltChunks: string[];
@@ -1508,6 +1510,7 @@ function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspa
         <KeyValue label="Map" value={props.mapName} />
         <KeyValue label="Description" value={props.mapDescription || "-"} />
         <KeyValue label="Renderer" value={props.renderMode} />
+        <KeyValue label="Regions" value={props.regionLoadSummary ?? "1 / 1 loaded"} mono />
         <KeyValue label="Autosave" value={props.autosaveStatus} />
         <KeyValue label="Dimensions" value="64 x 64 x 12" mono />
         <KeyValue label="Blocks" value={`${props.blockEditCount} edits`} mono />
