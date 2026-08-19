@@ -6,10 +6,10 @@
 - [x] Phase 3: Define the world manifest and region-file contract
 - [x] Phase 4: Assemble the current center map into one seamless world
 - [x] Phase 5: Add one North region and prove the storage boundary
-- [ ] Phase 6: Run the existing editor against the composite world
-- [ ] Phase 7: Persist seamless edits back into region files
-- [ ] Phase 8: Add the remaining seven scenery regions
-- [ ] Phase 9: Make rendering seamless across storage boundaries
+- [x] Phase 6: Run the existing editor against the composite world
+- [x] Phase 7: Persist seamless edits back into region files
+- [x] Phase 8: Add the remaining seven scenery regions
+- [x] Phase 9: Make rendering seamless across storage boundaries
 - [ ] Phase 10: Apply runtime capabilities from manifest roles
 - [ ] Phase 11: Extend liquids and reveal into scenery
 - [ ] Phase 12: Profile, optimize, and validate the complete source world
@@ -440,58 +440,58 @@ These timings are development/headless comparison baselines, not production budg
 
 ### Tasks
 
-- [ ] Pass the composite `VoxelWorld` to the normal `MapEditorSession`.
-- [ ] Keep the existing toolbar, tools, brush visuals, and shortcuts.
-- [ ] Expand camera framing and raycasting to the composite bounds.
-- [ ] Keep normal selection behavior across all global cells.
-- [ ] Verify paint, erase, raise, lower, flatten, fill, clear, paths, zones, shapes, and liquids.
-- [ ] Verify one history stack and one dirty-state indicator.
-- [ ] Do not add region UI.
+- [x] Pass the composite `VoxelWorld` to the normal `MapEditorSession`.
+- [x] Keep the existing toolbar, tools, brush visuals, and shortcuts.
+- [x] Expand camera framing and raycasting to the composite bounds.
+- [x] Keep normal selection behavior across all global cells.
+- [x] Verify paint, erase, raise, lower, flatten, fill, clear, paths, zones, shapes, and liquids.
+- [x] Verify one history stack and one dirty-state indicator.
+- [x] Do not add region UI.
 
 ### Exit Criteria
 
-- [ ] Existing tools behave normally in center and North.
-- [ ] A brush footprint crossing Z `63/64` is continuous and atomic.
-- [ ] Undo and redo restore the entire cross-boundary stroke in one action.
+- [x] Existing tools behave normally in center and North.
+- [x] A brush footprint crossing Z `63/64` is continuous and atomic.
+- [x] Undo and redo restore the entire cross-boundary stroke in one action.
 
 ## Phase 7: Persist Seamless Edits Back Into Region Files
 
 ### Tasks
 
-- [ ] Implement deterministic global-to-region partitioning.
-- [ ] Convert partitioned cells back to local X/Z coordinates.
-- [ ] Partition fluids, zones, and region-owned entities.
-- [ ] Preserve center-only gameplay metadata without duplication.
-- [ ] Validate every output document before saving.
-- [ ] Add coordinated save failure reporting.
-- [ ] Reload the nine-file result and compare it with the pre-save composite world.
+- [x] Implement deterministic global-to-region partitioning.
+- [x] Convert partitioned cells back to local X/Z coordinates.
+- [x] Partition fluids, zones, and region-owned entities.
+- [x] Preserve center-only gameplay metadata without duplication.
+- [x] Validate every output document before saving.
+- [x] Add coordinated save failure reporting.
+- [x] Reload the nine-file result and compare it with the pre-save composite world.
 
 ### Required Tests
 
-- [ ] A center-only load/save does not alter center authored data.
-- [ ] A cross-boundary stroke saves edits into both correct files.
-- [ ] Reloading produces a cell-for-cell equivalent composite world.
-- [ ] Undo history remains an editor concern and never leaks into files.
+- [x] A center-only load/save does not alter center authored data.
+- [x] A cross-boundary stroke saves edits into both correct files.
+- [x] Reloading produces a cell-for-cell equivalent composite world.
+- [x] Undo history remains an editor concern and never leaks into files.
 
 ### Exit Criteria
 
-- [ ] The storage partition is invisible during editing and exact during save/load.
+- [x] The storage partition is invisible during editing and exact during save/load.
 
 ## Phase 8: Add The Remaining Seven Scenery Regions
 
 ### Tasks
 
-- [ ] Create the remaining region map files.
-- [ ] Initialize every new region with the standard vertical bounds and stone foundation.
-- [ ] Register all nine files in the manifest.
-- [ ] Assemble the complete `192x192x32` source world.
-- [ ] Add temporary terrain sufficient to inspect every seam.
-- [ ] Confirm all files can be edited and saved through the same session.
+- [x] Create the remaining region map files.
+- [x] Initialize every new region with the standard vertical bounds and stone foundation.
+- [x] Register all nine files in the manifest.
+- [x] Assemble the complete `192x192x32` source world.
+- [x] Add temporary terrain sufficient to inspect every seam.
+- [x] Confirm all files can be edited and saved through the same session.
 
 ### Exit Criteria
 
-- [ ] All nine regions form one editable world.
-- [ ] No new region count increases editor architecture complexity.
+- [x] All nine regions form one editable world.
+- [x] No new region count increases editor architecture complexity.
 
 ## Phase 9: Make Rendering Seamless Across Storage Boundaries
 
@@ -499,16 +499,16 @@ Because the renderer receives one world, ordinary neighbor lookup should natural
 
 ### Tasks
 
-- [ ] Verify face occlusion across every former region boundary.
-- [ ] Verify dirty render chunks on both sides rebuild when seam cells change.
-- [ ] Seed texture variants and rotations from global coordinates.
-- [ ] Verify grass covering, stone, water, shapes, and transparent faces at seams.
-- [ ] Ensure no region-edge overlays appear in runtime output.
-- [ ] Keep optional debug boundaries development-only.
+- [x] Verify face occlusion across every former region boundary.
+- [x] Verify dirty render chunks on both sides rebuild when seam cells change.
+- [x] Seed texture variants and rotations from global coordinates.
+- [x] Verify grass covering, stone, water, shapes, and transparent faces at seams.
+- [x] Ensure no region-edge overlays appear in runtime output.
+- [x] Keep optional debug boundaries development-only.
 
 ### Exit Criteria
 
-- [ ] No cracks, duplicate faces, texture resets, or visible 64-cell partition lines remain.
+- [x] No cracks, duplicate faces, texture resets, or visible 64-cell partition lines remain.
 
 ## Phase 10: Apply Runtime Capabilities From Manifest Roles
 

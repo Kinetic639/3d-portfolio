@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BLOCK_IDS } from "@/lib/world/block-registry";
 import { createFlatVoxelWorld } from "@/lib/world/voxel-world";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
+import { COMPOSITE_WORLD_CONFIG } from "@/lib/world/world-config";
 import { createTerrainMutations, getBrushFootprint, getDirtyChunkIdsForMutations, getTerrainOperationFootprint } from "./terrain-brushes";
 
 describe("terrain brushes", () => {
@@ -9,6 +10,20 @@ describe("terrain brushes", () => {
     expect(getBrushFootprint({ x: 10, y: 0, z: 10 }, { shape: "square", size: 3, pathWidth: 1, pathEnds: "square", flattenHeight: 0 })).toHaveLength(9);
     expect(getBrushFootprint({ x: 10, y: 0, z: 10 }, { shape: "circle", size: 3, pathWidth: 1, pathEnds: "square", flattenHeight: 0 })).toHaveLength(5);
     expect(getBrushFootprint({ x: 0, y: 0, z: 0 }, { shape: "square", size: 3, pathWidth: 1, pathEnds: "square", flattenHeight: 0 })).toHaveLength(4);
+  });
+
+  it("keeps a composite brush continuous across a former region boundary", () => {
+    const cells = getBrushFootprint(
+      { x: 64, y: 0, z: 64 },
+      { shape: "square", size: 3, pathWidth: 1, pathEnds: "square", flattenHeight: 0 },
+      COMPOSITE_WORLD_CONFIG,
+    );
+    expect(cells).toHaveLength(9);
+    expect(cells).toEqual(expect.arrayContaining([
+      { x: 63, y: 0, z: 64 },
+      { x: 64, y: 0, z: 64 },
+      { x: 65, y: 0, z: 64 },
+    ]));
   });
 
   it("uses operation-specific footprints for previews and mutations", () => {

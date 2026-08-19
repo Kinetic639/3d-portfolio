@@ -21,21 +21,26 @@ export type LoadedCompositeWorldState = LoadedMapState & {
   sourceRegions: ReadonlyMap<WorldRegionId, LoadedMapState>;
 };
 
-export function loadCompositeWorldStateSync(manifestId = DEFAULT_WORLD_MANIFEST_ID): LoadedCompositeWorldState {
+export function loadCompositeWorldStateSync(
+  manifestId = DEFAULT_WORLD_MANIFEST_ID,
+  options: { loadRegion?: (mapId: string) => LoadedMapState } = {},
+): LoadedCompositeWorldState {
   const manifest = resolveWorldManifestSync(manifestId);
   const world = new VoxelWorld(COMPOSITE_WORLD_CONFIG);
   const sourceRegions = new Map<WorldRegionId, LoadedMapState>();
 
   for (const region of manifest.regions) {
-    const source = loadMapStateSync(region.mapId, { includeDevelopment: true });
+    const source = options.loadRegion?.(region.mapId) ?? loadMapStateSync(region.mapId, { includeDevelopment: true });
     sourceRegions.set(region.id, source);
     copyRegionIntoComposite(world, region.id, source.world);
   }
 
   const center = sourceRegions.get("center");
   if (!center) throw new Error(`World manifest ${manifest.id} does not contain a loaded center region.`);
-  const definition = createCompositeCenterDefinition(center.definition);
-  const entities = center.entities.map((entity) => translateAnchor(entity, "center"));
+  const definition = createCompositeDefinition(center.definition, sourceRegions);
+  const entities = [...sourceRegions.entries()].flatMap(([regionId, state]) => (
+    state.entities.map((entity) => translateAnchor(entity, regionId))
+  ));
   world.clearDirtyChunks();
   world.clearDirtyZoneChunks();
   world.clearDirtyFluidChunks();
@@ -88,7 +93,7 @@ function copyRegionIntoComposite(target: VoxelWorld, regionId: WorldRegionId, so
   }
 }
 
-function createCompositeCenterDefinition(source: MapDefinition): MapDefinition {
+function createCompositeDefinition(source: MapDefinition, regions: ReadonlyMap<WorldRegionId, LoadedMapState>): MapDefinition {
   const definition = cloneMapDefinition(source);
   definition.zoneAssignments = definition.zoneAssignments.map((assignment) => {
     const global = regionLocalToGlobal("center", { x: assignment.x, y: assignment.y ?? 0, z: assignment.z });
@@ -112,6 +117,30 @@ function createCompositeCenterDefinition(source: MapDefinition): MapDefinition {
     position: regionLocalToGlobal("center", spawn.position),
     cameraTarget: spawn.cameraTarget ? regionLocalToGlobal("center", spawn.cameraTarget) : undefined,
   }));
+  for (const [regionId, state] of regions) {
+    if (regionId === "center") continue;
+    const offset = getRegionWorldOffset(regionId);
+    definition.markers.push(...state.definition.markers.map((marker) => ({
+      ...marker,
+      gridPosition: regionLocalToGlobal(regionId, marker.gridPosition),
+    })));
+    definition.entities.push(...state.definition.entities.map((entity) => ({
+      ...entity,
+      transform: {
+        ...entity.transform,
+        position: translateSceneryWorldPosition(regionId, entity.transform.position),
+        rotation: { ...entity.transform.rotation },
+        scale: { ...entity.transform.scale },
+      },
+    })));
+    definition.entityGroups.push(...state.definition.entityGroups.map((group) => ({ ...group })));
+    definition.navigation.nodes.push(...state.definition.navigation.nodes.map((node) => ({
+      ...node,
+      position: { x: node.position.x + offset.x, y: node.position.y, z: node.position.z + offset.z },
+    })));
+    definition.navigation.edges.push(...state.definition.navigation.edges.map((edge) => ({ ...edge })));
+    definition.navigation.routes.push(...state.definition.navigation.routes.map((route) => ({ ...route, nodeIds: [...route.nodeIds] })));
+  }
   return definition;
 }
 

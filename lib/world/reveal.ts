@@ -7,6 +7,7 @@ import { getWorldMaxY, WORLD_CONFIG } from "@/lib/world/world-config";
 // Both need identical numbers here or the two renderers would animate out of
 // sync with each other whenever a project switches between them mid-reveal.
 export const MAX_WAVE_DELAY = 0.74;
+export const TERRAIN_REVEAL_WINDOW = 0.22;
 
 // Minimal shape a world needs to have for the loader-platform lookup below —
 // just enough of VoxelWorld's surface that reveal.ts doesn't have to import
@@ -68,4 +69,15 @@ export function computeExpansionDelay(world: LoaderPlatformWorld, x: number, y: 
   // wave beyond the former boundary instead of renormalizing its duration.
   const originalCornerDistance = distanceFromCenterPlatform(0, 0, WORLD_CONFIG);
   return (distanceFromCenterPlatform(x, z, world.config) / originalCornerDistance) * MAX_WAVE_DELAY;
+}
+
+export function getExpansionRevealEnd(world: LoaderPlatformWorld): number {
+  const maxX = world.config.width - 1;
+  const maxZ = world.config.depth - 1;
+  return Math.max(
+    computeExpansionDelay(world, 0, world.config.minY, 0),
+    computeExpansionDelay(world, maxX, world.config.minY, 0),
+    computeExpansionDelay(world, 0, world.config.minY, maxZ),
+    computeExpansionDelay(world, maxX, world.config.minY, maxZ),
+  ) + TERRAIN_REVEAL_WINDOW;
 }

@@ -6,7 +6,7 @@ import {
   serializeMapDocument,
 } from "@/lib/world/map-document";
 import { createFlatVoxelWorld, type RenderChunk, type VoxelWorld } from "@/lib/world/voxel-world";
-import { getWorldMaxY, type GridCoordinate } from "@/lib/world/world-config";
+import { getWorldMaxY, WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
 import type { TerrainCellMutation } from "./terrain-brushes";
 import type { ZoneColumnChange } from "./zone-tools";
 import { DEFAULT_ROTATION, DEFAULT_SHAPE_ID, DEFAULT_STATE, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
@@ -132,7 +132,12 @@ export class MapEditorSession {
       return this.cachedSnapshot;
     }
 
-    const document = this.getCurrentDocument();
+    // A composite editor world contains over one million logical cells.
+    // Keep interaction snapshots cheap and defer its full serialization to
+    // explicit save/export operations.
+    const document = this.documentDirty && this.world.config.width > WORLD_CONFIG.width
+      ? this.currentDocument
+      : this.getCurrentDocument();
     this.cachedSnapshot = {
       world: this.world,
       entities: this.entities.map(cloneEntity),
@@ -593,7 +598,7 @@ export class MapEditorSession {
   }
 
   resetToFlatMap(): EditorActionResult {
-    return this.replaceWithDocument(serializeMapDocument(createFlatVoxelWorld(), []), false);
+    return this.replaceWithDocument(serializeMapDocument(createFlatVoxelWorld(this.world.config), []), false);
   }
 
   markSaved() {
@@ -713,7 +718,14 @@ export class MapEditorSession {
 }
 
 function collectDocumentCellChanges(before: MapDocument, after: MapDocument): CellChange[] {
-  const baseWorld = createFlatVoxelWorld();
+  const baseWorld = createFlatVoxelWorld({
+    width: before.world.width,
+    depth: before.world.depth,
+    minY: before.world.minY ?? WORLD_CONFIG.minY,
+    height: before.world.height,
+    blockSize: before.world.blockSize,
+    chunkSize: before.world.chunkSize,
+  });
   const beforeMap = new Map(before.edits.map((edit) => [coordinateKey(edit), edit]));
   const afterMap = new Map(after.edits.map((edit) => [coordinateKey(edit), edit]));
   const keys = new Set([...beforeMap.keys(), ...afterMap.keys()]);

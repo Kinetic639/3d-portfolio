@@ -19,6 +19,7 @@ import { buildZoneOverlayChunkMeshes, buildZoneOverlayMeshes, type ZoneOverlayCh
 import { BLOCK_IDS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import { parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
 import { getWorldMaxY, WORLD_CONFIG, type GridCoordinate, type WorldPosition } from "@/lib/world/world-config";
+import { getExpansionRevealEnd } from "@/lib/world/reveal";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
 import { getTerrainSurfaceAt, getTerrainSurfaceAtWorldPosition } from "@/lib/world/surface-query";
 import { MapEditorSession, type BasinFillPreview, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
@@ -88,7 +89,8 @@ import {
   loadMapStateSync,
   saveMapDraft,
 } from "@/lib/maps/map-registry";
-import { loadCompositeWorldStateSync } from "@/lib/world-manifest/composite-world-loader";
+import { loadCompositeWorldStateSync, type LoadedCompositeWorldState } from "@/lib/world-manifest/composite-world-loader";
+import { partitionCompositeWorld, saveCompositeRegionDrafts } from "@/lib/world-manifest/composite-world-saver";
 import type { EditorLayerId, EditorLayerState, EditorViewportLayoutState, EntityTransformMode, MapEditorToolbarProps } from "@/components/experience/MapEditorToolbar";
 import { createBrowsingState, reduceBrowsingState, type BrowsingState } from "@/lib/portfolio/browsing-state";
 import { getShapeDefinition, getShapePitch, setShapePitch, type ShapeCategory, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
@@ -1104,6 +1106,19 @@ function createInitialExperienceMapState(mapId: string, compositeWorld: boolean)
   }
 }
 
+function downloadJson(filename: string, value: unknown) {
+  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: "application/json" });
+  const link = window.document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function isLoadedCompositeWorldState(value: unknown): value is LoadedCompositeWorldState {
+  return typeof value === "object" && value !== null && "manifest" in value && "sourceRegions" in value;
+}
+
 function ExperienceScene({
   initialMapId,
   editorEnabled,
@@ -1122,7 +1137,7 @@ function ExperienceScene({
   onCloseEditor: () => void;
 }) {
   const initialState = useMemo(
-    () => createInitialExperienceMapState(initialMapId, initialMapId === DEFAULT_AUTHORED_MAP_ID && !editorEnabled),
+    () => createInitialExperienceMapState(initialMapId, initialMapId === DEFAULT_AUTHORED_MAP_ID),
     [editorEnabled, initialMapId],
   );
   const [currentMap, setCurrentMap] = useState<MapDefinition>(() => editorEnabled ? ensureEditableZones(initialState.loadedMap.definition) : initialState.loadedMap.definition);
@@ -1130,6 +1145,10 @@ function ExperienceScene({
   const [terrain, setTerrain] = useState(initialState.terrain);
   const [zoneOverlay, setZoneOverlay] = useState(() => buildZoneOverlayMeshes(initialState.loadedMap.world));
   const [editorSession, setEditorSession] = useState(() => new MapEditorSession(initialState.loadedMap.world, initialState.loadedMap.entities, initialState.loadedMap.definition.fluids.settings));
+  const [compositeState, setCompositeState] = useState<LoadedCompositeWorldState | null>(() => (
+    isLoadedCompositeWorldState(initialState.loadedMap) ? initialState.loadedMap : null
+  ));
+  const compositeDraftRestoreAttempted = useRef(false);
   const [tool, setTool] = useState<EditorTool>("select");
   const [infiniteWaterSources, setInfiniteWaterSources] = useState(initialState.loadedMap.definition.fluids.settings.infiniteSources);
   const [waterSimulationPlaying, setWaterSimulationPlaying] = useState(false);
@@ -1239,6 +1258,7 @@ function ExperienceScene({
   }, [currentMap.id, currentMap.zones, zoneId]);
   const dynamicStats = editorSession.world.getStats();
   const snapshot = editorSession.getSnapshot();
+  const expansionRevealEnd = getExpansionRevealEnd(editorSession.world);
   const zoneAssignmentCounts = useMemo(
     () => countZoneAssignments(editorSession.world),
     [editorSession.world, snapshot.zoneAssignmentCount],
@@ -1277,7 +1297,7 @@ function ExperienceScene({
         if (zoneSelectionMode === "rectangle" && zoneRectangleAnchor) {
           return getZoneRectangleFootprint(zoneRectangleAnchor, hoveredCell).length;
         }
-        return getZoneBrushFootprint(hoveredCell, effectiveBrushSettings).length;
+        return getZoneBrushFootprint(hoveredCell, effectiveBrushSettings, editorSession.world.config).length;
       }
       if (!getTerrainBrushOperation(tool)) {
         return 0;
@@ -1435,6 +1455,17 @@ function ExperienceScene({
   );
   const normalizeEditableMap = useCallback((map: MapDefinition) => editorEnabled ? ensureEditableZones(map) : map, [editorEnabled]);
   const loadEditableMapState = useCallback((nextMapId: string) => {
+    if (nextMapId === DEFAULT_AUTHORED_MAP_ID) {
+      return loadCompositeWorldStateSync(undefined, {
+        loadRegion: (regionMapId) => {
+          const registryState = loadMapStateSync(regionMapId, { includeDevelopment: true });
+          const draft = loadMapDraft(localStorage, regionMapId);
+          return draft && draft.metadata.authoringVersion === registryState.definition.metadata.authoringVersion
+            ? createLoadedMapState(normalizeEditableMap(draft))
+            : registryState;
+        },
+      });
+    }
     const registryState = loadMapStateSync(nextMapId, { includeDevelopment: true });
     const draft = loadMapDraft(localStorage, nextMapId);
     if (draft && draft.metadata.authoringVersion === registryState.definition.metadata.authoringVersion) {
@@ -1472,6 +1503,21 @@ function ExperienceScene({
     fluidSettings: { ...currentMap.fluids.settings, infiniteSources: infiniteWaterSources },
   });
 
+  const createCompositePartitions = () => {
+    if (!compositeState) return null;
+    return partitionCompositeWorld({
+      manifest: compositeState.manifest,
+      sourceRegions: compositeState.sourceRegions,
+      world: editorSession.world,
+      definition: {
+        ...currentMap,
+        markers: mergeMarkerDefinitions(currentMap.markers, editorSession.entities),
+        fluids: { ...currentMap.fluids, settings: { ...currentMap.fluids.settings, infiniteSources: infiniteWaterSources } },
+      },
+      markerAnchors: editorSession.entities,
+    });
+  };
+
   const replaceLoadedMap = (map: MapDefinition, markSaved: boolean, message: string) => {
     const editableMap = normalizeEditableMap(map);
     const document = mapDefinitionToDocument(editableMap);
@@ -1480,6 +1526,7 @@ function ExperienceScene({
     const nextZoneOverlay = buildZoneOverlayMeshes(editorSession.world);
 
     setCurrentMap(editableMap);
+    setCompositeState(null);
     setInfiniteWaterSources(editableMap.fluids.settings.infiniteSources);
     mapHistoryRef.current = { undo: [], redo: [] };
     setActiveMapId(map.id);
@@ -1612,7 +1659,7 @@ function ExperienceScene({
     if (tool === "zone") {
       const columns = zoneSelectionMode === "rectangle" && zoneRectangleAnchor
         ? getZoneRectangleFootprint(zoneRectangleAnchor, coordinate)
-        : getZoneBrushFootprint(coordinate, effectiveBrushSettings);
+        : getZoneBrushFootprint(coordinate, effectiveBrushSettings, editorSession.world.config);
       applyZoneColumns(columns, coordinate);
       return;
     }
@@ -1872,6 +1919,10 @@ function ExperienceScene({
   };
 
   const handlePresetChange = (nextPresetId: MapPresetId) => {
+    if (compositeState) {
+      setEditorMessage({ type: "error", text: "Performance presets are available on standalone maps." });
+      return;
+    }
     if (snapshot.hasUnsavedChanges && !window.confirm("Replace unsaved editor changes with the selected preset?")) {
       return;
     }
@@ -1905,6 +1956,7 @@ function ExperienceScene({
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
       const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
       setEditorSession(nextSession);
+      setCompositeState(isLoadedCompositeWorldState(loaded) ? loaded : null);
       setCurrentMap(editableDefinition);
       mapHistoryRef.current = { undo: [], redo: [] };
       setActiveMapId(loaded.definition.id);
@@ -1932,6 +1984,7 @@ function ExperienceScene({
       const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
 
       setEditorSession(nextSession);
+      setCompositeState(isLoadedCompositeWorldState(loaded) ? loaded : null);
       setCurrentMap(editableDefinition);
       mapHistoryRef.current = { undo: [], redo: [] };
       setActiveMapId(loaded.definition.id);
@@ -1972,6 +2025,7 @@ function ExperienceScene({
       const nextTerrain = createTerrainDataFromWorld(nextSession.world);
       const nextZoneOverlay = buildZoneOverlayMeshes(nextSession.world);
       setEditorSession(nextSession);
+      setCompositeState(null);
       setCurrentMap(map);
       mapHistoryRef.current = { undo: [], redo: [] };
       setActiveMapId(map.id);
@@ -1989,6 +2043,10 @@ function ExperienceScene({
   };
 
   const handleDuplicateMap = () => {
+    if (compositeState) {
+      setEditorMessage({ type: "error", text: "Composite worlds are duplicated by exporting their region set." });
+      return;
+    }
     const id = window.prompt("Duplicate map id", `${currentMap.id}-copy`);
     if (!id) return;
     if (availableMaps.some((map) => map.id === id) || id === currentMap.id) {
@@ -2002,11 +2060,23 @@ function ExperienceScene({
   };
 
   const handleSaveDraft = () => {
-    const saved = normalizeEditableMap(saveMapDraft(localStorage, createCurrentMapDefinition()));
-    setCurrentMap(saved);
-    editorSession.markSaved();
-    setAutosaveStatus(`draft saved ${new Date().toLocaleTimeString()}`);
-    setEditorRevision((revision) => revision + 1);
+    try {
+      const partitions = createCompositePartitions();
+      if (partitions) {
+        saveCompositeRegionDrafts(localStorage, partitions);
+        editorSession.markSaved();
+        setAutosaveStatus(`9 regions saved ${new Date().toLocaleTimeString()}`);
+        setEditorRevision((revision) => revision + 1);
+        return;
+      }
+      const saved = normalizeEditableMap(saveMapDraft(localStorage, createCurrentMapDefinition()));
+      setCurrentMap(saved);
+      editorSession.markSaved();
+      setAutosaveStatus(`draft saved ${new Date().toLocaleTimeString()}`);
+      setEditorRevision((revision) => revision + 1);
+    } catch (error) {
+      setEditorMessage({ type: "error", text: error instanceof Error ? error.message : "Coordinated region save failed." });
+    }
   };
 
   const handleRenameMap = () => {
@@ -2018,16 +2088,24 @@ function ExperienceScene({
   };
 
   const handleExport = () => {
-    const mapDefinition = createCurrentMapDefinition();
-    const blob = new Blob([`${JSON.stringify(mapDefinition, null, 2)}\n`], { type: "application/json" });
-    const link = window.document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `${mapDefinition.id}.map.v1.json`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-    editorSession.markSaved();
-    setAutosaveStatus("exported");
-    setEditorRevision((revision) => revision + 1);
+    try {
+      const partitions = createCompositePartitions();
+      if (partitions) {
+        for (const definition of partitions.values()) downloadJson(`${definition.id}.map.json`, definition);
+        downloadJson(`${compositeState!.manifest.id}.manifest.json`, compositeState!.manifest);
+        editorSession.markSaved();
+        setAutosaveStatus("9 regions exported");
+        setEditorRevision((revision) => revision + 1);
+        return;
+      }
+      const mapDefinition = createCurrentMapDefinition();
+      downloadJson(`${mapDefinition.id}.map.v1.json`, mapDefinition);
+      editorSession.markSaved();
+      setAutosaveStatus("exported");
+      setEditorRevision((revision) => revision + 1);
+    } catch (error) {
+      setEditorMessage({ type: "error", text: error instanceof Error ? error.message : "Coordinated region export failed." });
+    }
   };
 
   const handleImport = async (file: File) => {
@@ -2686,6 +2764,36 @@ function ExperienceScene({
 
     const timer = window.setTimeout(() => {
       try {
+        if (compositeState) {
+          if (compositeDraftRestoreAttempted.current) return;
+          compositeDraftRestoreAttempted.current = true;
+          const drafts = new Map(compositeState.manifest.regions.map((region) => [
+            region.mapId,
+            loadMapDraft(localStorage, region.mapId),
+          ]));
+          if (![...drafts.values()].some(Boolean)) {
+            setAutosaveStatus("no region drafts");
+            return;
+          }
+          const loaded = loadCompositeWorldStateSync(undefined, {
+            loadRegion: (mapId) => {
+              const registryState = loadMapStateSync(mapId, { includeDevelopment: true });
+              const draft = drafts.get(mapId);
+              return draft && draft.metadata.authoringVersion === registryState.definition.metadata.authoringVersion
+                ? createLoadedMapState(normalizeEditableMap(draft))
+                : registryState;
+            },
+          });
+          const nextSession = new MapEditorSession(loaded.world, loaded.entities, loaded.definition.fluids.settings);
+          setEditorSession(nextSession);
+          setCompositeState(loaded);
+          setCurrentMap(normalizeEditableMap(loaded.definition));
+          setTerrain(createTerrainDataFromWorld(loaded.world));
+          setZoneOverlay(buildZoneOverlayMeshes(loaded.world));
+          setAutosaveStatus("region drafts restored");
+          setEditorRevision((revision) => revision + 1);
+          return;
+        }
         const savedDraft = loadMapDraft(localStorage, currentMap.id);
         if (!savedDraft) {
           return;
@@ -2711,7 +2819,7 @@ function ExperienceScene({
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [currentMap.id, editorAvailable, editorSession]);
+  }, [compositeState, currentMap.id, editorAvailable, editorSession, normalizeEditableMap]);
 
   useEffect(() => {
     if (!editorAvailable) {
@@ -2719,8 +2827,12 @@ function ExperienceScene({
     }
 
     const timer = window.setTimeout(() => {
-      saveMapDraft(localStorage, createCurrentMapDefinition());
-      setAutosaveStatus("local saved");
+      if (compositeState) {
+        setAutosaveStatus("9 regions modified - save draft to persist");
+      } else {
+        saveMapDraft(localStorage, createCurrentMapDefinition());
+        setAutosaveStatus("local saved");
+      }
     }, 450);
 
     return () => window.clearTimeout(timer);
@@ -2846,20 +2958,34 @@ function ExperienceScene({
     // Runtime objects stay completely hidden while the terrain grows. The
     // object reveal starts only after the terrain shader reaches 100%.
     setRuntimeObjectReveal("hidden");
+    const terrainDuration = editorEnabled ? 0.01 : reducedMotion ? 0.45 : 2 * expansionRevealEnd;
 
     const tween = gsap.to(uniforms.uExpansionProgress, {
-      value: 1,
-      duration: reducedMotion ? 0.45 : 2,
+      value: expansionRevealEnd,
+      duration: terrainDuration,
       ease: "none",
       onComplete: () => {
         setRuntimeObjectReveal("revealing");
       },
     });
+    const completionTimer = window.setTimeout(
+      markExplore,
+      (editorEnabled ? terrainDuration : reducedMotion ? terrainDuration : Math.max(4, terrainDuration)) * 1000,
+    );
 
     return () => {
       tween.kill();
+      window.clearTimeout(completionTimer);
     };
-  }, [phase, reducedMotion, uniforms.uExpansionProgress]);
+  }, [editorEnabled, expansionRevealEnd, markExplore, phase, reducedMotion, uniforms.uExpansionProgress]);
+
+  useEffect(() => {
+    if (!editorEnabled || phase !== "ready") return;
+    // Shader uniforms are external Three.js state.
+    // eslint-disable-next-line react-hooks/immutability
+    uniforms.uExpansionProgress.value = expansionRevealEnd;
+    markExplore();
+  }, [editorEnabled, expansionRevealEnd, markExplore, phase, uniforms.uExpansionProgress]);
 
   useEffect(() => {
     if (phase === "boot" || phase === "loading" || phase === "ready" || phase === "focusing") {
@@ -2916,7 +3042,7 @@ function ExperienceScene({
       }),
       loadMap: loadBenchmarkMap,
       enterLoadedMap: () => {
-        uniforms.uExpansionProgress.value = 1;
+        uniforms.uExpansionProgress.value = expansionRevealEnd;
         setBenchmarkInputEnabled(false);
         markExplore();
       },
@@ -2979,6 +3105,7 @@ function ExperienceScene({
     camera,
     currentMap,
     editorSession.world,
+    expansionRevealEnd,
     gl,
     loadBenchmarkMap,
     markExplore,
@@ -2995,7 +3122,7 @@ function ExperienceScene({
     uniforms.uTime.value = clock.elapsedTime;
     // Once exploration begins, editor rerenders must never replay or collapse
     // the one-shot terrain reveal.
-    if (phase === "explore") uniforms.uExpansionProgress.value = 1;
+    if (phase === "explore") uniforms.uExpansionProgress.value = expansionRevealEnd;
   });
 
   const soldierSurface = getTerrainSurfaceAt(editorSession.world, 36, 34);
@@ -3073,10 +3200,11 @@ function ExperienceScene({
         enabled={benchmarkMode ? benchmarkInputEnabled : isInteractivePhase(phase) && !entityTransformDragging}
         phase={phase}
         editorMinZoomDistance={editorAvailable ? editorMinZoomDistance : undefined}
+        editorWorldRadius={editorAvailable ? Math.max(editorSession.world.config.width, editorSession.world.config.depth) / 2 : undefined}
         focusPreset={activeCameraPreset}
         reducedMotion={reducedMotion}
         onFocusComplete={markExpanding}
-        onExpansionComplete={markExplore}
+        onExpansionComplete={() => undefined}
       />
       <RenderInvalidator phase={phase} />
       <EditorInteractionOverlay
@@ -4556,7 +4684,7 @@ function BrushFootprintIndicator({
       if (tool === "zone" && coordinate) {
         return zoneSelectionMode === "rectangle" && zoneRectangleAnchor
           ? getZoneRectangleFootprint(zoneRectangleAnchor, coordinate)
-          : getZoneBrushFootprint(coordinate, settings);
+          : getZoneBrushFootprint(coordinate, settings, world.config);
       }
       return coordinate ? getToolPreviewFootprint(coordinate, tool, settings, world, blockId, zoneId) : [];
     },
@@ -6124,7 +6252,7 @@ function getToolPreviewFootprint(
   }
 
   if (operation === "raise") {
-    const footprint = getTerrainOperationFootprint(coordinate, operation, settings);
+    const footprint = getTerrainOperationFootprint(coordinate, operation, settings, world.config);
     return footprint.flatMap((cell) => {
       const topY = world.getHighestNonAirY(cell.x, cell.z);
       return topY === null ? [] : [{ x: cell.x, y: topY, z: cell.z }];
@@ -6147,7 +6275,7 @@ function getToolPreviewFootprint(
     return mutations.map((mutation) => mutation.coordinate);
   }
 
-  return getTerrainOperationFootprint(coordinate, operation, settings);
+  return getTerrainOperationFootprint(coordinate, operation, settings, world.config);
 }
 
 type FlattenPreviewAction = "raise" | "lower" | "unchanged";
@@ -6164,7 +6292,7 @@ function getFlattenPreviewCells(
   world: MapEditorSession["world"],
 ): Array<{ coordinate: GridCoordinate; action: FlattenPreviewAction; hasSurface: boolean }> {
   const desiredY = Math.max(world.config.minY, Math.min(getWorldMaxY(world.config), coordinate.y));
-  return getTerrainOperationFootprint(coordinate, "flatten", settings).map((cell) => {
+  return getTerrainOperationFootprint(coordinate, "flatten", settings, world.config).map((cell) => {
     const topY = world.getHighestNonAirY(cell.x, cell.z);
     const action: FlattenPreviewAction = topY === null || topY < desiredY
       ? "raise"
@@ -6507,6 +6635,7 @@ function ConstrainedMapControls({
   enabled,
   phase,
   editorMinZoomDistance,
+  editorWorldRadius,
   focusPreset,
   reducedMotion,
   onFocusComplete,
@@ -6515,6 +6644,7 @@ function ConstrainedMapControls({
   enabled: boolean;
   phase: ExperiencePhase;
   editorMinZoomDistance?: number;
+  editorWorldRadius?: number;
   focusPreset: MapCameraPreset | null;
   reducedMotion: boolean;
   onFocusComplete: () => void;
@@ -6531,7 +6661,7 @@ function ConstrainedMapControls({
   const setCameraHeading = useExperienceStore((state) => state.setCameraHeading);
   const compassSnapDirection = useExperienceStore((state) => state.compassSnapDirection);
   const compassSnapCount = useExperienceStore((state) => state.compassSnapCount);
-  const bounds = 36;
+  const bounds = editorWorldRadius ?? 36;
   const lockedAngle = useRef<number | null>(null);
   const previousResetCount = useRef(resetViewCount);
   const resetting = useRef(false);
@@ -6872,7 +7002,7 @@ function ConstrainedMapControls({
       enableRotate
       panSpeed={panSpeed * 0.4}
       rotateSpeed={rotateSpeed * 0.4}
-      maxDistance={98}
+      maxDistance={editorWorldRadius ? Math.max(98, editorWorldRadius * 1.5) : 98}
       minDistance={editorMinZoomDistance ?? 22}
       minPolarAngle={THREE.MathUtils.degToRad(20)}
       maxPolarAngle={THREE.MathUtils.degToRad(82)}

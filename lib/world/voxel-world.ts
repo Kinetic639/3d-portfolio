@@ -98,8 +98,6 @@ export type WorldStats = {
   chunks: number;
 };
 
-const CENTER_MIN = WORLD_CONFIG.width / 2 - 1;
-const CENTER_MAX = WORLD_CONFIG.width / 2;
 
 export class VoxelWorld {
   readonly config: WorldConfig;
@@ -779,19 +777,23 @@ function validateWorldConfig(config: WorldConfig) {
   }
 }
 
-export function createFlatVoxelWorld() {
-  const world = new VoxelWorld();
+export function createFlatVoxelWorld(config: WorldConfig = WORLD_CONFIG) {
+  const world = new VoxelWorld(config);
 
-  for (let y = WORLD_CONFIG.minY; y <= 0; y += 1) {
-    for (let z = 0; z < WORLD_CONFIG.depth; z += 1) {
-      for (let x = 0; x < WORLD_CONFIG.width; x += 1) {
+  for (let y = config.minY; y <= 0; y += 1) {
+    for (let z = 0; z < config.depth; z += 1) {
+      for (let x = 0; x < config.width; x += 1) {
         world.setBlock(x, y, z, y < 0 ? BLOCK_IDS.Stone : BLOCK_IDS.Ground);
       }
     }
   }
 
-  for (let z = CENTER_MIN; z <= CENTER_MAX; z += 1) {
-    for (let x = CENTER_MIN; x <= CENTER_MAX; x += 1) {
+  const centerMinX = config.width / 2 - 1;
+  const centerMaxX = config.width / 2;
+  const centerMinZ = config.depth / 2 - 1;
+  const centerMaxZ = config.depth / 2;
+  for (let z = centerMinZ; z <= centerMaxZ; z += 1) {
+    for (let x = centerMinX; x <= centerMaxX; x += 1) {
       world.setBlock(x, 0, z, BLOCK_IDS.LoaderOrigin);
     }
   }

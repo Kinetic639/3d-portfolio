@@ -19,6 +19,13 @@ import type { PrefabDefinition, PrefabVariantDefinition } from "@/lib/prefabs/pr
 import { ROTATIONS, SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import portfolioPrimaryFlatMap from "./portfolio-primary-flat.map.json";
 import portfolioNorthMap from "./portfolio-north.map.json";
+import portfolioNorthWestMap from "./portfolio-north-west.map.json";
+import portfolioNorthEastMap from "./portfolio-north-east.map.json";
+import portfolioWestMap from "./portfolio-west.map.json";
+import portfolioEastMap from "./portfolio-east.map.json";
+import portfolioSouthWestMap from "./portfolio-south-west.map.json";
+import portfolioSouthMap from "./portfolio-south.map.json";
+import portfolioSouthEastMap from "./portfolio-south-east.map.json";
 
 const PHASE4_CREATED_AT = "2026-08-01T00:00:00.000Z";
 const PHASE5_CREATED_AT = "2026-08-02T00:00:00.000Z";
@@ -299,6 +306,14 @@ export function createPortfolioPrimaryFlatMapDefinition(): MapDefinition {
 export function createPortfolioNorthMapDefinition(): MapDefinition {
   return loadBundledMapDefinition(portfolioNorthMap, "portfolio-north.map.json");
 }
+
+export function createPortfolioNorthWestMapDefinition(): MapDefinition { return loadBundledMapDefinition(portfolioNorthWestMap, "portfolio-north-west.map.json"); }
+export function createPortfolioNorthEastMapDefinition(): MapDefinition { return loadBundledMapDefinition(portfolioNorthEastMap, "portfolio-north-east.map.json"); }
+export function createPortfolioWestMapDefinition(): MapDefinition { return loadBundledMapDefinition(portfolioWestMap, "portfolio-west.map.json"); }
+export function createPortfolioEastMapDefinition(): MapDefinition { return loadBundledMapDefinition(portfolioEastMap, "portfolio-east.map.json"); }
+export function createPortfolioSouthWestMapDefinition(): MapDefinition { return loadBundledMapDefinition(portfolioSouthWestMap, "portfolio-south-west.map.json"); }
+export function createPortfolioSouthMapDefinition(): MapDefinition { return loadBundledMapDefinition(portfolioSouthMap, "portfolio-south.map.json"); }
+export function createPortfolioSouthEastMapDefinition(): MapDefinition { return loadBundledMapDefinition(portfolioSouthEastMap, "portfolio-south-east.map.json"); }
 
 function loadBundledMapDefinition(input: unknown, source: string): MapDefinition {
   const validation = validateMapDefinition(input);

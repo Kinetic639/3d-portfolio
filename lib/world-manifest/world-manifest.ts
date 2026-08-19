@@ -65,12 +65,13 @@ export function createCenterOnlyWorldManifest(mapId = "portfolio-primary-flat"):
 
 export function createPortfolioWorldManifest(): WorldManifest {
   const manifest = createCenterOnlyWorldManifest();
-  manifest.regions.unshift({
-    id: "north",
-    ...WORLD_REGION_SLOTS.north,
-    mapId: "portfolio-north",
-    role: "scenery",
-  });
+  const scenery = (Object.keys(WORLD_REGION_SLOTS) as WorldRegionId[]).filter((id) => id !== "center");
+  manifest.regions.unshift(...scenery.map((id) => ({
+    id,
+    ...WORLD_REGION_SLOTS[id],
+    mapId: `portfolio-${id}`,
+    role: "scenery" as const,
+  })));
   return manifest;
 }
 

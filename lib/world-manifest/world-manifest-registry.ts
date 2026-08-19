@@ -26,7 +26,7 @@ export function listWorldManifestRegistryEntries() {
 export function resolveWorldManifestSync(manifestId: string) {
   const source = BUNDLED_WORLD_MANIFESTS.find((entry) => entry.id === manifestId);
   if (!source) throw new Error(`Unknown world manifest id: ${manifestId}.`);
-  const validation = validateWorldManifest(source.load());
+  const validation = validateWorldManifest(source.load(), { requireComplete: true });
   if (!validation.ok) throw new Error(`World manifest ${manifestId} is invalid:\n${validation.errors.join("\n")}`);
   validateRegionMapReferences(validation.manifest);
   return cloneWorldManifest(validation.manifest);
@@ -38,7 +38,7 @@ export function validateWorldManifestRegistry() {
   for (const source of BUNDLED_WORLD_MANIFESTS) {
     if (ids.has(source.id)) errors.push(`Duplicate world manifest id: ${source.id}.`);
     ids.add(source.id);
-    const validation = validateWorldManifest(source.load());
+    const validation = validateWorldManifest(source.load(), { requireComplete: true });
     if (!validation.ok) {
       errors.push(...validation.errors.map((error) => `${source.id}: ${error}`));
       continue;

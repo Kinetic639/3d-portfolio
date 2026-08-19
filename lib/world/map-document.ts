@@ -1,6 +1,6 @@
 import { type BlockId, isKnownBlockId } from "./block-registry";
 import { createFlatVoxelWorld, type VoxelWorld } from "./voxel-world";
-import { WORLD_CONFIG, type GridCoordinate } from "./world-config";
+import { WORLD_CONFIG, type GridCoordinate, type WorldConfig } from "./world-config";
 import { incrementEditorPerfCounter } from "@/lib/editor/editor-performance-counters";
 import {
   DEFAULT_ROTATION,
@@ -53,12 +53,12 @@ export type MapZoneAssignment = Pick<GridCoordinate, "x" | "z"> & {
 export type MapDocument = {
   version: 1 | 2 | 3 | 4 | 5;
   world: {
-    width: 64;
-    depth: 64;
+    width: number;
+    depth: number;
     minY?: number;
     height: number;
-    blockSize: 1;
-    chunkSize: 16;
+    blockSize: number;
+    chunkSize: number;
     generator: "flat-v1";
   };
   cellEncoding?: "flat-edits-v1" | "cell-edits-v2";
@@ -81,7 +81,7 @@ export type ImportedMapState = {
 
 export function serializeMapDocument(world: VoxelWorld, entities: MapEntityAnchor[], fluidSettings: FluidSettings = DEFAULT_FLUID_SETTINGS): MapDocument {
   incrementEditorPerfCounter("mapSerializations");
-  const baseWorld = createFlatVoxelWorld();
+  const baseWorld = createFlatVoxelWorld(world.config);
   const edits: MapBlockEdit[] = [];
   const zones: MapZoneAssignment[] = [];
 
@@ -128,12 +128,12 @@ export function serializeMapDocument(world: VoxelWorld, entities: MapEntityAncho
     cellEncoding: "cell-edits-v2",
     zoneEncoding: "column-zones-v2",
     world: {
-      width: WORLD_CONFIG.width,
-      depth: WORLD_CONFIG.depth,
-      minY: WORLD_CONFIG.minY,
-      height: WORLD_CONFIG.height,
-      blockSize: WORLD_CONFIG.blockSize,
-      chunkSize: WORLD_CONFIG.chunkSize,
+      width: world.config.width,
+      depth: world.config.depth,
+      minY: world.config.minY,
+      height: world.config.height,
+      blockSize: 1,
+      chunkSize: world.config.chunkSize,
       generator: "flat-v1",
     },
     edits,
@@ -158,9 +158,11 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
   }
 
   const usesLegacyVerticalBounds = input.version < MAP_DOCUMENT_VERTICAL_BOUNDS_VERSION;
+  const horizontalDimensionsValid =
+    (world.width === WORLD_CONFIG.width || world.width === WORLD_CONFIG.width * 3) &&
+    (world.depth === WORLD_CONFIG.depth || world.depth === WORLD_CONFIG.depth * 3);
   if (
-    world.width !== WORLD_CONFIG.width ||
-    world.depth !== WORLD_CONFIG.depth ||
+    !horizontalDimensionsValid ||
     (!usesLegacyVerticalBounds && (world.minY !== WORLD_CONFIG.minY || world.height !== WORLD_CONFIG.height)) ||
     (usesLegacyVerticalBounds && world.height !== 12) ||
     world.blockSize !== WORLD_CONFIG.blockSize ||
@@ -169,17 +171,25 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
     return { ok: false, error: "Map document dimensions do not match the current world." };
   }
 
-  const edits = parseBlockEdits(input.edits);
+  const config: WorldConfig = {
+    width: world.width as number,
+    depth: world.depth as number,
+    minY: WORLD_CONFIG.minY,
+    height: WORLD_CONFIG.height,
+    blockSize: WORLD_CONFIG.blockSize,
+    chunkSize: WORLD_CONFIG.chunkSize,
+  };
+  const edits = parseBlockEdits(input.edits, config);
   if (!edits.ok) {
     return edits;
   }
 
-  const zones = parseZoneAssignments(input.zones);
+  const zones = parseZoneAssignments(input.zones, config);
   if (!zones.ok) {
     return zones;
   }
 
-  const entities = parseEntityAnchors(input.entities);
+  const entities = parseEntityAnchors(input.entities, config);
   if (!entities.ok) {
     return entities;
   }
@@ -188,7 +198,7 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
     : { ok: true as const, value: undefined };
   if (!fluids.ok) return fluids;
   if (fluids.value) {
-    const validationWorld = createFlatVoxelWorld();
+    const validationWorld = createFlatVoxelWorld(config);
     for (const edit of edits.value) {
       validationWorld.setCell({ ...edit, shapeId: edit.shapeId ?? DEFAULT_SHAPE_ID, rotation: edit.rotation ?? DEFAULT_ROTATION, state: edit.state ?? DEFAULT_STATE, zoneId: 0 });
     }
@@ -206,8 +216,8 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
       cellEncoding: input.version === MAP_DOCUMENT_VERSION ? "flat-edits-v1" : "cell-edits-v2",
       zoneEncoding: input.version >= MAP_DOCUMENT_ZONE_VERSION ? "column-zones-v2" : "voxel-zones-v1",
       world: {
-        width: WORLD_CONFIG.width,
-        depth: WORLD_CONFIG.depth,
+        width: config.width,
+        depth: config.depth,
         minY: WORLD_CONFIG.minY,
         height: WORLD_CONFIG.height,
         blockSize: WORLD_CONFIG.blockSize,
@@ -223,7 +233,14 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
 }
 
 export function createMapStateFromDocument(document: MapDocument): ImportedMapState {
-  const world = createFlatVoxelWorld();
+  const world = createFlatVoxelWorld({
+    width: document.world.width,
+    depth: document.world.depth,
+    minY: document.world.minY ?? WORLD_CONFIG.minY,
+    height: document.world.height,
+    blockSize: document.world.blockSize,
+    chunkSize: document.world.chunkSize,
+  });
 
   for (const edit of document.edits) {
     world.setCell({
@@ -259,14 +276,14 @@ export function documentsEqual(left: MapDocument, right: MapDocument) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function parseBlockEdits(input: unknown): { ok: true; value: MapBlockEdit[] } | { ok: false; error: string } {
+function parseBlockEdits(input: unknown, config: WorldConfig = WORLD_CONFIG): { ok: true; value: MapBlockEdit[] } | { ok: false; error: string } {
   if (!Array.isArray(input)) {
     return { ok: false, error: "Map document edits must be an array." };
   }
 
   const edits: MapBlockEdit[] = [];
   const seen = new Set<number>();
-  const validationWorld = createFlatVoxelWorld();
+  const validationWorld = createFlatVoxelWorld(config);
 
   for (const value of input) {
     if (!isRecord(value) || !isGridCoordinate(value)) {
@@ -311,14 +328,14 @@ function parseBlockEdits(input: unknown): { ok: true; value: MapBlockEdit[] } | 
   return { ok: true, value: edits };
 }
 
-function parseZoneAssignments(input: unknown): { ok: true; value: MapZoneAssignment[] } | { ok: false; error: string } {
+function parseZoneAssignments(input: unknown, config: WorldConfig = WORLD_CONFIG): { ok: true; value: MapZoneAssignment[] } | { ok: false; error: string } {
   if (!Array.isArray(input)) {
     return { ok: false, error: "Map document zones must be an array." };
   }
 
   const zones: MapZoneAssignment[] = [];
   const seen = new Set<number>();
-  const validationWorld = createFlatVoxelWorld();
+  const validationWorld = createFlatVoxelWorld(config);
 
   for (const value of input) {
     if (!isRecord(value) || !isZoneCoordinate(value)) {
@@ -334,7 +351,7 @@ function parseZoneAssignments(input: unknown): { ok: true; value: MapZoneAssignm
       return { ok: false, error: `Zone coordinate is out of bounds: ${value.x},${value.z}.` };
     }
     if (seen.has(index)) {
-      zones[zones.findIndex((zone) => zone.x + WORLD_CONFIG.width * zone.z === index)] = {
+      zones[zones.findIndex((zone) => zone.x + config.width * zone.z === index)] = {
         x: value.x,
         z: value.z,
         ...(Number.isInteger(value.y) ? { y: value.y as number } : {}),
@@ -355,14 +372,14 @@ function parseZoneAssignments(input: unknown): { ok: true; value: MapZoneAssignm
   return { ok: true, value: zones };
 }
 
-function parseEntityAnchors(input: unknown): { ok: true; value: MapEntityAnchor[] } | { ok: false; error: string } {
+function parseEntityAnchors(input: unknown, config: WorldConfig = WORLD_CONFIG): { ok: true; value: MapEntityAnchor[] } | { ok: false; error: string } {
   if (!Array.isArray(input)) {
     return { ok: false, error: "Map document entities must be an array." };
   }
 
   const entities: MapEntityAnchor[] = [];
   const seen = new Set<string>();
-  const validationWorld = createFlatVoxelWorld();
+  const validationWorld = createFlatVoxelWorld(config);
 
   for (const value of input) {
     if (!isRecord(value) || typeof value.id !== "string" || value.type !== "marker") {

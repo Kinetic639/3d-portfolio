@@ -13,11 +13,12 @@ describe("world manifest registry", () => {
     expect(validateWorldManifestRegistry()).toEqual({ ok: true });
   });
 
-  it("lists and resolves the center-only portfolio manifest", () => {
+  it("lists and resolves the complete portfolio manifest", () => {
     expect(listWorldManifestRegistryEntries()).toEqual([{ id: DEFAULT_WORLD_MANIFEST_ID }]);
     const manifest = resolveWorldManifestSync(DEFAULT_WORLD_MANIFEST_ID);
     expect(manifest.regions.find((region) => region.id === "center")?.mapId).toBe("portfolio-primary-flat");
     expect(manifest.regions.find((region) => region.id === "north")?.mapId).toBe("portfolio-north");
+    expect(manifest.regions).toHaveLength(9);
   });
 
   it("rejects missing region map references", () => {
