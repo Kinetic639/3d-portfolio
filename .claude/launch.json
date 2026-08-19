@@ -2,13 +2,43 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "dev",
+      "name": "new-portfolio",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": [
+        "--dir",
+        "new-portfolio",
         "run",
         "dev"
       ],
       "port": 3000
+    },
+    {
+      "name": "portfolio-prototype",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "portfolio-prototype",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "3001"
+      ],
+      "port": 3001
+    },
+    {
+      "name": "nomadic-tribe",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "D:/dev/nomadic-tribe",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "3100"
+      ],
+      "port": 3100
     }
   ]
 }
