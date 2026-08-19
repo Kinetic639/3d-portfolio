@@ -1,5 +1,5 @@
 import { isRenderableBlock, type BlockId } from "./block-registry";
-import { WORLD_CONFIG } from "@/lib/world/world-config";
+import { getWorldMaxY, WORLD_CONFIG } from "@/lib/world/world-config";
 
 // The center-platform "wave" reveal timing shared by every renderer that
 // grows terrain in on load: the instanced cube-reveal path (voxel-world.ts's
@@ -15,7 +15,7 @@ export const MAX_WAVE_DELAY = 0.74;
 // the class itself (which imports back from this module).
 type LoaderPlatformWorld = {
   getBlock(x: number, y: number, z: number): BlockId;
-  config: { height: number };
+  config: { minY: number; height: number };
 };
 
 // Which cell is "the loader platform" (always fully revealed, no growth
@@ -35,7 +35,7 @@ export function isLoaderPlatformTopCell(world: LoaderPlatformWorld, x: number, y
     return false;
   }
 
-  for (let aboveY = y + 1; aboveY < world.config.height; aboveY += 1) {
+  for (let aboveY = y + 1; aboveY <= getWorldMaxY(world.config); aboveY += 1) {
     if (isRenderableBlock(world.getBlock(x, aboveY, z))) {
       return false;
     }

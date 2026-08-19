@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createTerrainMutations } from "@/lib/editor/terrain-brushes";
 import { BLOCK_IDS } from "@/lib/world/block-registry";
+import { getWorldMaxY, WORLD_CONFIG } from "@/lib/world/world-config";
 import { MapEditorSession } from "@/lib/editor/map-editor";
 import { buildZoneOverlayChunkMeshes, buildZoneOverlayMeshes, getDirtyZoneChunkIdsForColumns } from "./zone-overlay";
 import { createFlatVoxelWorld } from "@/lib/world/voxel-world";
@@ -90,7 +91,9 @@ describe("terrain-conforming zone overlays", () => {
 
   it("does not render a highlight over an empty column", () => {
     const world = createFlatVoxelWorld();
-    world.setBlock(14, 0, 14, BLOCK_IDS.Air);
+    for (let y = WORLD_CONFIG.minY; y <= getWorldMaxY(); y += 1) {
+      world.setBlock(14, y, 14, BLOCK_IDS.Air);
+    }
     world.setColumnZone(14, 14, 1);
 
     const overlay = buildZoneOverlayMeshes(world);

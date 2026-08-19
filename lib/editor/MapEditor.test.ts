@@ -65,30 +65,32 @@ describe("map editor session", () => {
     expect(editor.world.getHighestNonAirY(4, 5)).toBe(1);
   });
 
-  it("stops raising safely at Y = 11", () => {
+  it("stops raising safely at the configured maximum Y", () => {
     const editor = new MapEditorSession();
-    for (let y = 1; y < 12; y += 1) {
+    for (let y = 1; y <= 19; y += 1) {
       editor.world.setBlock(4, y, 5, BLOCK_IDS.Ground);
     }
     editor.world.clearDirtyChunks();
 
-    const result = editor.raise({ x: 4, y: 11, z: 5 }, BLOCK_IDS.Special);
+    const result = editor.raise({ x: 4, y: 19, z: 5 }, BLOCK_IDS.Special);
 
     expect(result.changed).toBe(false);
-    expect(result.message?.text).toBe("Height limit reached at Y = 11.");
-    expect(editor.world.getHighestNonAirY(4, 5)).toBe(11);
+    expect(result.message?.text).toBe("Height limit reached at Y = 19.");
+    expect(editor.world.getHighestNonAirY(4, 5)).toBe(19);
   });
 
-  it("lowers only the top block and preserves the Y = 0 base", () => {
+  it("lowers terrain below zero and stops at the configured minimum Y", () => {
     const editor = new MapEditorSession();
     editor.raise({ x: 4, y: 0, z: 5 }, BLOCK_IDS.Special);
 
     editor.lower({ x: 4, y: 1, z: 5 });
-    const baseLowerResult = editor.lower({ x: 4, y: 0, z: 5 });
+    const zeroLowerResult = editor.lower({ x: 4, y: 0, z: 5 });
 
     expect(editor.world.getBlock(4, 1, 5)).toBe(BLOCK_IDS.Air);
-    expect(editor.world.getBlock(4, 0, 5)).toBe(BLOCK_IDS.Ground);
-    expect(baseLowerResult.changed).toBe(false);
+    expect(editor.world.getBlock(4, 0, 5)).toBe(BLOCK_IDS.Air);
+    expect(zeroLowerResult.changed).toBe(true);
+    for (let y = -1; y > -12; y -= 1) editor.lower({ x: 4, y, z: 5 });
+    expect(editor.lower({ x: 4, y: -12, z: 5 }).changed).toBe(false);
   });
 
   it("assigns and clears zones without changing block type", () => {
@@ -265,7 +267,7 @@ describe("map editor session", () => {
     editor.resetToFlatMap();
 
     const stats = editor.world.getStats();
-    expect(stats.renderedInstances).toBe(4_096);
+    expect(stats.renderedInstances).toBe(53_248);
     expect(stats.zoneAssignments).toBe(0);
     expect(editor.entities).toHaveLength(0);
   });

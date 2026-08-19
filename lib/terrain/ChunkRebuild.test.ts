@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { BLOCK_IDS, getBlockDefinition } from "@/lib/world/block-registry";
 import { createFlatVoxelWorld } from "@/lib/world/voxel-world";
-import { CHUNK_MAX_INSTANCE_COUNT, createTerrainData, toTerrainChunk } from "./terrain";
+import { CHUNK_INSTANCE_COUNT, CHUNK_MAX_INSTANCE_COUNT, createTerrainData, toTerrainChunk } from "./terrain";
+import { WORLD_CONFIG } from "@/lib/world/world-config";
 
 describe("dirty chunk rebuilds", () => {
   it("rebuilding one chunk preserves all other chunk data", () => {
@@ -13,7 +14,7 @@ describe("dirty chunk rebuilds", () => {
 
     expect(rebuilt).toHaveLength(1);
     expect(rebuilt[0].id).toBe("chunk-0-0");
-    expect(rebuilt[0].cells).toHaveLength(255);
+    expect(rebuilt[0].cells).toHaveLength(CHUNK_INSTANCE_COUNT - 1);
     expect(terrain.chunks.find((chunk) => chunk.id === "chunk-1-0")).toBe(untouchedChunk);
   });
 
@@ -60,6 +61,6 @@ describe("dirty chunk rebuilds", () => {
   });
 
   it("documents the renderer capacity strategy", () => {
-    expect(CHUNK_MAX_INSTANCE_COUNT).toBe(16 * 16 * 12);
+    expect(CHUNK_MAX_INSTANCE_COUNT).toBe(16 * 16 * WORLD_CONFIG.height);
   });
 });

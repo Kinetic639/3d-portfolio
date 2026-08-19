@@ -26,6 +26,7 @@ export const MAP_DOCUMENT_VERSION = 1;
 export const MAP_DOCUMENT_CELL_VERSION = 2;
 export const MAP_DOCUMENT_ZONE_VERSION = 3;
 export const MAP_DOCUMENT_FLUID_VERSION = 4;
+export const MAP_DOCUMENT_VERTICAL_BOUNDS_VERSION = 5;
 export const MAP_DOCUMENT_FILENAME = "portfolio-map.v1.json";
 
 export type MapEntityAnchor = {
@@ -50,11 +51,12 @@ export type MapZoneAssignment = Pick<GridCoordinate, "x" | "z"> & {
 };
 
 export type MapDocument = {
-  version: 1 | 2 | 3 | 4;
+  version: 1 | 2 | 3 | 4 | 5;
   world: {
     width: 64;
     depth: 64;
-    height: 12;
+    minY?: number;
+    height: number;
     blockSize: 1;
     chunkSize: 16;
     generator: "flat-v1";
@@ -122,12 +124,13 @@ export function serializeMapDocument(world: VoxelWorld, entities: MapEntityAncho
   zones.sort(compareZoneAssignments);
 
   return {
-    version: MAP_DOCUMENT_FLUID_VERSION,
+    version: MAP_DOCUMENT_VERTICAL_BOUNDS_VERSION,
     cellEncoding: "cell-edits-v2",
     zoneEncoding: "column-zones-v2",
     world: {
       width: WORLD_CONFIG.width,
       depth: WORLD_CONFIG.depth,
+      minY: WORLD_CONFIG.minY,
       height: WORLD_CONFIG.height,
       blockSize: WORLD_CONFIG.blockSize,
       chunkSize: WORLD_CONFIG.chunkSize,
@@ -145,7 +148,7 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
     return { ok: false, error: "Map document must be a JSON object." };
   }
 
-  if (input.version !== MAP_DOCUMENT_VERSION && input.version !== MAP_DOCUMENT_CELL_VERSION && input.version !== MAP_DOCUMENT_ZONE_VERSION && input.version !== MAP_DOCUMENT_FLUID_VERSION) {
+  if (input.version !== MAP_DOCUMENT_VERSION && input.version !== MAP_DOCUMENT_CELL_VERSION && input.version !== MAP_DOCUMENT_ZONE_VERSION && input.version !== MAP_DOCUMENT_FLUID_VERSION && input.version !== MAP_DOCUMENT_VERTICAL_BOUNDS_VERSION) {
     return { ok: false, error: `Unsupported map document version: ${String(input.version)}.` };
   }
 
@@ -154,10 +157,12 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
     return { ok: false, error: "Map document world generator must be flat-v1." };
   }
 
+  const usesLegacyVerticalBounds = input.version < MAP_DOCUMENT_VERTICAL_BOUNDS_VERSION;
   if (
     world.width !== WORLD_CONFIG.width ||
     world.depth !== WORLD_CONFIG.depth ||
-    world.height !== WORLD_CONFIG.height ||
+    (!usesLegacyVerticalBounds && (world.minY !== WORLD_CONFIG.minY || world.height !== WORLD_CONFIG.height)) ||
+    (usesLegacyVerticalBounds && world.height !== 12) ||
     world.blockSize !== WORLD_CONFIG.blockSize ||
     world.chunkSize !== WORLD_CONFIG.chunkSize
   ) {
@@ -178,7 +183,7 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
   if (!entities.ok) {
     return entities;
   }
-  const fluids = input.version === MAP_DOCUMENT_FLUID_VERSION
+  const fluids = input.version >= MAP_DOCUMENT_FLUID_VERSION
     ? validateFluidDocument(input.fluids)
     : { ok: true as const, value: undefined };
   if (!fluids.ok) return fluids;
@@ -197,12 +202,13 @@ export function parseMapDocument(input: unknown): MapDocumentResult {
   return {
     ok: true,
     document: {
-      version: input.version === MAP_DOCUMENT_VERSION ? MAP_DOCUMENT_VERSION : input.version === MAP_DOCUMENT_CELL_VERSION ? MAP_DOCUMENT_CELL_VERSION : input.version === MAP_DOCUMENT_ZONE_VERSION ? MAP_DOCUMENT_ZONE_VERSION : MAP_DOCUMENT_FLUID_VERSION,
+      version: MAP_DOCUMENT_VERTICAL_BOUNDS_VERSION,
       cellEncoding: input.version === MAP_DOCUMENT_VERSION ? "flat-edits-v1" : "cell-edits-v2",
-      zoneEncoding: input.version === MAP_DOCUMENT_ZONE_VERSION || input.version === MAP_DOCUMENT_FLUID_VERSION ? "column-zones-v2" : "voxel-zones-v1",
+      zoneEncoding: input.version >= MAP_DOCUMENT_ZONE_VERSION ? "column-zones-v2" : "voxel-zones-v1",
       world: {
         width: WORLD_CONFIG.width,
         depth: WORLD_CONFIG.depth,
+        minY: WORLD_CONFIG.minY,
         height: WORLD_CONFIG.height,
         blockSize: WORLD_CONFIG.blockSize,
         chunkSize: WORLD_CONFIG.chunkSize,

@@ -17,7 +17,7 @@ import { buildSurfaceChunkMesh, type SurfaceChunkMeshData } from "@/lib/terrain/
 import { buildZoneOverlayChunkMeshes, buildZoneOverlayMeshes, type ZoneOverlayChunkMeshData } from "@/lib/terrain/zone-overlay";
 import { BLOCK_IDS, getBlockDefinition, type BlockId } from "@/lib/world/block-registry";
 import { parseMapDocument, serializeMapDocument } from "@/lib/world/map-document";
-import { WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
+import { getWorldMaxY, WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
 import { getTerrainSurfaceAt } from "@/lib/world/surface-query";
 import { MapEditorSession, type EditorMessage, type EditorTool } from "@/lib/editor/map-editor";
@@ -5018,8 +5018,8 @@ function EditorNavigationHelpers({
 function getToolTargetCoordinate(session: MapEditorSession, tool: EditorTool, coordinate: GridCoordinate) {
   if (tool === "raise") {
     const topY = session.world.getHighestNonAirY(coordinate.x, coordinate.z);
-    const nextY = topY === null ? 0 : topY + 1;
-    return nextY < session.world.config.height ? { x: coordinate.x, y: nextY, z: coordinate.z } : coordinate;
+    const nextY = topY === null ? session.world.config.minY : topY + 1;
+    return nextY <= getWorldMaxY(session.world.config) ? { x: coordinate.x, y: nextY, z: coordinate.z } : coordinate;
   }
 
   if (tool === "lower") {
@@ -5029,7 +5029,7 @@ function getToolTargetCoordinate(session: MapEditorSession, tool: EditorTool, co
 
   if (tool === "marker") {
     const topY = session.world.getHighestNonAirY(coordinate.x, coordinate.z);
-    if (topY !== null && topY >= session.world.config.height - 1) {
+    if (topY !== null && topY >= getWorldMaxY(session.world.config)) {
       return null;
     }
     const markerY = topY === null ? coordinate.y : topY + 1;
@@ -5156,7 +5156,7 @@ function getFlattenPreviewCells(
   settings: TerrainBrushSettings,
   world: MapEditorSession["world"],
 ): Array<{ coordinate: GridCoordinate; action: FlattenPreviewAction; hasSurface: boolean }> {
-  const desiredY = Math.max(0, Math.min(world.config.height - 1, coordinate.y));
+  const desiredY = Math.max(world.config.minY, Math.min(getWorldMaxY(world.config), coordinate.y));
   return getTerrainOperationFootprint(coordinate, "flatten", settings).map((cell) => {
     const topY = world.getHighestNonAirY(cell.x, cell.z);
     const action: FlattenPreviewAction = topY === null || topY < desiredY
@@ -5826,7 +5826,7 @@ function ConstrainedMapControls({
 
     if (enabled) {
       controls.target.x = THREE.MathUtils.clamp(controls.target.x, -bounds, bounds);
-      controls.target.y = THREE.MathUtils.clamp(controls.target.y, 0, WORLD_CONFIG.height);
+      controls.target.y = THREE.MathUtils.clamp(controls.target.y, WORLD_CONFIG.minY, getWorldMaxY() + 1);
       controls.target.z = THREE.MathUtils.clamp(controls.target.z, -bounds, bounds);
       const lookDirection = controls.target.clone().sub(camera.position);
       const nextHeading = normalizeHeadingRadians(Math.atan2(lookDirection.x, -lookDirection.z));

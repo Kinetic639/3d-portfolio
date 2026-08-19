@@ -6,7 +6,7 @@ import {
   serializeMapDocument,
 } from "@/lib/world/map-document";
 import { createFlatVoxelWorld, type RenderChunk, type VoxelWorld } from "@/lib/world/voxel-world";
-import type { GridCoordinate } from "@/lib/world/world-config";
+import { getWorldMaxY, type GridCoordinate } from "@/lib/world/world-config";
 import type { TerrainCellMutation } from "./terrain-brushes";
 import type { ZoneColumnChange } from "./zone-tools";
 import { DEFAULT_ROTATION, DEFAULT_SHAPE_ID, DEFAULT_STATE, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
@@ -244,14 +244,14 @@ export class MapEditorSession {
 
   raise(coordinate: GridCoordinate, paintBlockId: BlockId): EditorActionResult {
     const topY = this.world.getHighestNonAirY(coordinate.x, coordinate.z);
-    const nextY = topY === null ? 0 : topY + 1;
+    const nextY = topY === null ? this.world.config.minY : topY + 1;
 
-    if (nextY >= this.world.config.height) {
+    if (nextY > getWorldMaxY(this.world.config)) {
       return {
         changed: false,
         rebuiltChunkIds: [],
         rebuiltChunks: [],
-        message: { type: "error", text: "Height limit reached at Y = 11." },
+        message: { type: "error", text: `Height limit reached at Y = ${getWorldMaxY(this.world.config)}.` },
       };
     }
 
@@ -276,12 +276,12 @@ export class MapEditorSession {
       return { changed: false, rebuiltChunkIds: [], rebuiltChunks: [], message: { type: "info", text: "Column is already empty." } };
     }
 
-    if (topY === 0) {
+    if (topY === this.world.config.minY) {
       return {
         changed: false,
         rebuiltChunkIds: [],
         rebuiltChunks: [],
-        message: { type: "info", text: "Lower stops at Y = 0. Use Erase to make a hole." },
+        message: { type: "info", text: `Lower stops at Y = ${this.world.config.minY}. Use Erase to make a hole.` },
       };
     }
 
@@ -301,7 +301,7 @@ export class MapEditorSession {
     const cells: CellChange[] = [];
     const targetBlock = paintBlockId === BLOCK_IDS.Air ? BLOCK_IDS.Ground : paintBlockId;
 
-    for (let y = 0; y < this.world.config.height; y += 1) {
+    for (let y = this.world.config.minY; y <= getWorldMaxY(this.world.config); y += 1) {
       const cellCoordinate = { x: coordinate.x, y, z: coordinate.z };
       const before = this.captureCell(cellCoordinate);
       const afterBlock = y <= coordinate.y ? targetBlock : BLOCK_IDS.Air;

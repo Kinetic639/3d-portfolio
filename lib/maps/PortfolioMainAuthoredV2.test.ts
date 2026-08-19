@@ -25,40 +25,43 @@ describe("portfolio main authored v2 map", () => {
     expect(entries.find((entry) => entry.id === "portfolio-v2-prefab-showcase")?.developmentOnly).toBe(true);
   });
 
-  it("provides the primary terrain map as a cube-only foundation with authored zone landforms", () => {
+  it("provides the primary terrain map with a stone foundation and authored zone landforms", () => {
     const state = loadMapStateSync(PRIMARY_FLAT_MAP_ID, { includeDevelopment: true });
     expect(validateMapDefinition(state.definition).ok).toBe(true);
     expect(state.definition.name).toBe("Portfolio Primary Terrain");
     expect(state.world.config).toEqual(WORLD_CONFIG);
     expect(state.world.getStats().nonAirBlocks).toBeGreaterThan(64 * 64);
-    expect(state.definition.entities).toHaveLength(0);
+    expect(state.definition.entities).toHaveLength(2);
     expect(state.definition.markers).toHaveLength(0);
     expect(state.definition.zones.map((zone) => zone.numericId)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
     let maxTopY = 0;
     for (let z = 0; z < 64; z += 1) {
       for (let x = 0; x < 64; x += 1) {
-        expect(getBlockDefinition(state.world.getBlock(x, 0, z)).solid).toBe(true);
+        expect(state.world.getBlock(x, -1, z)).toBe(BLOCK_IDS.Stone);
         const topY = state.world.getHighestNonAirY(x, z);
         expect(topY).not.toBeNull();
         if (topY == null) throw new Error(`Missing bottom terrain at ${x},${z}`);
         maxTopY = Math.max(maxTopY, topY);
         expect(topY).toBeGreaterThanOrEqual(0);
         expect(topY).toBeLessThanOrEqual(8);
-        for (let y = 0; y < WORLD_CONFIG.height; y += 1) {
-          if (state.world.getBlock(x, y, z) !== BLOCK_IDS.Air) {
-            expect(state.world.getShape(x, y, z)).toBe(SHAPE_IDS.CUBE);
-          }
+        for (let y = WORLD_CONFIG.minY; y < 0; y += 1) {
+          expect(state.world.getBlock(x, y, z)).toBe(BLOCK_IDS.Stone);
+          expect(state.world.getShape(x, y, z)).toBe(SHAPE_IDS.CUBE);
         }
       }
     }
 
-    expect(state.world.getHighestNonAirY(31, 31)).toBe(1);
-    expect(state.world.getHighestNonAirY(32, 31)).toBe(1);
-    expect(state.world.getHighestNonAirY(31, 32)).toBe(1);
-    expect(state.world.getHighestNonAirY(32, 32)).toBe(1);
+    const loaderTopYs = [
+      state.world.getHighestNonAirY(31, 31),
+      state.world.getHighestNonAirY(32, 31),
+      state.world.getHighestNonAirY(31, 32),
+      state.world.getHighestNonAirY(32, 32),
+    ];
+    expect(new Set(loaderTopYs).size).toBe(1);
+    expect(loaderTopYs[0]).toBeGreaterThanOrEqual(1);
     expect(maxTopY).toBe(8);
-    expect(state.world.getStats().nonAirBlocks).toBe(13240);
+    expect(state.world.getStats().nonAirBlocks).toBe(61_568);
   });
 
   it("uses the portfolio-v2 namespace for every placed prefab", () => {

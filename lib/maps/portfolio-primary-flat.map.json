@@ -1,13 +1,14 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 4,
   "id": "portfolio-primary-flat",
   "name": "Portfolio Primary Terrain",
-  "description": "Primary portfolio map foundation: one continuous cube-only 64 by 64 by 12 landscape with a solid bottom layer, rough terrain zones and reserved water beds.",
+  "description": "Primary portfolio map foundation: one continuous 64 by 64 landscape with a 32-layer vertical range, underground stone foundation, rough terrain zones and reserved water beds.",
   "kind": "portfolio",
   "runtimeMode": "dynamic-voxel",
   "dimensions": {
     "width": 64,
-    "height": 12,
+    "minY": -12,
+    "height": 32,
     "depth": 64
   },
   "blockSize": 1,

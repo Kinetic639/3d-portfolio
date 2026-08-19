@@ -1,6 +1,6 @@
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import { VoxelWorld } from "@/lib/world/voxel-world";
-import { WORLD_CONFIG } from "@/lib/world/world-config";
+import { getWorldMaxY, WORLD_CONFIG } from "@/lib/world/world-config";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 
 export type MapPresetId =
@@ -176,7 +176,7 @@ function createDiagnosticBoundariesPreset() {
   world.setBlock(31, 1, 0, BLOCK_IDS.ZoneGround);
   world.setBlock(31, 1, WORLD_CONFIG.depth - 1, BLOCK_IDS.ZoneGround);
   world.setBlock(28, 0, 28, BLOCK_IDS.Boundary);
-  world.setBlock(28, WORLD_CONFIG.height - 1, 28, BLOCK_IDS.Boundary);
+  world.setBlock(28, getWorldMaxY(), 28, BLOCK_IDS.Boundary);
   preserveCenterPlaza(world);
   world.clearDirtyChunks();
   return world;
@@ -338,7 +338,7 @@ function createBaseWorld() {
 }
 
 function addColumn(world: VoxelWorld, x: number, z: number, height: number, blockId: BlockId) {
-  for (let y = 0; y < Math.min(height, WORLD_CONFIG.height); y += 1) {
+  for (let y = 0; y < Math.min(height, getWorldMaxY() + 1); y += 1) {
     world.setBlock(x, y, z, y === 0 && blockId !== BLOCK_IDS.Path ? BLOCK_IDS.Ground : blockId);
   }
 }
@@ -380,7 +380,7 @@ function carveColumn(world: VoxelWorld, x: number, z: number, radius: number) {
       if (Math.hypot(dx, dz) > radius) {
         continue;
       }
-      for (let y = 0; y < WORLD_CONFIG.height; y += 1) {
+      for (let y = Number(WORLD_CONFIG.minY); y <= getWorldMaxY(); y += 1) {
         world.setBlock(x + dx, y, z + dz, BLOCK_IDS.Air);
       }
     }
@@ -393,7 +393,7 @@ function preserveCenterPlaza(world: VoxelWorld) {
 
   for (let z = centerMin; z <= centerMax; z += 1) {
     for (let x = centerMin; x <= centerMax; x += 1) {
-      for (let y = 0; y < WORLD_CONFIG.height; y += 1) {
+      for (let y: number = WORLD_CONFIG.minY; y <= getWorldMaxY(); y += 1) {
         world.setBlock(x, y, z, y === 0 ? BLOCK_IDS.Ground : BLOCK_IDS.Air);
       }
     }

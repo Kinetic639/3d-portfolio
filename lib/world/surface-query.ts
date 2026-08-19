@@ -1,5 +1,5 @@
 import { getBlockDefinition, isRenderableBlock, type BlockId } from "./block-registry";
-import { type GridCoordinate, type WorldPosition } from "./world-config";
+import { getWorldMaxY, type GridCoordinate, type WorldPosition } from "./world-config";
 import type { VoxelWorld } from "./voxel-world";
 import { getShapeDefinition } from "@/lib/voxel-shapes/shape-registry";
 import type { CellRotation, ShapeId } from "@/lib/voxel-shapes/shape-ids";
@@ -95,7 +95,7 @@ export function getHighestSupportingSurfaceInColumn(world: VoxelWorld, gridX: nu
     return null;
   }
 
-  for (let y = world.config.height - 1; y >= 0; y -= 1) {
+  for (let y = getWorldMaxY(world.config); y >= world.config.minY; y -= 1) {
     const blockId = world.getBlock(gridX, y, gridZ);
     if (blockId === 0 || !getBlockDefinition(blockId).renderable) {
       continue;

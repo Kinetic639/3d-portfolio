@@ -1,6 +1,6 @@
 import { FLUID_IDS, MAX_HORIZONTAL_FLUID_LEVEL } from "@/lib/fluids/fluid-types";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
-import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
+import { getWorldMaxY, type GridCoordinate, type WorldPosition } from "@/lib/world/world-config";
 
 export type WaterFaceDirection = "py" | "px" | "nx" | "pz" | "nz";
 
@@ -78,7 +78,7 @@ export function buildWaterChunkMesh(world: VoxelWorld, chunkX: number, chunkZ: n
     triangleCells.push(cellIndex, cellIndex);
   };
 
-  for (let y = 0; y < world.config.height; y += 1) {
+  for (let y = world.config.minY; y <= getWorldMaxY(world.config); y += 1) {
     for (let z = minGridZ; z <= maxGridZ; z += 1) {
       for (let x = minGridX; x <= maxGridX; x += 1) {
         const fluid = world.getFluid(x, y, z);
@@ -119,8 +119,8 @@ export function buildWaterChunkMesh(world: VoxelWorld, chunkX: number, chunkZ: n
   }
 
   const bounds = {
-    min: { x: minGridX, y: 0, z: minGridZ },
-    max: { x: maxGridX, y: world.config.height - 1, z: maxGridZ },
+    min: { x: minGridX, y: world.config.minY, z: minGridZ },
+    max: { x: maxGridX, y: getWorldMaxY(world.config), z: maxGridZ },
   };
   return {
     id: `water-${world.getChunkId(chunkX, chunkZ)}`,
@@ -140,8 +140,8 @@ export function buildWaterChunkMesh(world: VoxelWorld, chunkX: number, chunkZ: n
     triangles: faceMappings.length * 2,
     bounds,
     boundingBox: {
-      min: world.gridToWorld(minGridX, 0, minGridZ),
-      max: world.gridToWorld(maxGridX, world.config.height - 1, maxGridZ),
+      min: world.gridToWorld(minGridX, world.config.minY, minGridZ),
+      max: world.gridToWorld(maxGridX, getWorldMaxY(world.config), maxGridZ),
     },
     buildMs: Number((now() - startedAt).toFixed(3)),
   };

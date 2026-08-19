@@ -1,6 +1,6 @@
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import { VoxelWorld } from "@/lib/world/voxel-world";
-import { WORLD_CONFIG } from "@/lib/world/world-config";
+import { getWorldMaxY, WORLD_CONFIG } from "@/lib/world/world-config";
 import {
   createBlankMapDefinition,
   createDefaultOverviewCameraPreset,
@@ -1228,7 +1228,7 @@ function addFoundation(world: VoxelWorld, worldX: number, worldZ: number, width:
   const maxZ = Math.min(WORLD_CONFIG.depth - 1, Math.ceil(centerZ + depth / 2));
   for (let z = minZ; z <= maxZ; z += 1) {
     for (let x = minX; x <= maxX; x += 1) {
-      for (let y = 0; y < WORLD_CONFIG.height; y += 1) {
+      for (let y = WORLD_CONFIG.minY; y <= getWorldMaxY(); y += 1) {
         if (y <= topY) {
           world.setBlock(x, y, z, y === topY ? blockId : BLOCK_IDS.Ground);
           world.setZone(x, y, z, zoneId);

@@ -1,6 +1,6 @@
 import { BLOCK_IDS, getBlockDefinition, isRenderableBlock } from "@/lib/world/block-registry";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
-import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
+import { getWorldMaxY, type GridCoordinate, type WorldPosition } from "@/lib/world/world-config";
 import { computeExpansionDelay, isLoaderPlatformTopCell } from "@/lib/world/reveal";
 import { FACE_NEIGHBOUR_OFFSETS, getShapeDefinition, type FaceDirection, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
 
@@ -85,7 +85,7 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
   const faceMappings: SurfaceFaceMapping[] = [];
   const triangleCells: number[] = [];
 
-  for (let y = 0; y < world.config.height; y += 1) {
+  for (let y = world.config.minY; y <= getWorldMaxY(world.config); y += 1) {
     for (let z = minGridZ; z <= maxGridZ; z += 1) {
       for (let x = minGridX; x <= maxGridX; x += 1) {
         const blockId = world.getBlock(x, y, z);
@@ -171,8 +171,8 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
   }
 
   const bounds = {
-    min: { x: minGridX, y: 0, z: minGridZ },
-    max: { x: maxGridX, y: world.config.height - 1, z: maxGridZ },
+    min: { x: minGridX, y: world.config.minY, z: minGridZ },
+    max: { x: maxGridX, y: getWorldMaxY(world.config), z: maxGridZ },
   };
 
   return {
@@ -198,8 +198,8 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
     triangles: faceMappings.length * 2,
     bounds,
     boundingBox: {
-      min: world.gridToWorld(minGridX, 0, minGridZ),
-      max: world.gridToWorld(maxGridX, world.config.height - 1, maxGridZ),
+      min: world.gridToWorld(minGridX, world.config.minY, minGridZ),
+      max: world.gridToWorld(maxGridX, getWorldMaxY(world.config), maxGridZ),
     },
     buildMs: Number((now() - startedAt).toFixed(3)),
   };

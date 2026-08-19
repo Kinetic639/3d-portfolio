@@ -29,7 +29,7 @@ import {
 } from "./map-navigation";
 import { DEFAULT_FLUID_SETTINGS, type FluidDocument, validateFluidDocument } from "@/lib/fluids/fluid-document";
 
-export const MAP_DEFINITION_SCHEMA_VERSION = 3;
+export const MAP_DEFINITION_SCHEMA_VERSION = 4;
 
 export type MapRuntimeMode = "baked-static" | "dynamic-voxel";
 export type MapKind = "portfolio" | "interior" | "minigame" | "test" | "custom";
@@ -107,7 +107,7 @@ export type MapPresentationConfig = {
 };
 
 export type MapDefinition = {
-  schemaVersion: 1 | 2 | 3;
+  schemaVersion: 1 | 2 | 3 | 4;
   id: string;
   name: string;
   description?: string;
@@ -115,7 +115,8 @@ export type MapDefinition = {
   runtimeMode: MapRuntimeMode;
   dimensions: {
     width: 64;
-    height: 12;
+    minY: number;
+    height: number;
     depth: 64;
   };
   blockSize: 1;
@@ -181,6 +182,7 @@ export function createMapDefinitionFromWorld(input: {
     runtimeMode: input.runtimeMode,
     dimensions: {
       width: WORLD_CONFIG.width,
+      minY: WORLD_CONFIG.minY,
       height: WORLD_CONFIG.height,
       depth: WORLD_CONFIG.depth,
     },
@@ -284,12 +286,13 @@ export function duplicateMapDefinition(map: MapDefinition, id: string, name: str
 
 export function mapDefinitionToDocument(map: MapDefinition): MapDocument {
   return {
-    version: 4,
+    version: 5,
     cellEncoding: map.blocks.encoding,
     zoneEncoding: "column-zones-v2",
     world: {
       width: WORLD_CONFIG.width,
       depth: WORLD_CONFIG.depth,
+      minY: WORLD_CONFIG.minY,
       height: WORLD_CONFIG.height,
       blockSize: WORLD_CONFIG.blockSize,
       chunkSize: WORLD_CONFIG.chunkSize,
@@ -342,7 +345,7 @@ export function validateMapDefinition(input: unknown): MapDefinitionValidationRe
     errors.push(`Unknown runtime mode: ${String(map.runtimeMode)}.`);
   }
   if (!hasExpectedDimensions(map)) {
-    errors.push("Map dimensions must match 64 x 64 x 12 with block size 1.");
+    errors.push(`Map dimensions must match 64 x 64 x ${WORLD_CONFIG.height} from Y=${WORLD_CONFIG.minY} with block size 1.`);
   }
   if (
     !isRecord(map.blocks) ||
@@ -422,6 +425,11 @@ export function migrateMapDefinition(input: MapDefinition): MapDefinition {
   return {
     ...input,
     schemaVersion: MAP_DEFINITION_SCHEMA_VERSION,
+    dimensions: {
+      ...input.dimensions,
+      minY: WORLD_CONFIG.minY,
+      height: WORLD_CONFIG.height,
+    },
     fluids: input.fluids ?? {
       encoding: "fluid-sources-v1",
       settings: { ...DEFAULT_FLUID_SETTINGS },
@@ -688,6 +696,7 @@ function isZoneFocusDirection(value: unknown): value is MapZoneFocusDirection {
 function hasExpectedDimensions(map: MapDefinition) {
   return (
     map.dimensions?.width === WORLD_CONFIG.width &&
+    map.dimensions.minY === WORLD_CONFIG.minY &&
     map.dimensions.height === WORLD_CONFIG.height &&
     map.dimensions.depth === WORLD_CONFIG.depth &&
     map.blockSize === WORLD_CONFIG.blockSize
@@ -741,8 +750,8 @@ function isGridCoordinate(value: unknown): value is GridCoordinate {
     Number.isInteger(z) &&
     x >= 0 &&
     x < WORLD_CONFIG.width &&
-    y >= 0 &&
-    y < WORLD_CONFIG.height &&
+    y >= WORLD_CONFIG.minY &&
+    y <= WORLD_CONFIG.minY + WORLD_CONFIG.height - 1 &&
     z >= 0 &&
     z < WORLD_CONFIG.depth
   );
@@ -756,7 +765,7 @@ function isZoneCoordinate(value: unknown): value is MapZoneAssignment {
   return (
     typeof x === "number" &&
     typeof z === "number" &&
-    (y === undefined || (typeof y === "number" && Number.isInteger(y) && y >= 0 && y < WORLD_CONFIG.height)) &&
+    (y === undefined || (typeof y === "number" && Number.isInteger(y) && y >= WORLD_CONFIG.minY && y <= WORLD_CONFIG.minY + WORLD_CONFIG.height - 1)) &&
     Number.isInteger(x) &&
     Number.isInteger(z) &&
     x >= 0 &&

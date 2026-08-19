@@ -16,7 +16,10 @@ import {
   WORLD_CELL_COUNT,
   WORLD_CHUNK_COUNT,
   WORLD_CONFIG,
+  WORLD_FOUNDATION_CELL_COUNT,
+  WORLD_FOUNDATION_LEVEL_COUNT,
   WORLD_SURFACE_CELL_COUNT,
+  getWorldMaxY,
   type GridCoordinate,
   type WorldConfig,
   type WorldPosition,
@@ -147,8 +150,8 @@ export class VoxelWorld {
       Number.isInteger(z) &&
       x >= 0 &&
       x < this.config.width &&
-      y >= 0 &&
-      y < this.config.height &&
+      y >= this.config.minY &&
+      y <= getWorldMaxY(this.config) &&
       z >= 0 &&
       z < this.config.depth
     );
@@ -159,7 +162,7 @@ export class VoxelWorld {
       return null;
     }
 
-    return x + this.config.width * (z + this.config.depth * y);
+    return x + this.config.width * (z + this.config.depth * (y - this.config.minY));
   }
 
   getCoordinates(index: number): GridCoordinate | null {
@@ -168,8 +171,9 @@ export class VoxelWorld {
     }
 
     const yStride = this.config.width * this.config.depth;
-    const y = Math.floor(index / yStride);
-    const remainder = index - y * yStride;
+    const storageY = Math.floor(index / yStride);
+    const y = storageY + this.config.minY;
+    const remainder = index - storageY * yStride;
     const z = Math.floor(remainder / this.config.width);
     const x = remainder - z * this.config.width;
 
@@ -449,7 +453,7 @@ export class VoxelWorld {
       return null;
     }
 
-    for (let y = this.config.height - 1; y >= 0; y -= 1) {
+    for (let y = getWorldMaxY(this.config); y >= this.config.minY; y -= 1) {
       if (this.getBlock(x, y, z) !== BLOCK_IDS.Air) {
         return y;
       }
@@ -649,7 +653,7 @@ export class VoxelWorld {
     const maxGridX = minGridX + this.config.chunkSize - 1;
     const maxGridZ = minGridZ + this.config.chunkSize - 1;
 
-    for (let y = 0; y < this.config.height; y += 1) {
+    for (let y = this.config.minY; y <= getWorldMaxY(this.config); y += 1) {
       for (let z = minGridZ; z <= maxGridZ; z += 1) {
         for (let x = minGridX; x <= maxGridX; x += 1) {
           const blockId = this.getBlock(x, y, z);
@@ -696,15 +700,15 @@ export class VoxelWorld {
       chunkX,
       chunkZ,
       bounds: {
-        min: { x: minGridX, y: 0, z: minGridZ },
-        max: { x: maxGridX, y: this.config.height - 1, z: maxGridZ },
+        min: { x: minGridX, y: this.config.minY, z: minGridZ },
+        max: { x: maxGridX, y: getWorldMaxY(this.config), z: maxGridZ },
       },
       renderableCells,
       instanceToCell,
       cellToInstance,
       boundingBox: {
-        min: this.gridToWorld(minGridX, 0, minGridZ),
-        max: this.gridToWorld(maxGridX, this.config.height - 1, maxGridZ),
+        min: this.gridToWorld(minGridX, this.config.minY, minGridZ),
+        max: this.gridToWorld(maxGridX, getWorldMaxY(this.config), maxGridZ),
       },
     };
   }
@@ -756,9 +760,11 @@ export class VoxelWorld {
 export function createFlatVoxelWorld() {
   const world = new VoxelWorld();
 
-  for (let z = 0; z < WORLD_CONFIG.depth; z += 1) {
-    for (let x = 0; x < WORLD_CONFIG.width; x += 1) {
-      world.setBlock(x, 0, z, BLOCK_IDS.Ground);
+  for (let y = WORLD_CONFIG.minY; y <= 0; y += 1) {
+    for (let z = 0; z < WORLD_CONFIG.depth; z += 1) {
+      for (let x = 0; x < WORLD_CONFIG.width; x += 1) {
+        world.setBlock(x, y, z, y < 0 ? BLOCK_IDS.Stone : BLOCK_IDS.Ground);
+      }
     }
   }
 
@@ -783,10 +789,10 @@ function normalizeZoneLayer(config: WorldConfig, zones?: Uint8Array) {
   }
 
   const columns = new Uint8Array(columnCount);
-  for (let y = 0; y < config.height; y += 1) {
+  for (let storageY = 0; storageY < config.height; storageY += 1) {
     for (let z = 0; z < config.depth; z += 1) {
       for (let x = 0; x < config.width; x += 1) {
-        const legacyIndex = x + config.width * (z + config.depth * y);
+        const legacyIndex = x + config.width * (z + config.depth * storageY);
         const zoneId = zones[legacyIndex];
         if (zoneId !== 0) {
           columns[x + config.width * z] = zoneId;
@@ -843,11 +849,11 @@ function validateFluidLayerSnapshot(snapshot: FluidLayerSnapshot, blocks: Uint16
 export const EXPECTED_WORLD_STATS = {
   logicalCells: WORLD_CELL_COUNT,
   airCells: WORLD_AIR_CELL_COUNT,
-  nonAirBlocks: WORLD_SURFACE_CELL_COUNT,
-  renderedInstances: WORLD_SURFACE_CELL_COUNT,
+  nonAirBlocks: WORLD_FOUNDATION_CELL_COUNT,
+  renderedInstances: WORLD_FOUNDATION_CELL_COUNT,
   fluidCells: 0,
   fluidSources: 0,
   fallingFluidCells: 0,
   chunks: WORLD_CHUNK_COUNT,
-  instancesPerFlatChunk: CHUNK_SURFACE_CELL_COUNT,
+  instancesPerFlatChunk: CHUNK_SURFACE_CELL_COUNT * WORLD_FOUNDATION_LEVEL_COUNT,
 } as const;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BLOCK_IDS } from "./block-registry";
 import { EXPECTED_WORLD_STATS, VoxelWorld, createFlatVoxelWorld } from "./voxel-world";
-import { WORLD_CELL_COUNT, WORLD_CONFIG, WORLD_SURFACE_CELL_COUNT, WORLD_AIR_CELL_COUNT } from "./world-config";
+import { getWorldMaxY, WORLD_AIR_CELL_COUNT, WORLD_CELL_COUNT, WORLD_CONFIG, WORLD_FOUNDATION_CELL_COUNT, WORLD_SURFACE_CELL_COUNT } from "./world-config";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 import { EMPTY_FLUID_CELL, FLUID_IDS } from "@/lib/fluids/fluid-types";
 
@@ -25,7 +25,7 @@ describe("voxel world foundation", () => {
     expect(world.fluidLevels).toHaveLength(WORLD_CELL_COUNT);
     expect(world.fluidFlags).toHaveLength(WORLD_CELL_COUNT);
     expect(world.zones).toHaveLength(WORLD_SURFACE_CELL_COUNT);
-    expect(world.getStats().logicalCells).toBe(49_152);
+    expect(world.getStats().logicalCells).toBe(131_072);
   });
 
   it("stores shape, rotation and state independently from block id", () => {
@@ -100,14 +100,16 @@ describe("voxel world foundation", () => {
     expect(world.getStats().zoneAssignments).toBe(1);
   });
 
-  it("generates a deterministic flat ground layer and leaves upper cells as air", () => {
+  it("generates a deterministic underground foundation and leaves upper cells as air", () => {
     const world = createFlatVoxelWorld();
     const stats = world.getStats();
 
-    expect(stats.nonAirBlocks).toBe(WORLD_SURFACE_CELL_COUNT);
-    expect(stats.renderedInstances).toBe(4_096);
+    expect(stats.nonAirBlocks).toBe(WORLD_FOUNDATION_CELL_COUNT);
+    expect(stats.renderedInstances).toBe(WORLD_FOUNDATION_CELL_COUNT);
     expect(stats.airCells).toBe(WORLD_AIR_CELL_COUNT);
     expect(world.getBlock(0, 0, 0)).toBe(BLOCK_IDS.Ground);
+    expect(world.getBlock(0, WORLD_CONFIG.minY, 0)).toBe(BLOCK_IDS.Stone);
+    expect(world.getBlock(0, -1, 0)).toBe(BLOCK_IDS.Stone);
     expect(world.getBlock(0, 1, 0)).toBe(BLOCK_IDS.Air);
   });
 
@@ -116,7 +118,7 @@ describe("voxel world foundation", () => {
     const indexes = new Set<number>();
     let invalidIndexCount = 0;
 
-    for (let y = 0; y < WORLD_CONFIG.height; y += 1) {
+    for (let y = WORLD_CONFIG.minY; y <= getWorldMaxY(); y += 1) {
       for (let z = 0; z < WORLD_CONFIG.depth; z += 1) {
         for (let x = 0; x < WORLD_CONFIG.width; x += 1) {
           const index = world.getIndex(x, y, z);
@@ -136,11 +138,11 @@ describe("voxel world foundation", () => {
   it("converts flat indexes back to logical coordinates", () => {
     const world = createFlatVoxelWorld();
 
-    expect(world.getCoordinates(0)).toEqual({ x: 0, y: 0, z: 0 });
-    expect(world.getCoordinates(63)).toEqual({ x: 63, y: 0, z: 0 });
-    expect(world.getCoordinates(64)).toEqual({ x: 0, y: 0, z: 1 });
-    expect(world.getCoordinates(4_096)).toEqual({ x: 0, y: 1, z: 0 });
-    expect(world.getCoordinates(WORLD_CELL_COUNT - 1)).toEqual({ x: 63, y: 11, z: 63 });
+    expect(world.getCoordinates(0)).toEqual({ x: 0, y: -12, z: 0 });
+    expect(world.getCoordinates(63)).toEqual({ x: 63, y: -12, z: 0 });
+    expect(world.getCoordinates(64)).toEqual({ x: 0, y: -12, z: 1 });
+    expect(world.getCoordinates(4_096)).toEqual({ x: 0, y: -11, z: 0 });
+    expect(world.getCoordinates(WORLD_CELL_COUNT - 1)).toEqual({ x: 63, y: 19, z: 63 });
   });
 
   it("rejects out-of-bounds coordinates safely", () => {
@@ -149,8 +151,9 @@ describe("voxel world foundation", () => {
     expect(world.isInsideWorld(-1, 0, 0)).toBe(false);
     expect(world.getIndex(64, 0, 0)).toBeNull();
     expect(world.getCoordinates(WORLD_CELL_COUNT)).toBeNull();
-    expect(world.getBlock(0, 12, 0)).toBe(BLOCK_IDS.Air);
-    expect(world.setBlock(0, 12, 0, BLOCK_IDS.Ground)).toBe(false);
+    expect(world.getBlock(0, 20, 0)).toBe(BLOCK_IDS.Air);
+    expect(world.setBlock(0, 20, 0, BLOCK_IDS.Ground)).toBe(false);
+    expect(world.setBlock(0, -13, 0, BLOCK_IDS.Ground)).toBe(false);
   });
 
   it("centres grid coordinates around the world origin", () => {
@@ -168,6 +171,8 @@ describe("voxel world foundation", () => {
       { x: 31, y: 0, z: 31 },
       { x: 32, y: 0, z: 32 },
       { x: 63, y: 11, z: 63 },
+      { x: 0, y: -12, z: 0 },
+      { x: 63, y: 19, z: 63 },
     ]) {
       expect(world.worldToGrid(world.gridToWorld(coordinate.x, coordinate.y, coordinate.z))).toEqual(coordinate);
     }
@@ -187,7 +192,7 @@ describe("voxel world foundation", () => {
     const chunks = world.createRenderChunks();
 
     expect(chunks).toHaveLength(16);
-    expect(chunks.every((chunk) => chunk.renderableCells.length === 256)).toBe(true);
+    expect(chunks.every((chunk) => chunk.renderableCells.length === EXPECTED_WORLD_STATS.instancesPerFlatChunk)).toBe(true);
     expect(chunks.every((chunk) => chunk.instanceToCell.length === chunk.renderableCells.length)).toBe(true);
 
     for (const chunk of chunks) {
@@ -224,17 +229,17 @@ describe("voxel world foundation", () => {
     const changedCellIndex = world.getIndex(2, 0, 3);
 
     expect(changedCellIndex).not.toBeNull();
-    expect(world.getStats().renderedInstances).toBe(4_096);
+    expect(world.getStats().renderedInstances).toBe(WORLD_FOUNDATION_CELL_COUNT);
 
     expect(world.setBlock(2, 0, 3, BLOCK_IDS.Air)).toBe(true);
 
     const airRebuild = world.rebuildDirtyChunks();
     const rebuiltAirChunk = airRebuild[0];
 
-    expect(world.getStats().renderedInstances).toBe(4_095);
+    expect(world.getStats().renderedInstances).toBe(WORLD_FOUNDATION_CELL_COUNT - 1);
     expect(airRebuild).toHaveLength(1);
     expect(rebuiltAirChunk.id).toBe("chunk-0-0");
-    expect(rebuiltAirChunk.renderableCells).toHaveLength(255);
+    expect(rebuiltAirChunk.renderableCells).toHaveLength(EXPECTED_WORLD_STATS.instancesPerFlatChunk - 1);
     expect(rebuiltAirChunk.cellToInstance.has(changedCellIndex as number)).toBe(false);
     expect([...world.dirtyChunks]).toEqual([]);
 
@@ -248,10 +253,10 @@ describe("voxel world foundation", () => {
     const groundRebuild = world.rebuildDirtyChunks();
     const rebuiltGroundChunk = groundRebuild[0];
 
-    expect(world.getStats().renderedInstances).toBe(4_096);
+    expect(world.getStats().renderedInstances).toBe(WORLD_FOUNDATION_CELL_COUNT);
     expect(groundRebuild).toHaveLength(1);
     expect(rebuiltGroundChunk.id).toBe("chunk-0-0");
-    expect(rebuiltGroundChunk.renderableCells).toHaveLength(256);
+    expect(rebuiltGroundChunk.renderableCells).toHaveLength(EXPECTED_WORLD_STATS.instancesPerFlatChunk);
     expect(rebuiltGroundChunk.cellToInstance.has(changedCellIndex as number)).toBe(true);
     expect([...world.dirtyChunks]).toEqual([]);
   });

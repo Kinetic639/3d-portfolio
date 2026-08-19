@@ -9,8 +9,44 @@ import {
 import { createFlatVoxelWorld } from "./voxel-world";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 import { WaterSimulator } from "@/lib/fluids/water-simulator";
+import { DEFAULT_FLUID_SETTINGS } from "@/lib/fluids/fluid-document";
 
 describe("map document format", () => {
+  it("migrates legacy vertical bounds without moving authored coordinates", () => {
+    const legacy: MapDocument = {
+      version: 4,
+      world: {
+        width: 64,
+        depth: 64,
+        height: 12,
+        blockSize: 1,
+        chunkSize: 16,
+        generator: "flat-v1",
+      },
+      cellEncoding: "cell-edits-v2",
+      zoneEncoding: "column-zones-v2",
+      edits: [
+        { x: 7, y: 0, z: 8, blockId: BLOCK_IDS.Path },
+        { x: 7, y: 11, z: 8, blockId: BLOCK_IDS.Special },
+      ],
+      zones: [{ x: 7, z: 8, zoneId: 3 }],
+      entities: [{ id: "legacy-marker", type: "marker", gridPosition: { x: 7, y: 1, z: 8 }, rotationY: 0 }],
+      fluids: { encoding: "fluid-sources-v1", settings: { ...DEFAULT_FLUID_SETTINGS }, sources: [] },
+    };
+
+    const parsed = parseMapDocument(legacy);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    expect(parsed.document.world).toMatchObject({ minY: -12, height: 32 });
+    const imported = createMapStateFromDocument(parsed.document);
+    expect(imported.world.getBlock(7, 0, 8)).toBe(BLOCK_IDS.Path);
+    expect(imported.world.getBlock(7, 11, 8)).toBe(BLOCK_IDS.Special);
+    expect(imported.world.getBlock(7, -1, 8)).toBe(BLOCK_IDS.Stone);
+    expect(imported.world.gridToWorld(7, 0, 8).y).toBe(0.5);
+    expect(imported.entities[0].gridPosition.y).toBe(1);
+  });
+
   it("exports and imports deterministic world differences, zones and entities", () => {
     const world = createFlatVoxelWorld();
     world.setBlock(8, 0, 9, BLOCK_IDS.Path);
@@ -94,7 +130,7 @@ describe("map document format", () => {
     const document = serializeMapDocument(world, []);
     const imported = createMapStateFromDocument(document);
 
-    expect(document.version).toBe(4);
+    expect(document.version).toBe(5);
     expect(document.cellEncoding).toBe("cell-edits-v2");
     expect(document.zoneEncoding).toBe("column-zones-v2");
     expect(document.edits).toContainEqual({

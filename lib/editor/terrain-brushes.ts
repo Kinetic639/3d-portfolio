@@ -1,6 +1,6 @@
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
-import { WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
+import { getWorldMaxY, WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
 import { DEFAULT_ROTATION, DEFAULT_SHAPE_ID, DEFAULT_STATE, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 
 export type BrushShape = "single" | "square" | "circle";
@@ -100,7 +100,7 @@ export function createTerrainMutations(input: {
   const mutations: TerrainCellMutation[] = [];
 
   if (input.operation === "flatten") {
-    const desiredY = Math.max(0, Math.min(WORLD_CONFIG.height - 1, Math.floor(input.center.y)));
+    const desiredY = Math.max(input.world.config.minY, Math.min(getWorldMaxY(input.world.config), Math.floor(input.center.y)));
     for (const cell of footprint) {
       const topY = input.world.getHighestNonAirY(cell.x, cell.z);
       if (topY === desiredY) continue;
@@ -117,7 +117,7 @@ export function createTerrainMutations(input: {
         continue;
       }
 
-      const startY = topY === null ? 0 : topY + 1;
+      const startY = topY === null ? input.world.config.minY : topY + 1;
       for (let y = startY; y <= desiredY; y += 1) {
         const mutation = createDirectCellMutation(
           input.world,
@@ -251,8 +251,8 @@ function createCellMutation(
       afterZone = world.getColumnZone(cell.x, cell.z);
       break;
     case "raise": {
-      const y = topY === null ? 0 : topY + 1;
-      if (y >= WORLD_CONFIG.height) return null;
+      const y = topY === null ? world.config.minY : topY + 1;
+      if (y > getWorldMaxY(world.config)) return null;
       target = { x: cell.x, y, z: cell.z };
       afterBlock = blockId === BLOCK_IDS.Air ? BLOCK_IDS.Ground : blockId;
       afterShape = shapeId;
@@ -262,7 +262,7 @@ function createCellMutation(
       break;
     }
     case "lower": {
-      if (topY === null || topY <= 0) return null;
+      if (topY === null || topY <= world.config.minY) return null;
       target = { x: cell.x, y: topY, z: cell.z };
       afterBlock = BLOCK_IDS.Air;
       afterShape = DEFAULT_SHAPE_ID;
@@ -272,7 +272,7 @@ function createCellMutation(
       break;
     }
     case "flatten": {
-      const desiredY = Math.max(0, Math.min(WORLD_CONFIG.height - 1, Math.floor(settings.flattenHeight)));
+      const desiredY = Math.max(world.config.minY, Math.min(getWorldMaxY(world.config), Math.floor(settings.flattenHeight)));
       if (cell.y > desiredY) {
         afterBlock = BLOCK_IDS.Air;
         afterShape = DEFAULT_SHAPE_ID;
@@ -288,7 +288,7 @@ function createCellMutation(
       break;
     }
     case "paint-path":
-      target = { x: cell.x, y: topY ?? 0, z: cell.z };
+      target = { x: cell.x, y: topY ?? world.config.minY, z: cell.z };
       afterBlock = blockId;
       afterZone = world.getColumnZone(target.x, target.z);
       break;

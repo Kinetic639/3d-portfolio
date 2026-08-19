@@ -62,8 +62,8 @@ describe("portfolio main greybox map", () => {
 
   it("loads through the standard map loader and preserves the authoritative dimensions", () => {
     const state = loadMapStateSync(MAP_ID, { includeDevelopment: true });
-    expect(state.definition.dimensions).toEqual({ width: 64, height: 12, depth: 64 });
-    expect(state.world.getStats().logicalCells).toBe(64 * 64 * 12);
+    expect(state.definition.dimensions).toEqual({ width: 64, minY: -12, height: 32, depth: 64 });
+    expect(state.world.getStats().logicalCells).toBe(64 * 64 * 32);
     expect(validateMapDefinition(state.definition).ok).toBe(true);
   });
 

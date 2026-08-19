@@ -88,7 +88,8 @@ describe("map definitions", () => {
     const result = validateMapDefinition(input);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.map.schemaVersion).toBe(3);
+      expect(result.map.schemaVersion).toBe(4);
+      expect(result.map.dimensions).toEqual({ width: 64, depth: 64, minY: -12, height: 32 });
       expect(result.map.fluids).toMatchObject({ encoding: "fluid-sources-v1", sources: [] });
       expect(result.map.entities).toEqual([]);
       expect(result.map.entityGroups).toEqual([]);

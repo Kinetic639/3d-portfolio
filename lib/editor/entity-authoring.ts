@@ -9,7 +9,7 @@ import {
   type SerializableTransform,
   type SerializableVector3,
 } from "@/lib/maps/map-entities";
-import { WORLD_CONFIG } from "@/lib/world/world-config";
+import { getWorldMaxY, WORLD_CONFIG } from "@/lib/world/world-config";
 import { getPrefabDefinition } from "@/lib/prefabs/prefab-library";
 import { resolvePrefabCollisionMode, resolvePrefabFootprint } from "@/lib/prefabs/prefab-resolver";
 
@@ -143,7 +143,7 @@ export function validateEntityPlacement(map: MapDefinition, entity: PlacedMapEnt
   if (!isFiniteTransform(entity.transform)) messages.push("Entity transform contains invalid numbers.");
   if (entity.footprint.width <= 0 || entity.footprint.depth <= 0 || entity.footprint.height <= 0) messages.push("Entity footprint must be positive.");
   if (!isInsideMapEdges(entity.transform.position)) messages.push("Entity position is outside map-edge bounds.");
-  if (entity.transform.position.y < 0) messages.push("Entity cannot be placed underground.");
+  if (entity.transform.position.y < WORLD_CONFIG.minY) messages.push("Entity position is below the world floor.");
   if (entity.zoneId && !map.zones.some((zone) => zone.id === entity.zoneId)) messages.push(`Unknown zone: ${entity.zoneId}.`);
   if (entity.markerId && !map.markers.some((marker) => marker.id === entity.markerId)) messages.push(`Unknown marker: ${entity.markerId}.`);
   if (entity.entityType === "prefab") {
@@ -285,5 +285,5 @@ function isFiniteVector(vector: SerializableVector3) {
 
 function isInsideMapEdges(position: SerializableVector3) {
   const edge = WORLD_CONFIG.width / 2;
-  return position.x >= -edge && position.x <= edge && position.z >= -edge && position.z <= edge && position.y <= WORLD_CONFIG.height + 8;
+  return position.x >= -edge && position.x <= edge && position.z >= -edge && position.z <= edge && position.y >= WORLD_CONFIG.minY && position.y <= getWorldMaxY() + 8;
 }

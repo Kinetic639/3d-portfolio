@@ -7,16 +7,17 @@ import {
   distanceFromCenterPlatform,
 } from "./terrain";
 import { BLOCK_IDS } from "@/lib/world/block-registry";
+import { WORLD_AIR_CELL_COUNT, WORLD_CELL_COUNT, WORLD_FOUNDATION_CELL_COUNT } from "@/lib/world/world-config";
 
 describe("createTerrainData", () => {
-  it("creates 16 chunks with 256 surface instances each", () => {
+  it("creates 16 chunks containing the generated stone foundation", () => {
     const terrain = createTerrainData();
 
     expect(terrain.chunks).toHaveLength(TERRAIN_CHUNK_COUNT);
     expect(terrain.instanceCount).toBe(TERRAIN_INSTANCE_COUNT);
-    expect(terrain.logicalCellCount).toBe(49_152);
-    expect(terrain.airCellCount).toBe(45_056);
-    expect(terrain.nonAirBlockCount).toBe(4_096);
+    expect(terrain.logicalCellCount).toBe(WORLD_CELL_COUNT);
+    expect(terrain.airCellCount).toBe(WORLD_AIR_CELL_COUNT);
+    expect(terrain.nonAirBlockCount).toBe(WORLD_FOUNDATION_CELL_COUNT);
     expect(terrain.chunks.every((chunk) => chunk.cells.length === CHUNK_INSTANCE_COUNT)).toBe(true);
   });
 
