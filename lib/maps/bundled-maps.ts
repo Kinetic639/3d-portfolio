@@ -18,6 +18,7 @@ import { groundEntityOnTerrain } from "@/lib/prefabs/prefab-placement";
 import type { PrefabDefinition, PrefabVariantDefinition } from "@/lib/prefabs/prefab-types";
 import { ROTATIONS, SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import portfolioPrimaryFlatMap from "./portfolio-primary-flat.map.json";
+import portfolioNorthMap from "./portfolio-north.map.json";
 
 const PHASE4_CREATED_AT = "2026-08-01T00:00:00.000Z";
 const PHASE5_CREATED_AT = "2026-08-02T00:00:00.000Z";
@@ -293,6 +294,10 @@ export function createPortfolioMainAuthoredV2MapDefinition(): MapDefinition {
 
 export function createPortfolioPrimaryFlatMapDefinition(): MapDefinition {
   return loadBundledMapDefinition(portfolioPrimaryFlatMap, "portfolio-primary-flat.map.json");
+}
+
+export function createPortfolioNorthMapDefinition(): MapDefinition {
+  return loadBundledMapDefinition(portfolioNorthMap, "portfolio-north.map.json");
 }
 
 function loadBundledMapDefinition(input: unknown, source: string): MapDefinition {

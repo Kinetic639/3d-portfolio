@@ -4,6 +4,7 @@ import {
   createPortfolioMainGreyboxBasicBackupMapDefinition,
   createPortfolioMainGreyboxMapDefinition,
   createPortfolioPrimaryFlatMapDefinition,
+  createPortfolioNorthMapDefinition,
   createPortfolioPhase4MapDefinition,
   createPortfolioV2PrefabShowcaseMapDefinition,
   createPrefabCatalogMapDefinition,
@@ -47,6 +48,7 @@ type BundledMapSource = {
 
 const BUNDLED_MAPS: BundledMapSource[] = [
   createBundledEntry(createPortfolioPrimaryFlatMapDefinition, "bundled:portfolio-primary-flat", false),
+  createBundledEntry(createPortfolioNorthMapDefinition, "bundled:portfolio-north", true),
   createBundledEntry(createPortfolioMainAuthoredV2MapDefinition, "bundled:portfolio-main-authored-v2", false),
   createBundledEntry(createPortfolioMainGreyboxMapDefinition, "bundled:portfolio-main-greybox-v1", false),
   createBundledEntry(createPortfolioMainGreyboxBasicBackupMapDefinition, "bundled:portfolio-main-greybox-v1-basic-backup", true),

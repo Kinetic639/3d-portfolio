@@ -6,8 +6,6 @@ import { getWorldMaxY, WORLD_CONFIG } from "@/lib/world/world-config";
 // renderable cells) and the surface-mesh reveal path (surface-mesher.ts).
 // Both need identical numbers here or the two renderers would animate out of
 // sync with each other whenever a project switches between them mid-reveal.
-const CENTER_MIN = WORLD_CONFIG.width / 2 - 1;
-const CENTER_MAX = WORLD_CONFIG.width / 2;
 export const MAX_WAVE_DELAY = 0.74;
 
 // Minimal shape a world needs to have for the loader-platform lookup below —
@@ -15,8 +13,14 @@ export const MAX_WAVE_DELAY = 0.74;
 // the class itself (which imports back from this module).
 type LoaderPlatformWorld = {
   getBlock(x: number, y: number, z: number): BlockId;
-  config: { minY: number; height: number };
+  config: { width: number; depth: number; minY: number; height: number };
 };
+
+type RevealDimensions = Pick<LoaderPlatformWorld["config"], "width" | "depth">;
+
+function getCenterBounds(size: number) {
+  return { min: size / 2 - 1, max: size / 2 };
+}
 
 // Which cell is "the loader platform" (always fully revealed, no growth
 // delay, plus the gentle idle wave, plus its own fixed look) is driven by
@@ -27,7 +31,9 @@ type LoaderPlatformWorld = {
 // or re-skinned in the editor (stacking slabs on top, repainting materials)
 // instead of breaking every time someone changes what's *in* the cell.
 export function isLoaderPlatformTopCell(world: LoaderPlatformWorld, x: number, y: number, z: number): boolean {
-  if (x < CENTER_MIN || x > CENTER_MAX || z < CENTER_MIN || z > CENTER_MAX) {
+  const centerX = getCenterBounds(world.config.width);
+  const centerZ = getCenterBounds(world.config.depth);
+  if (x < centerX.min || x > centerX.max || z < centerZ.min || z > centerZ.max) {
     return false;
   }
 
@@ -44,9 +50,11 @@ export function isLoaderPlatformTopCell(world: LoaderPlatformWorld, x: number, y
   return true;
 }
 
-export function distanceFromCenterPlatform(x: number, z: number): number {
-  const dx = x < CENTER_MIN ? CENTER_MIN - x : x > CENTER_MAX ? x - CENTER_MAX : 0;
-  const dz = z < CENTER_MIN ? CENTER_MIN - z : z > CENTER_MAX ? z - CENTER_MAX : 0;
+export function distanceFromCenterPlatform(x: number, z: number, dimensions: RevealDimensions = WORLD_CONFIG): number {
+  const centerX = getCenterBounds(dimensions.width);
+  const centerZ = getCenterBounds(dimensions.depth);
+  const dx = x < centerX.min ? centerX.min - x : x > centerX.max ? x - centerX.max : 0;
+  const dz = z < centerZ.min ? centerZ.min - z : z > centerZ.max ? z - centerZ.max : 0;
 
   return Math.hypot(dx, dz);
 }
@@ -56,5 +64,8 @@ export function computeExpansionDelay(world: LoaderPlatformWorld, x: number, y: 
     return 0;
   }
 
-  return (distanceFromCenterPlatform(x, z) / distanceFromCenterPlatform(0, 0)) * MAX_WAVE_DELAY;
+  // Keep the established 64x64 reveal speed. Larger worlds extend the same
+  // wave beyond the former boundary instead of renormalizing its duration.
+  const originalCornerDistance = distanceFromCenterPlatform(0, 0, WORLD_CONFIG);
+  return (distanceFromCenterPlatform(x, z, world.config) / originalCornerDistance) * MAX_WAVE_DELAY;
 }

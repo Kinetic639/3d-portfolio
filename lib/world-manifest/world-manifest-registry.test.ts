@@ -15,7 +15,9 @@ describe("world manifest registry", () => {
 
   it("lists and resolves the center-only portfolio manifest", () => {
     expect(listWorldManifestRegistryEntries()).toEqual([{ id: DEFAULT_WORLD_MANIFEST_ID }]);
-    expect(resolveWorldManifestSync(DEFAULT_WORLD_MANIFEST_ID).regions[0].mapId).toBe("portfolio-primary-flat");
+    const manifest = resolveWorldManifestSync(DEFAULT_WORLD_MANIFEST_ID);
+    expect(manifest.regions.find((region) => region.id === "center")?.mapId).toBe("portfolio-primary-flat");
+    expect(manifest.regions.find((region) => region.id === "north")?.mapId).toBe("portfolio-north");
   });
 
   it("rejects missing region map references", () => {

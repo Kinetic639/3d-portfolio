@@ -1,7 +1,7 @@
 import { listMapRegistryEntries, loadMapStateSync } from "@/lib/maps/map-registry";
 import {
   cloneWorldManifest,
-  createCenterOnlyWorldManifest,
+  createPortfolioWorldManifest,
   validateWorldManifest,
   type WorldManifest,
 } from "./world-manifest";
@@ -16,7 +16,7 @@ type BundledWorldManifest = {
 
 const BUNDLED_WORLD_MANIFESTS: BundledWorldManifest[] = [{
   id: DEFAULT_WORLD_MANIFEST_ID,
-  load: () => createCenterOnlyWorldManifest(),
+  load: () => createPortfolioWorldManifest(),
 }];
 
 export function listWorldManifestRegistryEntries() {

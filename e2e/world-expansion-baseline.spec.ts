@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { clickWorldEntryItem } from "./helpers";
 
-test("captures the Phase 1 runtime baseline", async ({ page }, testInfo) => {
+test("captures the Phase 5 composite runtime", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const experience = page.locator(".experience-shell");
@@ -11,9 +11,9 @@ test("captures the Phase 1 runtime baseline", async ({ page }, testInfo) => {
   await page.waitForTimeout(1_000);
 
   const metrics = await page.evaluate(() => window.__portfolioExperienceMetrics);
-  expect(metrics).toMatchObject({ logicalCells: 131_072, chunks: 16, phase: "explore" });
-  console.log("phase 1 runtime baseline", JSON.stringify(metrics));
-  await testInfo.attach("phase-1-runtime.png", {
+  expect(metrics).toMatchObject({ logicalCells: 1_179_648, chunks: 144, phase: "explore" });
+  console.log("phase 5 composite runtime", JSON.stringify(metrics));
+  await testInfo.attach("phase-5-composite-runtime.png", {
     body: await page.screenshot({ fullPage: true }),
     contentType: "image/png",
   });

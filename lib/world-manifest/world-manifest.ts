@@ -63,6 +63,17 @@ export function createCenterOnlyWorldManifest(mapId = "portfolio-primary-flat"):
   };
 }
 
+export function createPortfolioWorldManifest(): WorldManifest {
+  const manifest = createCenterOnlyWorldManifest();
+  manifest.regions.unshift({
+    id: "north",
+    ...WORLD_REGION_SLOTS.north,
+    mapId: "portfolio-north",
+    role: "scenery",
+  });
+  return manifest;
+}
+
 export function cloneWorldManifest(manifest: WorldManifest): WorldManifest {
   return {
     ...manifest,

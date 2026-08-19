@@ -88,6 +88,7 @@ import {
   loadMapStateSync,
   saveMapDraft,
 } from "@/lib/maps/map-registry";
+import { loadCompositeWorldStateSync } from "@/lib/world-manifest/composite-world-loader";
 import type { EditorLayerId, EditorLayerState, EditorViewportLayoutState, EntityTransformMode, MapEditorToolbarProps } from "@/components/experience/MapEditorToolbar";
 import { createBrowsingState, reduceBrowsingState, type BrowsingState } from "@/lib/portfolio/browsing-state";
 import { getShapeDefinition, getShapePitch, setShapePitch, type ShapeCategory, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
@@ -1083,9 +1084,11 @@ function renderPortfolioContent(content: NonNullable<ReturnType<typeof resolveCo
   );
 }
 
-function createInitialExperienceMapState(mapId: string) {
+function createInitialExperienceMapState(mapId: string, compositeWorld: boolean) {
   try {
-    const loadedMap = loadMapStateSync(mapId, { includeDevelopment: process.env.NODE_ENV !== "production" });
+    const loadedMap = compositeWorld
+      ? loadCompositeWorldStateSync()
+      : loadMapStateSync(mapId, { includeDevelopment: process.env.NODE_ENV !== "production" });
     return {
       loadedMap,
       terrain: createTerrainDataFromWorld(loadedMap.world),
@@ -1118,7 +1121,10 @@ function ExperienceScene({
   onMapUiStateChange: (state: MapUiState | null) => void;
   onCloseEditor: () => void;
 }) {
-  const initialState = useMemo(() => createInitialExperienceMapState(initialMapId), [initialMapId]);
+  const initialState = useMemo(
+    () => createInitialExperienceMapState(initialMapId, initialMapId === DEFAULT_AUTHORED_MAP_ID && !editorEnabled),
+    [editorEnabled, initialMapId],
+  );
   const [currentMap, setCurrentMap] = useState<MapDefinition>(() => editorEnabled ? ensureEditableZones(initialState.loadedMap.definition) : initialState.loadedMap.definition);
   const mapHistoryRef = useRef<{ undo: MapDefinition[]; redo: MapDefinition[] }>({ undo: [], redo: [] });
   const [terrain, setTerrain] = useState(initialState.terrain);

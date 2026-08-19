@@ -4,8 +4,8 @@
 - [x] Phase 1: Lock the seamless-world contract and capture baselines
 - [x] Phase 2: Make horizontal world dimensions configurable
 - [x] Phase 3: Define the world manifest and region-file contract
-- [ ] Phase 4: Assemble the current center map into one seamless world
-- [ ] Phase 5: Add one North region and prove the storage boundary
+- [x] Phase 4: Assemble the current center map into one seamless world
+- [x] Phase 5: Add one North region and prove the storage boundary
 - [ ] Phase 6: Run the existing editor against the composite world
 - [ ] Phase 7: Persist seamless edits back into region files
 - [ ] Phase 8: Add the remaining seven scenery regions
@@ -405,36 +405,36 @@ These timings are development/headless comparison baselines, not production budg
 
 ### Tasks
 
-- [ ] Create a composite loader that targets one `192x192x32` `VoxelWorld`.
-- [ ] Copy center terrain from local X/Z into global X/Z using offset `(64,64)`.
-- [ ] Convert center fluid and zone coordinates using the same offset.
-- [ ] Translate grid-owned markers and spawn points where required.
-- [ ] Preserve world-space entity transforms and camera values that must not move.
-- [ ] Preserve loader-platform world position and reveal timing.
-- [ ] Leave the eight unused areas empty during this compatibility phase.
+- [x] Create a composite loader that targets one `192x192x32` `VoxelWorld`.
+- [x] Copy center terrain from local X/Z into global X/Z using offset `(64,64)`.
+- [x] Convert center fluid and zone coordinates using the same offset.
+- [x] Translate grid-owned markers and spawn points where required.
+- [x] Preserve world-space entity transforms and camera values that must not move.
+- [x] Preserve loader-platform world position and reveal timing.
+- [x] Leave the eight unused areas empty during this compatibility phase.
 
 ### Exit Criteria
 
-- [ ] Runtime and editor screenshots match the current center-only baseline.
-- [ ] Every authored center cell maps back to its original region-local coordinate.
-- [ ] Soldier movement, water, markers, entities, navigation, and reveal remain unchanged.
+- [x] Runtime and editor screenshots match the current center-only baseline.
+- [x] Every authored center cell maps back to its original region-local coordinate.
+- [x] Soldier movement, water, markers, entities, navigation, and reveal remain unchanged.
 
 ## Phase 5: Add One North Region And Prove The Storage Boundary
 
 ### Tasks
 
-- [ ] Create one North `64x64x32` map with stone foundation and a simple test surface.
-- [ ] Add it to the manifest at grid position `(1,0)`.
-- [ ] Assemble it into global cells `X=64..127`, `Z=0..63`.
-- [ ] Confirm center and North cells are adjacent at global Z `63/64`.
-- [ ] Prove local-to-global-to-local round trips at the seam.
-- [ ] Keep both regions inside the same `VoxelWorld` and editor session.
+- [x] Create one North `64x64x32` map with stone foundation and a simple test surface.
+- [x] Add it to the manifest at grid position `(1,0)`.
+- [x] Assemble it into global cells `X=64..127`, `Z=0..63`.
+- [x] Confirm center and North cells are adjacent at global Z `63/64`.
+- [x] Prove local-to-global-to-local round trips at the seam.
+- [x] Keep both regions inside the same `VoxelWorld` and editor session.
 
 ### Exit Criteria
 
-- [ ] Center plus North load as one logical terrain volume.
-- [ ] No editor selection or tool code chooses an active region.
-- [ ] A direct cell edit on either side uses the same existing world API.
+- [x] Center plus North load as one logical terrain volume.
+- [x] No editor selection or tool code chooses an active region.
+- [x] A direct cell edit on either side uses the same existing world API.
 
 ## Phase 6: Run The Existing Editor Against The Composite World
 
