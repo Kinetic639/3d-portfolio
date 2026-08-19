@@ -2,7 +2,6 @@ import { BLOCK_IDS, getBlockDefinition, isRenderableBlock } from "@/lib/world/bl
 import type { VoxelWorld } from "@/lib/world/voxel-world";
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
 import { computeExpansionDelay, isLoaderPlatformTopCell } from "@/lib/world/reveal";
-import type { CellRotation, ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import { FACE_NEIGHBOUR_OFFSETS, getShapeDefinition, type FaceDirection, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
 
 export const SURFACE_TEXTURE_KINDS = {
@@ -63,26 +62,7 @@ export type SurfaceChunkMeshData = {
 
 const SURFACE_BLOCK_SIZE = 1.01;
 
-export type SurfaceMeshingCell = Readonly<{
-  blockId: number;
-  shapeId: ShapeId;
-  rotation: CellRotation;
-  state: number;
-}>;
-
-export type SurfaceMeshingContext = Readonly<{
-  cellOffset?: Readonly<{ x: number; z: number }>;
-  chunkIdPrefix?: string;
-  loaderPlatformEnabled?: boolean;
-  getCell?: (globalCoordinate: GridCoordinate) => SurfaceMeshingCell | null;
-}>;
-
-export function buildSurfaceChunkMesh(
-  world: VoxelWorld,
-  chunkX: number,
-  chunkZ: number,
-  context: SurfaceMeshingContext = {},
-): SurfaceChunkMeshData {
+export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ: number): SurfaceChunkMeshData {
   const startedAt = now();
   const chunkSize = world.config.chunkSize;
   const minGridX = chunkX * chunkSize;
@@ -128,7 +108,7 @@ export function buildSurfaceChunkMesh(
         // Position-based, not block/material-based — see isLoaderPlatformTopCell.
         // The loader platform keeps its own fixed look below regardless of
         // whatever block or material ends up painted onto that cell.
-        const isLoaderPlatformCell = context.loaderPlatformEnabled !== false && isLoaderPlatformTopCell(world, x, y, z);
+        const isLoaderPlatformCell = isLoaderPlatformTopCell(world, x, y, z);
 
         for (const face of shapeFaces) {
           const [dx, dy, dz] = FACE_NEIGHBOUR_OFFSETS[face.direction];
@@ -139,24 +119,22 @@ export function buildSurfaceChunkMesh(
           // computed once from the final settled world, so without this
           // exception these cells would render as if already flush with
           // their neighbors and the whole intro platform would disappear.
-          if (!isLoaderPlatformCell && occludesFace(world, x + dx, y + dy, z + dz, face, context)) {
+          if (!isLoaderPlatformCell && occludesFace(world, x + dx, y + dy, z + dz, face)) {
             continue;
           }
 
-          const worldPosition = offsetWorldPosition(world.gridToWorld(x, y, z), context.cellOffset);
-          const globalX = x + (context.cellOffset?.x ?? 0);
-          const globalZ = z + (context.cellOffset?.z ?? 0);
+          const worldPosition = world.gridToWorld(x, y, z);
           const vertexOffset = positions.length / 3;
           const color = hexToRgb(
             isLoaderPlatformCell
               ? getBlockDefinition(BLOCK_IDS.LoaderOrigin).developmentColor
               : getBlockDefinition(blockId).developmentColor,
           );
-          const variation = positiveModulo(globalX * 37 + globalZ * 17 + y * 11, 100) / 100;
+          const variation = ((x * 37 + z * 17 + y * 11) % 100) / 100;
           const textureKind = isLoaderPlatformCell
             ? SURFACE_TEXTURE_KINDS.None
             : getSurfaceTextureKind(blockId, face.direction, grassTopCovered);
-          const textureVariation = getTextureVariation(globalX, y, globalZ, textureKind);
+          const textureVariation = getTextureVariation(x, y, z, textureKind);
           const faceUvs = buildFaceUvs(face);
           const revealDelay = computeExpansionDelay(world, x, y, z);
           const centerFlag = isLoaderPlatformCell ? 1 : 0;
@@ -198,7 +176,7 @@ export function buildSurfaceChunkMesh(
   };
 
   return {
-    id: context.chunkIdPrefix ? `${context.chunkIdPrefix}:${world.getChunkId(chunkX, chunkZ)}` : world.getChunkId(chunkX, chunkZ),
+    id: world.getChunkId(chunkX, chunkZ),
     chunkX,
     chunkZ,
     positions: new Float32Array(positions),
@@ -220,8 +198,8 @@ export function buildSurfaceChunkMesh(
     triangles: faceMappings.length * 2,
     bounds,
     boundingBox: {
-      min: offsetWorldPosition(world.gridToWorld(minGridX, 0, minGridZ), context.cellOffset),
-      max: offsetWorldPosition(world.gridToWorld(maxGridX, world.config.height - 1, maxGridZ), context.cellOffset),
+      min: world.gridToWorld(minGridX, 0, minGridZ),
+      max: world.gridToWorld(maxGridX, world.config.height - 1, maxGridZ),
     },
     buildMs: Number((now() - startedAt).toFixed(3)),
   };
@@ -319,14 +297,14 @@ function isCellTopFullyCovered(world: VoxelWorld, x: number, y: number, z: numbe
   ).some((face) => face.direction === "ny" && face.occlusion === "full");
 }
 
-export function buildSurfaceChunkMeshes(world: VoxelWorld, context: SurfaceMeshingContext = {}) {
+export function buildSurfaceChunkMeshes(world: VoxelWorld) {
   const startedAt = now();
   const chunks: SurfaceChunkMeshData[] = [];
   const chunksPerAxis = world.config.width / world.config.chunkSize;
 
   for (let chunkZ = 0; chunkZ < chunksPerAxis; chunkZ += 1) {
     for (let chunkX = 0; chunkX < chunksPerAxis; chunkX += 1) {
-      chunks.push(buildSurfaceChunkMesh(world, chunkX, chunkZ, context));
+      chunks.push(buildSurfaceChunkMesh(world, chunkX, chunkZ));
     }
   }
 
@@ -336,66 +314,25 @@ export function buildSurfaceChunkMeshes(world: VoxelWorld, context: SurfaceMeshi
   };
 }
 
-function occludesFace(
-  world: VoxelWorld,
-  x: number,
-  y: number,
-  z: number,
-  face: ShapeFace,
-  context: SurfaceMeshingContext,
-) {
-  const cell = getMeshingCell(world, x, y, z, context);
-  if (!cell) return false;
+function occludesFace(world: VoxelWorld, x: number, y: number, z: number, face: ShapeFace) {
+  if (!world.isInsideWorld(x, y, z)) {
+    return false;
+  }
 
-  const definition = getBlockDefinition(cell.blockId);
+  const definition = getBlockDefinition(world.getBlock(x, y, z));
   if (!definition.renderable || !definition.solid || face.occlusion !== "full") {
     return false;
   }
 
-  const neighbourShape = getShapeDefinition(cell.shapeId);
+  const neighbourShape = getShapeDefinition(world.getShape(x, y, z));
   if (neighbourShape.fluid || !neighbourShape.solid) {
     return false;
   }
 
-  return neighbourShape.faces(cell.rotation, cell.state).some((neighbourFace) => (
+  return neighbourShape.faces(world.getRotation(x, y, z), world.getState(x, y, z)).some((neighbourFace) => (
     neighbourFace.occlusion === "full" &&
     neighbourFace.direction === oppositeDirection(face.direction)
   ));
-}
-
-function getMeshingCell(
-  world: VoxelWorld,
-  x: number,
-  y: number,
-  z: number,
-  context: SurfaceMeshingContext,
-): SurfaceMeshingCell | null {
-  if (world.isInsideWorld(x, y, z)) {
-    return {
-      blockId: world.getBlock(x, y, z),
-      shapeId: world.getShape(x, y, z),
-      rotation: world.getRotation(x, y, z),
-      state: world.getState(x, y, z),
-    };
-  }
-  if (!context.getCell || y < 0 || y >= world.config.height) return null;
-  return context.getCell({
-    x: x + (context.cellOffset?.x ?? 0),
-    y,
-    z: z + (context.cellOffset?.z ?? 0),
-  });
-}
-
-function offsetWorldPosition(position: WorldPosition, offset: SurfaceMeshingContext["cellOffset"]): WorldPosition {
-  return {
-    x: position.x + (offset?.x ?? 0),
-    y: position.y,
-    z: position.z + (offset?.z ?? 0),
-  };
-}
-
-function positiveModulo(value: number, divisor: number) {
-  return ((value % divisor) + divisor) % divisor;
 }
 
 function oppositeDirection(direction: SurfaceFaceDirection): SurfaceFaceDirection {

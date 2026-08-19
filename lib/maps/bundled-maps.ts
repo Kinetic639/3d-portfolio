@@ -18,7 +18,6 @@ import { groundEntityOnTerrain } from "@/lib/prefabs/prefab-placement";
 import type { PrefabDefinition, PrefabVariantDefinition } from "@/lib/prefabs/prefab-types";
 import { ROTATIONS, SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import portfolioPrimaryFlatMap from "./portfolio-primary-flat.map.json";
-import type { WorldRegionId } from "@/lib/world-layout/world-layout-types";
 
 const PHASE4_CREATED_AT = "2026-08-01T00:00:00.000Z";
 const PHASE5_CREATED_AT = "2026-08-02T00:00:00.000Z";
@@ -294,42 +293,6 @@ export function createPortfolioMainAuthoredV2MapDefinition(): MapDefinition {
 
 export function createPortfolioPrimaryFlatMapDefinition(): MapDefinition {
   return loadBundledMapDefinition(portfolioPrimaryFlatMap, "portfolio-primary-flat.map.json");
-}
-
-export function createPortfolioNorthSceneryMapDefinition(): MapDefinition {
-  return createPortfolioSceneryMapDefinition("north");
-}
-
-export function createPortfolioSceneryMapDefinition(regionId: Exclude<WorldRegionId, "center">): MapDefinition {
-  const world = new VoxelWorld();
-  for (let z = 0; z < WORLD_CONFIG.depth; z += 1) {
-    for (let x = 0; x < WORLD_CONFIG.width; x += 1) {
-      world.setBlock(x, 0, z, BLOCK_IDS.Riverbed);
-      world.setBlock(x, 1, z, BLOCK_IDS.Ground);
-    }
-  }
-  world.clearDirtyChunks();
-
-  return createMapDefinitionFromWorld({
-    id: `portfolio-scenery-${regionId}`,
-    name: `Portfolio ${regionId.split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join(" ")} Scenery`,
-    description: `Editable voxel source for the ${regionId} scenery region with a protected riverbed foundation.`,
-    kind: "portfolio",
-    runtimeMode: "dynamic-voxel",
-    world,
-    zones: [],
-    markers: [],
-    entities: [],
-    navigation: { nodes: [], edges: [], routes: [] },
-    spawnPoints: [],
-    cameraPresets: [],
-    presentation: { legendVisible: false },
-    metadata: {
-      createdAt: PRIMARY_FLAT_CREATED_AT,
-      updatedAt: PRIMARY_FLAT_CREATED_AT,
-      authoringVersion: "world-regions-phase-10",
-    },
-  });
 }
 
 function loadBundledMapDefinition(input: unknown, source: string): MapDefinition {

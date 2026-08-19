@@ -3,8 +3,6 @@ import {
   createPortfolioMainAuthoredV2MapDefinition,
   createPortfolioMainGreyboxBasicBackupMapDefinition,
   createPortfolioMainGreyboxMapDefinition,
-  createPortfolioNorthSceneryMapDefinition,
-  createPortfolioSceneryMapDefinition,
   createPortfolioPrimaryFlatMapDefinition,
   createPortfolioPhase4MapDefinition,
   createPortfolioV2PrefabShowcaseMapDefinition,
@@ -49,10 +47,6 @@ type BundledMapSource = {
 
 const BUNDLED_MAPS: BundledMapSource[] = [
   createBundledEntry(createPortfolioPrimaryFlatMapDefinition, "bundled:portfolio-primary-flat", false),
-  createBundledEntry(createPortfolioNorthSceneryMapDefinition, "bundled:portfolio-scenery-north", true),
-  ...(["north-west", "north-east", "west", "east", "south-west", "south", "south-east"] as const).map((regionId) => (
-    createBundledEntry(() => createPortfolioSceneryMapDefinition(regionId), `bundled:portfolio-scenery-${regionId}`, true)
-  )),
   createBundledEntry(createPortfolioMainAuthoredV2MapDefinition, "bundled:portfolio-main-authored-v2", false),
   createBundledEntry(createPortfolioMainGreyboxMapDefinition, "bundled:portfolio-main-greybox-v1", false),
   createBundledEntry(createPortfolioMainGreyboxBasicBackupMapDefinition, "bundled:portfolio-main-greybox-v1-basic-backup", true),
