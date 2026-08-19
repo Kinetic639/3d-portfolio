@@ -1,11 +1,54 @@
 import { describe, expect, it } from "vitest";
 import { BLOCK_IDS } from "./block-registry";
 import { EXPECTED_WORLD_STATS, VoxelWorld, createFlatVoxelWorld } from "./voxel-world";
-import { getWorldMaxY, WORLD_AIR_CELL_COUNT, WORLD_CELL_COUNT, WORLD_CONFIG, WORLD_FOUNDATION_CELL_COUNT, WORLD_SURFACE_CELL_COUNT } from "./world-config";
+import { COMPOSITE_WORLD_CONFIG, getWorldMaxY, WORLD_AIR_CELL_COUNT, WORLD_CELL_COUNT, WORLD_CONFIG, WORLD_FOUNDATION_CELL_COUNT, WORLD_SURFACE_CELL_COUNT } from "./world-config";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
 import { EMPTY_FLUID_CELL, FLUID_IDS } from "@/lib/fluids/fluid-types";
 
 describe("voxel world foundation", () => {
+  it("supports a blank 192 by 192 composite world without region concepts", () => {
+    const world = new VoxelWorld(COMPOSITE_WORLD_CONFIG);
+
+    expect(world.blocks).toHaveLength(192 * 192 * 32);
+    expect(world.getStats().chunks).toBe(144);
+    expect(world.createRenderChunks()).toHaveLength(144);
+    expect(world.getIndex(0, -12, 0)).not.toBeNull();
+    expect(world.getIndex(191, 19, 191)).not.toBeNull();
+    expect(world.getCoordinates(world.getIndex(191, 19, 191)!)).toEqual({ x: 191, y: 19, z: 191 });
+  });
+
+  it("preserves center-region world positions after the 64-cell composite offset", () => {
+    const region = new VoxelWorld(WORLD_CONFIG);
+    const composite = new VoxelWorld(COMPOSITE_WORLD_CONFIG);
+
+    for (const coordinate of [{ x: 0, y: -12, z: 0 }, { x: 31, y: 0, z: 31 }, { x: 63, y: 19, z: 63 }]) {
+      expect(composite.gridToWorld(coordinate.x + 64, coordinate.y, coordinate.z + 64)).toEqual(
+        region.gridToWorld(coordinate.x, coordinate.y, coordinate.z),
+      );
+    }
+  });
+
+  it("derives dirty neighbours from composite chunk counts", () => {
+    const world = new VoxelWorld(COMPOSITE_WORLD_CONFIG);
+    world.setBlock(175, 0, 80, BLOCK_IDS.Ground);
+
+    expect([...world.dirtyChunks].sort()).toEqual(["chunk-10-4", "chunk-10-5", "chunk-11-5"]);
+    expect(() => world.createRenderChunk(11, 11)).not.toThrow();
+    expect(() => world.createRenderChunk(12, 11)).toThrow(/out of bounds/);
+  });
+
+  it("rejects horizontal dimensions that cannot be partitioned into chunks", () => {
+    expect(() => new VoxelWorld({ ...WORLD_CONFIG, width: 65 })).toThrow(/divisible by chunk size/);
+  });
+
+  it("derives independent X and Z chunk counts for rectangular worlds", () => {
+    const world = new VoxelWorld({ ...WORLD_CONFIG, depth: 32 });
+    expect(world.getStats().chunks).toBe(8);
+    expect(world.createRenderChunks()).toHaveLength(8);
+    expect(() => world.createRenderChunk(3, 1)).not.toThrow();
+    expect(() => world.createRenderChunk(3, 2)).toThrow(/out of bounds/);
+  });
+
   it("allocates the complete logical volume in a compact typed array", () => {
     const world = createFlatVoxelWorld();
 

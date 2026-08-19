@@ -1,31 +1,29 @@
 # Progress Tracker
 
-- [x] Phase 0: Lock terminology, scope, invariants, and budgets
-- [x] Phase 1: Introduce WorldLayout and WorldRegion contracts
-- [x] Phase 2: Add global, region, chunk, and cell coordinate utilities
-- [x] Phase 3: Wrap the existing map as the unchanged center region
-- [x] Phase 4: Add and persist one North scenery region
-- [x] Phase 5: Make Center-to-North terrain rendering seamless
-- [x] Phase 6: Introduce layout-level editor selection
-- [x] Phase 7: Add Show All, Focus, Isolate, and region overlays
-- [x] Phase 8: Support normal terrain authoring and persistence in scenery
-- [x] Phase 9: Support cross-region terrain brushes and atomic undo
-- [x] Phase 10: Expand the proven architecture to all nine regions
-- [ ] Phase 11: Separate runtime capabilities by region role
-- [ ] Phase 12: Add affordable authored scenery-water behavior
-- [ ] Phase 13: Extend the center-originating reveal across the layout
-- [ ] Phase 14: Profile, optimize, and validate the expanded world
-- [ ] Phase 15: Design terrain baking as a separate follow-up feature
+- [x] Phase 0: Expand and migrate the vertical world range
+- [x] Phase 1: Lock the seamless-world contract and capture baselines
+- [x] Phase 2: Make horizontal world dimensions configurable
+- [x] Phase 3: Define the world manifest and region-file contract
+- [ ] Phase 4: Assemble the current center map into one seamless world
+- [ ] Phase 5: Add one North region and prove the storage boundary
+- [ ] Phase 6: Run the existing editor against the composite world
+- [ ] Phase 7: Persist seamless edits back into region files
+- [ ] Phase 8: Add the remaining seven scenery regions
+- [ ] Phase 9: Make rendering seamless across storage boundaries
+- [ ] Phase 10: Apply runtime capabilities from manifest roles
+- [ ] Phase 11: Extend liquids and reveal into scenery
+- [ ] Phase 12: Profile, optimize, and validate the complete source world
+- [ ] Phase 13: Design and implement production scenery baking separately
 
-Tracker rule: check a phase only after every task and exit criterion in that phase is complete and its automated tests pass. A phase awaiting visual, performance, persistence, or regression verification remains unchecked.
+Tracker rule: check a phase only after its implementation, automated tests, persistence checks, and relevant visual or performance verification are complete. Planning a phase does not complete it.
 
-# 3x3 World Region Expansion Implementation Plan
+# Seamless 3x3 World Expansion Plan
 
 ## Objective
 
-Expand the visible landscape from one 64x64x12 map into a 3x3 arrangement of nine 64x64x12 regions while preserving the existing 16x16 terrain-chunk implementation.
+Expand the current `64x64x32` world into one seamless `192x192x32` authoring world.
 
-The existing map remains the central playable region without changing its terrain, liquids, objects, navigation, coordinates, loader blocks, or current behavior. The eight surrounding regions are complete voxel terrain sources in the editor but scenery-only at runtime.
+The source world is persisted as nine `64x64x32` region map files plus one manifest, but those files are storage partitions only. Once loaded, the editor and terrain systems operate on one `VoxelWorld`, one `MapEditorSession`, one coordinate space, and one undo history.
 
 ```text
 [ north-west ][ north  ][ north-east ]
@@ -33,528 +31,588 @@ The existing map remains the central playable region without changing its terrai
 [ south-west ][ south  ][ south-east ]
 ```
 
-The resulting visible landscape is 192x192x12. It must read as one continuous world rather than nine adjacent maps.
+The existing authored map becomes the center partition without changing its visible world position. The eight surrounding partitions provide distant scenery. At runtime, the character and camera remain constrained to the center area even though the complete landscape is visible.
+
+## Fundamental Model
+
+```text
+WorldManifest
+  -> references nine region map files
+  -> assigns role and runtime capabilities
+
+CompositeWorldLoader
+  -> loads each 64x64x32 region
+  -> offsets its local X/Z cells into global X/Z
+  -> creates one 192x192x32 VoxelWorld
+  -> creates one editor session
+
+CompositeWorldSaver
+  -> reads the one edited world
+  -> partitions cells and region-owned metadata
+  -> saves nine independent region files
+```
+
+The editor must not know that terrain is stored in nine files during ordinary editing. A brush crossing a region boundary is an ordinary brush operating on adjacent global cells.
+
+## Coordinate Model
+
+The composite world uses these logical coordinates:
+
+```text
+X: 0..191
+Y: -12..19
+Z: 0..191
+```
+
+Each persisted region uses local coordinates:
+
+```text
+X: 0..63
+Y: -12..19
+Z: 0..63
+```
+
+The center region occupies global cells:
+
+```text
+X: 64..127
+Z: 64..127
+```
+
+Mapping the existing center cell `(x, y, z)` to `(x + 64, y, z + 64)` preserves its Three.js world position when the composite world is centered around `192x192`:
+
+```text
+old world X = x - 31.5
+new world X = (x + 64) - 95.5
+new world X = x - 31.5
+```
+
+The same applies to Z. Existing terrain, objects, camera targets, loader blocks, water, and gameplay therefore remain visually stationary.
 
 ## Core Invariants
 
-1. `chunk` continues to mean the existing 16x16x12 terrain/render subdivision.
-2. `WorldRegion` means one 64x64x12 authoring area containing the existing chunk structure.
-3. `WorldLayout` means the higher-level 3x3 arrangement of regions.
-4. All nine regions are normal editable voxel terrain in the editor.
-5. Only `center` receives full gameplay capabilities at runtime.
-6. The current center map document and local coordinates remain unchanged.
-7. Editor Show All can display and edit all nine voxel regions together.
-8. Lazy hydration may reduce work but must never prevent Show All.
-9. Terrain baking is not part of the initial implementation.
-10. The architecture must allow rendering to be replaced later without replacing source authoring data.
-11. Current center reveal timing and loader behavior must remain unchanged.
-12. The reveal must eventually continue beyond the center without restarting at region boundaries.
+1. Runtime and editor terrain are one `192x192x32` logical world.
+2. Region files are persistence partitions, not separate interactive worlds.
+3. The editor owns one `MapEditorSession` and one `VoxelWorld`.
+4. Existing brush implementations continue operating on normal world coordinates.
+5. One brush stroke produces one atomic undo command, including across file boundaries.
+6. There is no layout-level selection and no region-focused editing mode.
+7. There are no Show All, Focus, Isolate, or ghost-region controls.
+8. Existing editor tools and their UI remain visually and behaviorally consistent.
+9. The center map retains its authored data and visible positions.
+10. All regions share the same vertical bounds: `minY=-12`, `height=32`.
+11. Newly created regions use stone at `Y=-12..-1` and their authored surface at or above `Y=0`.
+12. Terrain meshing, texture variation, water, and reveal use global coordinates after assembly.
+13. Region roles affect runtime capabilities, not editor terrain behavior.
+14. Baking is a later output representation, not part of source authoring.
 
-## Region Capability Baseline
+## Explicitly Rejected Architecture
 
-### Center Region
+The implementation must not reintroduce:
 
-- Editable voxel terrain.
-- Terrain and liquid rendering.
-- Liquid authoring and simulation.
-- Navigation and click-to-move.
+- One active `MapEditorSession` per region.
+- A `WorldLayoutEditor` coordinating nine editors.
+- Cross-session brush dispatch.
+- Region-specific undo stacks.
+- Layout selection as a prerequisite for terrain editing.
+- Show All, Focus, Isolate, or ghosting as core editor modes.
+- Separate raycast and selection paths for each region.
+- Region boundaries that affect brush footprints.
+- Runtime hydration state inside terrain-authoring commands.
+- Baking abstractions before the seamless source world is stable.
+
+## Manifest Contract
+
+The manifest owns world composition and policy. It does not contain terrain cell arrays.
+
+Illustrative shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "portfolio-world",
+  "dimensions": {
+    "regionsX": 3,
+    "regionsZ": 3,
+    "regionWidth": 64,
+    "regionDepth": 64,
+    "minY": -12,
+    "height": 32
+  },
+  "centerRegionId": "center",
+  "regions": [
+    {
+      "id": "north-west",
+      "gridX": 0,
+      "gridZ": 0,
+      "mapId": "portfolio-north-west",
+      "role": "scenery"
+    },
+    {
+      "id": "center",
+      "gridX": 1,
+      "gridZ": 1,
+      "mapId": "portfolio-primary-flat",
+      "role": "playable"
+    }
+  ]
+}
+```
+
+Required validation:
+
+- Exactly nine unique slots for the completed portfolio world.
+- Exactly one playable center region.
+- No duplicate IDs, map IDs, or grid positions.
+- Grid positions remain within `0..2` on both axes.
+- Every region has matching `64x64x32` bounds.
+- Every region uses `minY=-12`.
+- Missing files and invalid maps fail with region-specific errors.
+
+Future optional settings can be added to manifest entries without changing the region map schema, for example:
+
+- Runtime visibility.
+- Collision participation.
+- Navigation participation.
+- Liquid simulation mode.
+- Reveal participation.
+- Baked asset reference.
+- Level-of-detail policy.
+
+## Data Ownership
+
+### Region Map Files
+
+Each region file owns:
+
+- Terrain blocks, shapes, rotations, and state.
+- Fluid source data belonging to cells in that region.
+- Zone assignments for that region.
+- Scenery entities authored in that region.
+- Region-specific metadata.
+
+### Manifest
+
+The manifest owns:
+
+- Region placement.
+- Region role.
+- Map-file references.
+- Center/playable designation.
+- Runtime capability settings.
+- Future baked representation references.
+
+### Center Gameplay Data
+
+The center map continues to own current gameplay data unless a later requirement justifies moving a specific field:
+
+- Spawn points.
+- Navigation graph.
+- Portfolio markers and interaction anchors.
+- Gameplay entities.
+- Camera presets.
+
+Scenery maps may own decorative entities but do not automatically participate in gameplay systems.
+
+## Save Semantics
+
+The editor presents one map, but saving is a coordinated multi-file operation:
+
+1. Snapshot the composite world and editor metadata.
+2. Partition terrain by global X/Z into nine local-coordinate documents.
+3. Partition fluids, zones, and region-owned entities using the same ownership rule.
+4. Validate all nine generated documents before writing any of them.
+5. Write drafts or files through one save transaction where the environment permits it.
+6. Report partial-write failures explicitly; never silently leave a mixed revision.
+7. Mark the composite editor clean only after every region save succeeds.
+
+Undo and redo remain entirely in the composite editor session. They are unrelated to how a later save partitions the data.
+
+## Runtime Capability Model
+
+### Playable Center
+
+- Terrain and water rendering.
+- Character navigation and click-to-move.
 - Collision and terrain-surface queries.
-- Entities, triggers, zones, and portfolio interaction.
-- Terrain and placeable-object reveal participation.
+- Portfolio markers, triggers, and interactions.
+- Gameplay entities and animation.
+- Camera and character movement constraints.
+- Full authored reveal behavior.
 
 ### Scenery Regions
 
-- Editable voxel terrain in the editor.
-- Terrain shapes, materials, textures, and elevation tools.
-- Terrain rendering and lighting.
-- Authored scenery objects and explicit lightweight animations.
-- Authored water presentation without continuous runtime simulation.
-- Terrain and appropriate scenery-object reveal participation.
+- Terrain and water rendering.
+- Decorative scenery entities.
+- Reveal participation.
+- Optional lightweight authored animation.
 
-Scenery regions do not receive character navigation, gameplay collision, click-to-move destinations, triggers, portfolio interaction, runtime terrain editing, normal gameplay selection, NPC simulation, or continuous liquid simulation.
+Scenery regions do not receive normal gameplay navigation, character destinations, portfolio interactions, triggers, continuous NPC simulation, or editor-like runtime mutation.
 
-## Non-Goals For The Initial Region Feature
+These policies are filters over one composite world. They must not require nine runtime worlds.
 
-- Terrain baking or a baked asset file format.
-- Baked reveal shaders or reveal-to-baked swapping.
-- Camera and character boundary redesign.
-- Final authored mountains, forests, railway, waterfalls, or scenery props.
-- Weather, wind, clouds, day/night, environment zones, or ambient audio.
-- Cross-region gameplay navigation.
-- Full runtime fluid simulation across scenery regions.
-- Infinite or streamed worlds.
-- Changing the existing 16x16 chunk size.
-- Replacing the existing center map schema with a 192x192 map.
+## Performance Strategy
 
-## Existing Architecture Baseline
+The source editor can afford a larger logical world because logical cells are compact typed-array data and editing is local. Performance work should focus on rendered and simulated content:
 
-- `lib/world/world-config.ts` defines the fixed 64x64x12 region dimensions and 16-cell chunk size.
-- `lib/world/voxel-world.ts` stores cells, fluids, zones, dirty chunks, coordinate conversion, and render-chunk creation for one 64x64 world.
-- `lib/maps/map-definition.ts` validates and serializes one fixed-size map including terrain, fluids, entities, navigation, and presentation data.
-- `lib/editor/map-editor.ts` owns one `VoxelWorld`, one undo/redo history, entities, saved state, and water authoring behavior.
-- `lib/terrain/surface-mesher.ts` builds surface geometry one existing 16x16 chunk at a time and currently treats cells outside its `VoxelWorld` as empty.
-- `lib/terrain/terrain.ts` builds terrain, surface, and water render data for one world.
-- `lib/world/reveal.ts` identifies the center 2x2 loader platform and derives reveal delay from region-local coordinates.
-- `components/experience/PortfolioExperience.tsx` currently orchestrates one world for rendering, editor selection, liquid tools, surface queries, navigation, soldier movement, reveal, entities, and performance reporting.
+- Continue using existing `16x16` internal render chunks.
+- A `192x192` world contains `12x12 = 144` horizontal render chunks.
+- Rebuild only dirty chunks touched by an edit.
+- Keep surface meshing restricted to exposed faces.
+- Avoid gameplay collision and navigation work outside the center bounds.
+- Avoid continuous fluid simulation in settled scenery water.
+- Frustum-cull scenery chunks.
+- Measure reveal and editor rebuild costs before adding abstractions.
+- Bake scenery only after the complete voxel source workflow is correct.
 
-## Target Architecture
+Production baking remains valuable because the eight scenery regions are visual-only. It is not a justification for making the source editor region-aware.
+
+# Implementation Phases
+
+## Phase 0: Expand And Migrate The Vertical World Range
+
+Status: complete in commit `d0b4faf`.
+
+Completed behavior:
+
+- [x] Expanded the world from `Y=0..11` to `Y=-12..19`.
+- [x] Added storage-index translation for negative logical Y.
+- [x] Preserved all existing authored logical coordinates and world positions.
+- [x] Added stone foundation at `Y=-12..-1`.
+- [x] Kept existing authored terrain at and above `Y=0`.
+- [x] Updated editor brushes, meshing, water, selection, camera bounds, and serialization.
+- [x] Migrated `portfolio-primary-flat.map.json` to schema version 4.
+- [x] Verified all 8,936 authored edits and non-terrain map data were preserved.
+- [x] Passed the complete automated suite and production build.
+
+## Phase 1: Lock The Seamless-World Contract And Capture Baselines
+
+### Tasks
+
+- [x] Record the current center map checksum and semantic data counts.
+- [x] Capture screenshots of runtime, reveal completion, and key editor views.
+- [x] Record editor load time, surface build time, draw calls, memory, and idle frame time.
+- [x] Lock the global and region-local coordinate formulas.
+- [x] Lock center gameplay bounds in global coordinates.
+- [x] Confirm that the editor UX remains one seamless map with no region controls.
+- [x] Document which center metadata remains local during persistence conversion.
+
+### Locked Baseline
+
+Source map: `lib/maps/portfolio-primary-flat.map.json` at commit `d0b4faf`.
 
 ```text
-WorldLayout
-  WorldRegion north-west  -> VoxelWorld -> existing 16x16 chunks
-  WorldRegion north       -> VoxelWorld -> existing 16x16 chunks
-  WorldRegion north-east  -> VoxelWorld -> existing 16x16 chunks
-  WorldRegion west        -> VoxelWorld -> existing 16x16 chunks
-  WorldRegion center      -> existing map and VoxelWorld
-  WorldRegion east        -> VoxelWorld -> existing 16x16 chunks
-  WorldRegion south-west  -> VoxelWorld -> existing 16x16 chunks
-  WorldRegion south       -> VoxelWorld -> existing 16x16 chunks
-  WorldRegion south-east  -> VoxelWorld -> existing 16x16 chunks
+SHA-256                 0a4785001f9ddce7f471ed4794d354404b48d9618d431ab4c2f06bf5a89788c5
+File bytes              844,000
+Block edits             8,936
+Fluid sources           0
+Settled fluid cells     0
+Zone definitions        10
+Zone assignments        688
+Markers                  0
+Placed entities          2
+Entity groups            0
+Navigation nodes         0
+Navigation edges         0
+Navigation routes        0
+Spawn points             1
+Camera presets           1
 ```
 
-Source documents remain independent from runtime rendering. Initially every visible region uses the current voxel surface-mesh renderer. A later baker may replace that renderer while retaining the same source maps, layout coordinates, materials, liquids, and center gameplay metadata.
+The reproducible Playwright capture is `e2e/world-expansion-baseline.spec.ts`. It attaches full-page runtime and editor screenshots to the test report. A Chromium development/headless run at `1440x900` recorded:
 
-## Phase 0: Lock Terminology, Scope, Invariants, And Budgets
+```text
+Logical cells            131,072
+Air cells                 69,504
+Non-air blocks             61,568
+Horizontal chunks              16
+Visible / culled chunks      14 / 2
+Surface quads              15,454
+Surface triangles          30,908
+Runtime draw calls              21
+Runtime frame sample       126.8 ms
+Runtime surface build      402.8 ms
+Editor draw calls               33
+Editor frame sample         93.3 ms
+Editor surface build       418.5 ms
+Editor ready              18,183 ms
+Editor used JS heap       131,000,000 bytes
+```
 
-### Tasks
+These timings are development/headless comparison baselines, not production budgets. They must be compared under the same environment.
 
-- [x] Adopt `WorldLayout`, `WorldRegion`, and existing `chunk` terminology.
-- [x] Record the nine stable region IDs and their grid offsets.
-- [x] Record the center-data preservation invariants.
-- [x] Define editor and runtime capability matrices.
-- [x] Confirm scenery regions initially remain 64x64x12.
-- [x] Define initial CPU, memory, draw-call, and reveal-frame budgets.
-- [x] Capture current center-map persistence, mesh, reveal, and performance baselines.
-- [x] Decide whether region files are embedded in a layout document or referenced by stable map IDs.
-- [x] Decide how missing or unloaded scenery regions are represented.
+### Locked Coordinates And Ownership
 
-### Locked Decisions
-
-- One `WorldLayoutDefinition` references independent region map documents by stable `mapId`; it does not embed or concatenate their cell arrays.
-- A region omitted from a layout is not part of that layout. A referenced region can independently be `unloaded`, `loading`, `ready`, or `error` at runtime or in the editor.
-- Center-only layouts are valid for backward compatibility. A complete authored portfolio layout contains all nine fixed slots.
-- Region IDs own their immutable offsets and roles. Documents do not persist arbitrary offsets that could overlap or drift.
-- `center` is the only playable slot. The other eight fixed slots are scenery.
-- Every region initially uses the existing 64x64x12 map dimensions and contains 16 existing 16x16 render chunks.
-- Editor Show All must be capable of hydrating all nine regions. Lazy hydration controls when work occurs, not whether full-world authoring is possible.
-- Region capability selection is explicit. Loading scenery source data must not implicitly register navigation, interaction, collision, or continuous simulation.
-- Terrain baking remains a later rendering concern and does not alter the layout or region source contracts introduced here.
-
-### Initial Budgets And Baseline
-
-- Current Center structural baseline: 49,152 logical cells, 4,096 surface columns, and 16 internal render chunks.
-- Complete hydrated editor ceiling: 442,368 logical cells, 36,864 surface columns, and 144 internal render chunks before later baking.
-- Phase 1 runtime budget: zero additional hydrated worlds, render chunks, draw calls, frame callbacks, raycasts, or GPU allocations. The new contracts must be inert until a layout loader is introduced.
-- Incremental editing budget: a local edit may rebuild affected 16x16 chunks and seam neighbors only; it must not rebuild nine complete regions.
-- Runtime gameplay budget: scenery must add zero navigation, collision, gameplay selection, entity-grounding, or continuous liquid-simulation work.
-- Reveal budget: Center timing is a regression invariant. Expanded reveal performance will be measured before Phase 13 is accepted rather than guessed during the contract phase.
-- Automated baseline recorded before Phase 1: 32 test files, 216 tests, 31 files and 215 tests passing in 88.43 seconds. One pre-existing failure remains in `PortfolioMainAuthoredV2.test.ts` because it expects zero entities while the current authored map contains two.
-- The repository benchmark harness already covers idle overview, scripted camera, dense close-up, and expansion reveal. Comparable browser/GPU results will be captured in Phase 14 when renderable regions exist; Phase 1 intentionally has no render-path delta to benchmark.
+- Region-local to global: `globalX = localX + gridX * 64`, `globalZ = localZ + gridZ * 64`.
+- Global to region slot: `gridX = floor(globalX / 64)`, `gridZ = floor(globalZ / 64)`.
+- Global to region-local: `localX = globalX % 64`, `localZ = globalZ % 64`.
+- Center source cells add `(64,64)` during assembly and subtract `(64,64)` during persistence.
+- Center gameplay cell bounds are inclusive global X/Z `64..127`.
+- Center gameplay world-space ground bounds remain `-32..32` on X/Z; current cell centers remain `-31.5..31.5`.
+- Terrain edits, shapes, fluids, and zone columns are region-local in files and global in the composite session.
+- Grid markers and grid spawn points remain region-local in the center file and receive the center offset during assembly.
+- Entity transforms, navigation positions, and camera presets remain world-space values and are not translated.
+- Center gameplay metadata remains owned by the center map. Scenery files cannot redefine center gameplay defaults.
+- The editor remains one seamless surface with no region-selection controls.
 
 ### Exit Criteria
 
-- [x] Terminology is unambiguous in code and documentation.
-- [x] Baseline tests and applicable contract-phase benchmark results are recorded before implementation.
-- [x] No unresolved schema ownership or lifecycle decision blocks Phase 1.
+- [x] Center preservation can be verified automatically and visually.
+- [x] No unresolved coordinate or ownership decision blocks implementation.
 
-## Phase 1: Introduce WorldLayout And WorldRegion Contracts
-
-### Expected Modules
-
-- `lib/world-layout/world-layout-types.ts`
-- `lib/world-layout/world-region.ts`
-- `lib/world-layout/world-layout.test.ts`
+## Phase 2: Make Horizontal World Dimensions Configurable
 
 ### Tasks
 
-- [x] Define the nine `WorldRegionId` values.
-- [x] Define `WorldRegionRole` as `playable | scenery`.
-- [x] Define immutable region grid offsets.
-- [x] Define `WorldLayoutDefinition` independently from hydrated worlds.
-- [x] Define runtime/editor region state without embedding React or Three.js objects.
-- [x] Validate exactly one center region and valid unique offsets.
-- [x] Prevent arbitrary components from inventing region offsets.
-
-### Exit Criteria
-
-- [x] A center-only layout and a complete 3x3 layout validate correctly.
-- [x] Duplicate IDs, map references, or invalid playable-region assignments are rejected; offsets are fixed by unique region ID and cannot be supplied by documents.
-- [x] No current world behavior has changed.
-
-## Phase 2: Add Global, Region, Chunk, And Cell Coordinates
-
-### Expected Modules
-
-- `lib/world-layout/world-layout-coordinates.ts`
-- `lib/world-layout/world-layout-coordinates.test.ts`
-
-### Tasks
-
-- [x] Convert region-local cells to global layout cells.
-- [x] Convert global layout cells to region ID and local cells.
-- [x] Convert region-local cells to existing 16x16 chunk and chunk-local cells.
-- [x] Convert local cells to continuous Three.js world positions.
-- [x] Convert Three.js positions back to region-local selection coordinates.
-- [x] Use correct signed floor division and modulo for North and West.
-- [x] Define behavior for coordinates outside the 3x3 layout.
-- [x] Add centralized region-offset and boundary ownership lookup; neighbor-cell traversal builds on these primitives in Phase 5.
+- [x] Remove assumptions that width and depth are always 64.
+- [x] Derive horizontal chunk counts from each `WorldConfig` instance.
+- [x] Support both `64x64x32` region worlds and `192x192x32` composite worlds.
+- [x] Replace global chunk-count constants in instance methods with config-derived values.
+- [x] Verify cell indexing, world conversion, chunk lookup, dirty propagation, and bounds at 192 cells.
+- [x] Keep block size and internal chunk size unchanged.
 
 ### Required Tests
 
-- [x] All four corners of every region round-trip correctly.
-- [x] Center local coordinates preserve current world positions exactly.
-- [x] Center/North, Center/South, Center/East, and Center/West boundaries are adjacent by one cell.
-- [x] Corner transitions resolve correctly across diagonal regions.
-- [x] Existing 16x16 chunk coordinates remain unchanged within a region.
+- [x] All corner cells round-trip for both sizes.
+- [x] The composite world contains exactly 144 horizontal render chunks.
+- [x] Center local cells retain their existing Three.js positions after the `+64` offset.
+- [x] Dirty propagation remains local at ordinary chunk boundaries.
 
 ### Exit Criteria
 
-- [x] All new layout coordinate calculations flow through the centralized utilities.
-- [x] The center map has zero coordinate drift.
+- [x] A blank `192x192x32` world works without any region concepts.
+- [x] Existing `64x64x32` maps still load and pass regressions.
 
-## Phase 3: Wrap The Existing Map As The Unchanged Center Region
+## Phase 3: Define The World Manifest And Region-File Contract
 
 ### Tasks
 
-- [x] Create a center-only layout compatibility path.
-- [x] Reference the existing map as `center` without rewriting its document.
-- [x] Preserve block, shape, rotation, state, fluid, zone, entity, navigation, spawn, and camera data.
-- [x] Preserve the center region scene transform at the existing origin.
-- [x] Keep legacy single-map loading functional during the transition.
-- [x] Ensure save operations do not rewrite untouched center data unnecessarily.
-
-### Regression Tests
-
-- [x] Serialized center terrain is semantically identical.
-- [x] The four loader cells remain at the same local and world coordinates.
-- [x] Current liquid source and settled data are preserved with the unchanged map definition.
-- [x] Navigation and soldier click-to-move remain unchanged because the experience continues using the existing Center map path.
-- [x] Current terrain reveal metadata remains identical and the object-reveal path is untouched.
-- [x] Existing editor save/load and undo/redo code paths remain untouched and their targeted tests pass.
+- [x] Add manifest types, parser, validator, and cloning utilities.
+- [x] Define the nine stable region IDs and grid positions.
+- [x] Reference region documents by stable map ID.
+- [x] Define `playable` and `scenery` roles.
+- [x] Validate matching vertical and local horizontal bounds.
+- [x] Add bundled-manifest registry support.
+- [x] Keep map documents independently loadable for diagnostics.
 
 ### Exit Criteria
 
-- [x] The center-only compatibility loader produces the same map, voxel data, world positions, and reveal metadata.
-- [x] No scenery-specific code path is required by existing maps.
+- [x] Valid center-only test fixtures and complete manifests parse deterministically.
+- [x] Invalid slots, duplicate references, mismatched dimensions, and missing maps fail clearly.
+- [x] No editor or renderer behavior changes in this phase.
 
-## Phase 4: Add And Persist One North Scenery Region
-
-### Expected Modules
-
-- `lib/world-layout/world-layout-document.ts`
-- `lib/world-layout/world-layout-loader.ts`
-- corresponding schema, migration, and loading tests
+## Phase 4: Assemble The Current Center Map Into One Seamless World
 
 ### Tasks
 
-- [x] Create a flat North 64x64x12 map source.
-- [x] Place North exactly one region width beyond Center through the centralized coordinate contract.
-- [x] Add layout serialization and validation.
-- [x] Load Center and North independently into region-scoped `VoxelWorld` instances.
-- [x] Save and reload edits in North without modifying Center.
-- [x] Define deterministic region-specific error state for a missing North document.
-- [x] Keep North free of gameplay systems at runtime; Phase 4 only hydrates map state on explicit request and does not register it with the experience.
+- [ ] Create a composite loader that targets one `192x192x32` `VoxelWorld`.
+- [ ] Copy center terrain from local X/Z into global X/Z using offset `(64,64)`.
+- [ ] Convert center fluid and zone coordinates using the same offset.
+- [ ] Translate grid-owned markers and spawn points where required.
+- [ ] Preserve world-space entity transforms and camera values that must not move.
+- [ ] Preserve loader-platform world position and reveal timing.
+- [ ] Leave the eight unused areas empty during this compatibility phase.
 
 ### Exit Criteria
 
-- [x] Center and North load, save, and reload independently; rendering begins in Phase 5.
-- [x] Center remains behaviorally identical.
-- [x] Persistence and resolver errors identify the affected region.
+- [ ] Runtime and editor screenshots match the current center-only baseline.
+- [ ] Every authored center cell maps back to its original region-local coordinate.
+- [ ] Soldier movement, water, markers, entities, navigation, and reveal remain unchanged.
 
-## Phase 5: Make Center-To-North Terrain Rendering Seamless
-
-### Expected Changes
-
-- `lib/terrain/surface-mesher.ts`
-- `lib/terrain/terrain.ts`
-- `lib/world/voxel-world.ts` only where narrow neighbor hooks are required
+## Phase 5: Add One North Region And Prove The Storage Boundary
 
 ### Tasks
 
-- [x] Provide the mesher with read-only adjacent-region cell lookup.
-- [x] Cull faces hidden by terrain in the neighboring region.
-- [x] Retain faces when no neighboring region or occluding cell exists.
-- [x] Dirty the neighboring boundary chunk when an edge cell changes.
-- [x] Use global layout coordinates for deterministic texture variation.
-- [x] Preserve shape rotation, UV orientation, grass-side rules, and material IDs across the seam.
-- [x] Keep region-aware terrain meshing separate from the existing water mesher; cross-region water remains explicitly deferred to Phase 12.
-- [x] Namespace scenery mesh IDs while preserving current Center IDs required by existing editor raycasting.
-- [x] Render North through the existing shared surface material without collision, gameplay click handling, or scenery-water simulation.
-- [x] Fill North level `y=0` completely with Riverbed and level `y=1` completely with Ground, leaving `y=2` and above empty for authoring.
+- [ ] Create one North `64x64x32` map with stone foundation and a simple test surface.
+- [ ] Add it to the manifest at grid position `(1,0)`.
+- [ ] Assemble it into global cells `X=64..127`, `Z=0..63`.
+- [ ] Confirm center and North cells are adjacent at global Z `63/64`.
+- [ ] Prove local-to-global-to-local round trips at the seam.
+- [ ] Keep both regions inside the same `VoxelWorld` and editor session.
+
+### Exit Criteria
+
+- [ ] Center plus North load as one logical terrain volume.
+- [ ] No editor selection or tool code chooses an active region.
+- [ ] A direct cell edit on either side uses the same existing world API.
+
+## Phase 6: Run The Existing Editor Against The Composite World
+
+### Tasks
+
+- [ ] Pass the composite `VoxelWorld` to the normal `MapEditorSession`.
+- [ ] Keep the existing toolbar, tools, brush visuals, and shortcuts.
+- [ ] Expand camera framing and raycasting to the composite bounds.
+- [ ] Keep normal selection behavior across all global cells.
+- [ ] Verify paint, erase, raise, lower, flatten, fill, clear, paths, zones, shapes, and liquids.
+- [ ] Verify one history stack and one dirty-state indicator.
+- [ ] Do not add region UI.
+
+### Exit Criteria
+
+- [ ] Existing tools behave normally in center and North.
+- [ ] A brush footprint crossing Z `63/64` is continuous and atomic.
+- [ ] Undo and redo restore the entire cross-boundary stroke in one action.
+
+## Phase 7: Persist Seamless Edits Back Into Region Files
+
+### Tasks
+
+- [ ] Implement deterministic global-to-region partitioning.
+- [ ] Convert partitioned cells back to local X/Z coordinates.
+- [ ] Partition fluids, zones, and region-owned entities.
+- [ ] Preserve center-only gameplay metadata without duplication.
+- [ ] Validate every output document before saving.
+- [ ] Add coordinated save failure reporting.
+- [ ] Reload the nine-file result and compare it with the pre-save composite world.
 
 ### Required Tests
 
-- [x] Two full cubes across the seam do not emit internal faces.
-- [x] Editing either boundary cell dirties both relevant boundary chunks and exposed faces are restored after removal.
-- [x] Partial and rotated shape data crosses the neighbor reader without incorrectly culling non-full faces; the existing shape mesher regression suite remains green.
-- [x] Grass and dirt transitions retain the existing material-selection path.
-- [x] Texture variation does not restart at local coordinate zero.
-- [x] A continuous Center-to-North surface has no exposed internal boundary face or duplicate chunk identity.
-- [x] Every North column contains Riverbed at `y=0`, Ground at `y=1`, and Air at `y=2` before authoring.
+- [ ] A center-only load/save does not alter center authored data.
+- [ ] A cross-boundary stroke saves edits into both correct files.
+- [ ] Reloading produces a cell-for-cell equivalent composite world.
+- [ ] Undo history remains an editor concern and never leaks into files.
 
 ### Exit Criteria
 
-- [x] Center and North appear as one continuous terrain surface in automated geometry checks and desktop screenshot verification.
-- [x] Boundary edits update the eight affected seam chunks at most, not both full regions.
-- [x] Phase 1-5 constitute the completed first implementation milestone and are ready for review before broader editor expansion.
+- [ ] The storage partition is invisible during editing and exact during save/load.
 
-## Phase 6: Introduce Layout-Level Editor Selection
+## Phase 8: Add The Remaining Seven Scenery Regions
 
 ### Tasks
 
-- [x] Represent selection as region ID plus region-local coordinate.
-- [x] Expose derived global coordinates for diagnostics and tools.
-- [x] Attach region identity to terrain raycast results.
-- [x] Route hover, selection, inspection, and tool targeting to the owning region.
-- [x] Preserve current center selection behavior.
-- [x] Prevent hidden or noninteractive ghost meshes from stealing selection.
+- [ ] Create the remaining region map files.
+- [ ] Initialize every new region with the standard vertical bounds and stone foundation.
+- [ ] Register all nine files in the manifest.
+- [ ] Assemble the complete `192x192x32` source world.
+- [ ] Add temporary terrain sufficient to inspect every seam.
+- [ ] Confirm all files can be edited and saved through the same session.
 
 ### Exit Criteria
 
-- [x] Selecting either Center or North resolves the correct region and cell.
-- [x] Selection remains stable while changing region visibility mode.
+- [ ] All nine regions form one editable world.
+- [ ] No new region count increases editor architecture complexity.
 
-## Phase 7: Add Show All, Focus, Isolate, And Region Overlays
+## Phase 9: Make Rendering Seamless Across Storage Boundaries
+
+Because the renderer receives one world, ordinary neighbor lookup should naturally cross former region boundaries. This phase verifies and removes any remaining 64-cell assumptions.
 
 ### Tasks
 
-- [x] Add `show-all`, `focus-selected`, and `isolate-selected` editor states.
-- [x] Ensure Show All hydrates and displays every requested voxel region.
-- [x] Ghost non-focused regions without making terrain unreadable.
-- [x] Hide all non-selected regions in Isolate mode.
-- [x] Add a toggleable region-boundary overlay.
-- [x] Add a compact 3x3 navigator only if it improves navigation without replacing selection. (Deferred; the two-region milestone does not need one.)
-- [x] Frame the camera appropriately for one region or the complete layout.
-- [x] Preserve unsaved state while switching visibility modes.
+- [ ] Verify face occlusion across every former region boundary.
+- [ ] Verify dirty render chunks on both sides rebuild when seam cells change.
+- [ ] Seed texture variants and rotations from global coordinates.
+- [ ] Verify grass covering, stone, water, shapes, and transparent faces at seams.
+- [ ] Ensure no region-edge overlays appear in runtime output.
+- [ ] Keep optional debug boundaries development-only.
 
 ### Exit Criteria
 
-- [x] All visibility modes work without reloading or losing edits.
-- [x] Show All displays normal editable voxel terrain, not baked previews.
-- [x] Editor controls remain usable at desktop and supported smaller viewports.
+- [ ] No cracks, duplicate faces, texture resets, or visible 64-cell partition lines remain.
 
-## Phase 8: Support Normal Terrain Authoring And Persistence In Scenery
+## Phase 10: Apply Runtime Capabilities From Manifest Roles
 
 ### Tasks
 
-- [x] Route add, remove, raise, lower, flatten, fill, clear, and path tools by region.
-- [x] Route shape, rotation, state, and material painting by region.
-- [x] Preserve per-region dirty chunk rebuilding.
-- [x] Save and load every region independently through the layout.
-- [x] Report unsaved state at layout and individual-region levels.
-- [x] Prevent scenery editing from creating runtime navigation or gameplay metadata implicitly.
-- [x] Verify large scenery edits do not snapshot all nine worlds unnecessarily.
+- [ ] Define global center bounds from the center manifest slot.
+- [ ] Restrict player destinations and navigation to center bounds.
+- [ ] Restrict portfolio interaction and gameplay selection to center-owned content.
+- [ ] Keep scenery terrain visible but non-interactive at runtime.
+- [ ] Filter scenery collision and simulation work without splitting the world.
+- [ ] Keep editor authoring unrestricted across all regions.
 
 ### Exit Criteria
 
-- [x] Every existing terrain-authoring operation works normally in a scenery region.
-- [x] Reloading the layout restores all authored terrain exactly.
-- [x] Undo and redo work within one region before cross-region commands are introduced.
+- [ ] Users cannot enter or interact with scenery regions.
+- [ ] Camera controls cannot expose invalid viewpoints beyond the intended center constraint.
+- [ ] Scenery contributes no ordinary gameplay processing.
 
-## Phase 9: Support Cross-Region Terrain Brushes And Atomic Undo
+## Phase 11: Extend Liquids And Reveal Into Scenery
 
-### Tasks
+### Liquids
 
-- [x] Calculate brush footprints in global layout coordinates.
-- [x] Partition mutations by owning region.
-- [x] Convert mutations back to region-local coordinates before applying them.
-- [x] Record one layout-level command for a cross-region brush stroke.
-- [x] Undo or redo the complete stroke atomically.
-- [x] Rebuild only affected internal chunks, including neighboring seam chunks.
-- [x] Reject mutations outside the complete layout safely.
+- [ ] Keep full existing water behavior in the center.
+- [ ] Author scenery water through the same editor tools.
+- [ ] Serialize scenery sources and settled results into the owning region file.
+- [ ] Prefer settled/static runtime scenery water over continuous simulation.
+- [ ] Define deliberate behavior for water crossing region-file boundaries.
 
-### Required Tests
+### Reveal
 
-- [x] Paint, raise, lower, flatten, and erase can cross every cardinal seam.
-- [x] A brush can cross a four-region intersection.
-- [x] One undo reverses the entire multi-region stroke.
-- [x] Saving and reloading preserves the result.
-
-### Exit Criteria
-
-- [x] Region boundaries do not constrain ordinary terrain-authoring workflows.
-- [x] History memory remains within the Phase 0 budget.
-
-## Phase 10: Expand The Proven Architecture To All Nine Regions
-
-### Tasks
-
-- [x] Add the remaining seven region documents and layout entries.
-- [x] Generalize seam lookup to all cardinal neighboring pairs.
-- [x] Validate corner-region placement and mesh identity.
-- [x] Support Show All, Focus, and Isolate across all nine regions.
-- [x] Add load progress and region-specific error reporting.
-- [x] Avoid synchronous remeshing of all regions after a local edit.
-- [x] Ensure all nine can be hydrated together in editor mode.
+- [ ] Preserve the current center reveal visually and temporally.
+- [ ] Continue the same wave beyond the old center boundary using global world distance.
+- [ ] Do not renormalize the center timing against the larger world.
+- [ ] Reveal appropriate scenery entities once, after nearby terrain.
+- [ ] Verify objects never restart their pop animation.
 
 ### Exit Criteria
 
-- [x] The editor displays a continuous 192x192 voxel landscape.
-- [x] Every region is independently editable and persistent.
-- [x] No visible seam identifies the nine-region structure.
+- [ ] Center regressions are absent.
+- [ ] Scenery water is visually convincing within the performance budget.
+- [ ] Reveal reads as one continuous expansion across the complete world.
 
-## Phase 11: Separate Runtime Capabilities By Region Role
+## Phase 12: Profile, Optimize, And Validate The Complete Source World
 
-### Tasks
+### Measurements
 
-- [ ] Define explicit runtime capability resolution from region role.
-- [ ] Route surface queries and click-to-move to Center only.
-- [ ] Keep soldier navigation and destination validation Center-only.
-- [ ] Register gameplay entities, triggers, zones, and interactions from Center only.
-- [ ] Disable runtime scenery terrain raycasting.
-- [ ] Avoid collision generation for scenery terrain.
-- [ ] Permit explicit lightweight scenery objects and animations through a separate path.
-- [ ] Confirm editor capabilities remain broader than runtime capabilities.
+- [ ] Composite load and assembly time.
+- [ ] Editor entry time.
+- [ ] Initial surface build time.
+- [ ] Cross-boundary brush latency.
+- [ ] Save partitioning and serialization time.
+- [ ] CPU frame time and GPU frame time.
+- [ ] Draw calls, triangles, and texture memory.
+- [ ] Reveal worst-frame time.
+- [ ] Heap growth across repeated editor open/close cycles.
 
-### Exit Criteria
+### Optimization Order
 
-- [ ] Scenery contributes visual rendering without appearing in gameplay queries.
-- [ ] Center gameplay behavior remains unchanged.
-- [ ] Runtime work is capability-driven rather than implicitly applied to every loaded region.
-
-## Phase 12: Add Affordable Authored Scenery-Water Behavior
-
-### Tasks
-
-- [ ] Keep full liquid tools available for an active scenery region in the editor where practical.
-- [ ] Avoid continuously simulating eight scenery regions at runtime.
-- [ ] Define whether cross-region sources are solved independently, transferred through boundary conditions, or authored as settled visual continuity.
-- [ ] Save authored sources and any validated settled representation per region.
-- [ ] Render scenery water statically with normal shader animation.
-- [ ] Validate rivers crossing Center/scenery seams and distant waterfalls.
-- [ ] Keep a future global or baked water representation possible.
+1. Remove accidental full-world rebuilds.
+2. Reduce scenery simulation and interaction work.
+3. Improve chunk culling and material batching.
+4. Cache settled scenery liquids.
+5. Only then introduce production baking.
 
 ### Exit Criteria
 
-- [ ] Scenery rivers and basins can be authored and persist.
-- [ ] Published runtime performs no unnecessary scenery-water solver work.
-- [ ] Water seams do not expose region boundaries.
+- [ ] Editor tools remain responsive on the complete source world.
+- [ ] Runtime meets the agreed portfolio performance budget.
+- [ ] No optimization compromises source authoring correctness.
 
-## Phase 13: Extend The Center-Originating Reveal Across The Layout
+## Phase 13: Design And Implement Production Scenery Baking Separately
 
-### Tasks
+This phase starts only after Phases 1-12 are stable.
 
-- [ ] Preserve the exact four center loader cells and their special behavior.
-- [ ] Express reveal distance using global layout coordinates.
-- [ ] Preserve every Center cell's current reveal delay.
-- [ ] Continue the same spatial wave speed beyond Center.
-- [ ] Prevent reveal timing from restarting or renormalizing per region.
-- [ ] Keep terrain reveal separate from placeable-object reveal.
-- [ ] Keep scenery props hidden until their appropriate object-reveal phase.
-- [ ] Add reduced-motion behavior for the expanded terrain.
+### Intended Direction
 
-### Required Tests
+- Keep all nine voxel region files as authoritative source data.
+- Keep the center playable representation dynamic where required.
+- Bake visual-only scenery terrain and suitable props into optimized assets.
+- Reference baked outputs from optional manifest fields.
+- Preserve the source-to-bake relationship for rebuilding.
+- Decide separately how the reveal transitions from source voxel presentation to baked scenery.
 
-- [ ] Old and new delays match for every Center terrain cell.
-- [ ] The first scenery row follows its adjacent Center boundary continuously.
-- [ ] Equal global distances reveal at equal times.
-- [ ] Only Center's 2x2 loader platform receives loader behavior.
-- [ ] Placeable objects reveal once after terrain reveal completes.
+### Not Yet Specified
 
-### Exit Criteria
+- Baked file format.
+- Mesh grouping and LOD strategy.
+- Texture atlas generation.
+- Occlusion data.
+- Reveal shader implementation.
+- Voxel-to-baked swap timing.
 
-- [ ] The visitor perceives one expansion wave across the complete landscape.
-- [ ] The current Center entrance remains visually and temporally unchanged.
+These decisions must be based on profiling the working `192x192x32` source world rather than guessed in advance.
 
-## Phase 14: Profile, Optimize, And Validate The Expanded World
+# Final Acceptance Criteria
 
-### Performance Scenarios
-
-- [ ] Center-only compatibility layout.
-- [ ] Center plus North seam prototype.
-- [ ] Editor Show All with all nine regions.
-- [ ] Editor isolated region with repeated brush strokes.
-- [ ] Cross-region brush and undo.
-- [ ] Runtime overview facing several scenery regions.
-- [ ] Complete 192x192 reveal.
-- [ ] Mobile and constrained-device profiles.
-
-### Tasks
-
-- [ ] Measure document load, hydration, meshing, GPU upload, and first-visible times separately.
-- [ ] Measure memory for source documents, hydrated worlds, geometry, textures, and history.
-- [ ] Measure draw calls, triangles, visible chunks, and frame time.
-- [ ] Load or hydrate editor regions incrementally while guaranteeing Show All completion.
-- [ ] Retain frustum culling for all existing 16x16 render chunks.
-- [ ] Disable scenery raycasting and update loops at runtime.
-- [ ] Add layout metrics to the existing benchmark diagnostics.
-- [ ] Verify resource disposal when layouts or editor visibility change.
-
-### Release Checks
-
-- [ ] Production build succeeds.
-- [ ] Unit and integration tests pass.
-- [ ] Existing center-map regression tests pass.
-- [ ] Layout persistence and migration tests pass.
-- [ ] Editor Show All, Focus, and Isolate workflows pass.
-- [ ] Cross-region editing and atomic undo tests pass.
-- [ ] Reveal regression and continuity tests pass.
-- [ ] No WebGL shader or geometry validation errors occur.
-- [ ] Desktop and mobile performance budgets are met.
-
-## Phase 15: Design Terrain Baking As A Separate Follow-Up Feature
-
-This phase is a design and planning gate only. Do not implement the baker as part of the initial region expansion.
-
-### Future Requirements To Preserve
-
-- [ ] Source voxel documents remain authoritative and editable.
-- [ ] Center and scenery can use the same baking pipeline with different retained gameplay metadata.
-- [ ] Baked output preserves positions, normals, UVs, material IDs, texture variants, AO, and required reveal metadata.
-- [ ] Dynamic lighting, fog, wetness, weather, snow, and environment uniforms remain runtime-controlled.
-- [ ] Baked sectors retain useful culling boundaries.
-- [ ] Center retains navigation, liquids, collision/height queries, and interaction metadata independently from rendered geometry.
-- [ ] Scenery can omit gameplay data from its runtime package.
-- [ ] The future reveal may swap animated terrain to baked terrain or reveal baked geometry directly.
-
-### Exit Criteria
-
-- [ ] A separate reviewed baking plan exists after the voxel-region architecture is stable and benchmarked.
-- [ ] No baking assumption has leaked into the source/editor data model.
-
-## Main Risks And Mitigations
-
-### Center Regression
-
-Mitigation: wrap rather than migrate the existing map, preserve its local coordinates, and compare serialized data plus reveal timings in automated tests.
-
-### Visible Region Seams
-
-Mitigation: neighbor-aware face occlusion, global texture hashing, boundary dirty propagation, shape-specific seam tests, and visual reference captures.
-
-### Editor Memory And Responsiveness
-
-Mitigation: hydrate incrementally, rebuild dirty chunks only, store mutation deltas instead of whole-world history snapshots, and make Show All an explicit supported benchmark.
-
-### Cross-Region History Corruption
-
-Mitigation: one layout-level command owns all region mutations from a single brush stroke and commits or rolls back atomically.
-
-### Accidental Scenery Simulation
-
-Mitigation: explicit runtime capability resolution. Systems receive Center or an allowed region list rather than discovering every loaded region automatically.
-
-### Reveal Becoming Nine Separate Waves
-
-Mitigation: compute timing from global coordinates, preserve Center delays exactly, and test continuity at every boundary.
-
-### Premature Baking Abstractions
-
-Mitigation: keep source documents separate from rendering but defer concrete baked formats, exporters, shaders, and swapping until Phase 15 planning.
-
-## First Delivery Milestone
-
-The first implementation pass should stop after Phase 5 and be reviewed before proceeding.
-
-It must demonstrate:
-
-- The current map running unchanged as Center.
-- One persisted North scenery region.
-- Correct global and local coordinate conversion.
-- Existing 16x16 chunks retained inside both regions.
-- Continuous terrain with correct boundary face occlusion.
-- Global texture variation without a repeated region pattern.
-- Neighboring dirty-chunk propagation after seam edits.
-- No gameplay systems activated for North.
-
-Only after this milestone passes should layout-level editor selection, visibility modes, cross-region tools, and the remaining seven regions be implemented.
+- [ ] The editor presents one seamless `192x192x32` world.
+- [ ] All existing tools retain their established appearance and interaction model.
+- [ ] Brushes cross former region boundaries normally.
+- [ ] One action creates one undo entry.
+- [ ] The world saves into nine region files through one coordinated save operation.
+- [ ] Reloaded data is cell-for-cell equivalent to the saved composite world.
+- [ ] The current center map remains visually and behaviorally unchanged.
+- [ ] The eight surrounding regions are visible scenery but not playable runtime areas.
+- [ ] Terrain, textures, water, and reveal do not expose storage boundaries.
+- [ ] The implementation contains none of the rejected multi-editor architecture.
+- [ ] Production baking remains a separate, measurable optimization stage.

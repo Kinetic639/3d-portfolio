@@ -1,6 +1,6 @@
 import { FLUID_IDS, MAX_HORIZONTAL_FLUID_LEVEL } from "@/lib/fluids/fluid-types";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
-import { getWorldMaxY, type GridCoordinate, type WorldPosition } from "@/lib/world/world-config";
+import { getChunkCounts, getWorldMaxY, type GridCoordinate, type WorldPosition } from "@/lib/world/world-config";
 
 export type WaterFaceDirection = "py" | "px" | "nx" | "pz" | "nz";
 
@@ -150,9 +150,9 @@ export function buildWaterChunkMesh(world: VoxelWorld, chunkX: number, chunkZ: n
 export function buildWaterChunkMeshes(world: VoxelWorld) {
   const startedAt = now();
   const chunks: WaterChunkMeshData[] = [];
-  const chunksPerAxis = world.config.width / world.config.chunkSize;
-  for (let chunkZ = 0; chunkZ < chunksPerAxis; chunkZ += 1) {
-    for (let chunkX = 0; chunkX < chunksPerAxis; chunkX += 1) {
+  const chunkCounts = getChunkCounts(world.config);
+  for (let chunkZ = 0; chunkZ < chunkCounts.z; chunkZ += 1) {
+    for (let chunkX = 0; chunkX < chunkCounts.x; chunkX += 1) {
       chunks.push(buildWaterChunkMesh(world, chunkX, chunkZ));
     }
   }

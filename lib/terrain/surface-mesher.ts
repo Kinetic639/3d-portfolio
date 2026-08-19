@@ -1,6 +1,6 @@
 import { BLOCK_IDS, getBlockDefinition, isRenderableBlock } from "@/lib/world/block-registry";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
-import { getWorldMaxY, type GridCoordinate, type WorldPosition } from "@/lib/world/world-config";
+import { getChunkCounts, getWorldMaxY, type GridCoordinate, type WorldPosition } from "@/lib/world/world-config";
 import { computeExpansionDelay, isLoaderPlatformTopCell } from "@/lib/world/reveal";
 import { FACE_NEIGHBOUR_OFFSETS, getShapeDefinition, type FaceDirection, type ShapeFace } from "@/lib/voxel-shapes/shape-registry";
 
@@ -300,10 +300,10 @@ function isCellTopFullyCovered(world: VoxelWorld, x: number, y: number, z: numbe
 export function buildSurfaceChunkMeshes(world: VoxelWorld) {
   const startedAt = now();
   const chunks: SurfaceChunkMeshData[] = [];
-  const chunksPerAxis = world.config.width / world.config.chunkSize;
+  const chunkCounts = getChunkCounts(world.config);
 
-  for (let chunkZ = 0; chunkZ < chunksPerAxis; chunkZ += 1) {
-    for (let chunkX = 0; chunkX < chunksPerAxis; chunkX += 1) {
+  for (let chunkZ = 0; chunkZ < chunkCounts.z; chunkZ += 1) {
+    for (let chunkX = 0; chunkX < chunkCounts.x; chunkX += 1) {
       chunks.push(buildSurfaceChunkMesh(world, chunkX, chunkZ));
     }
   }

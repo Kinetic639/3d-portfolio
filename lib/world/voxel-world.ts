@@ -10,16 +10,16 @@ import {
   type ShapeId,
 } from "@/lib/voxel-shapes/shape-ids";
 import {
-  CHUNKS_PER_AXIS,
   CHUNK_SURFACE_CELL_COUNT,
   WORLD_AIR_CELL_COUNT,
   WORLD_CELL_COUNT,
-  WORLD_CHUNK_COUNT,
   WORLD_CONFIG,
   WORLD_FOUNDATION_CELL_COUNT,
   WORLD_FOUNDATION_LEVEL_COUNT,
   WORLD_SURFACE_CELL_COUNT,
   getWorldMaxY,
+  getChunkCounts,
+  getWorldChunkCount,
   type GridCoordinate,
   type WorldConfig,
   type WorldPosition,
@@ -126,6 +126,7 @@ export class VoxelWorld {
     fluidLevels?: Uint8Array,
     fluidFlags?: Uint8Array,
   ) {
+    validateWorldConfig(config);
     this.config = config;
     const cellCount = config.width * config.depth * config.height;
     const zoneCount = config.width * config.depth;
@@ -521,7 +522,8 @@ export class VoxelWorld {
       this.dirtyChunks.add(this.getChunkId(chunk.chunkX - 1, chunk.chunkZ));
     }
 
-    if (x % this.config.chunkSize === this.config.chunkSize - 1 && chunk.chunkX < CHUNKS_PER_AXIS - 1) {
+    const chunkCounts = getChunkCounts(this.config);
+    if (x % this.config.chunkSize === this.config.chunkSize - 1 && chunk.chunkX < chunkCounts.x - 1) {
       this.dirtyChunks.add(this.getChunkId(chunk.chunkX + 1, chunk.chunkZ));
     }
 
@@ -529,7 +531,7 @@ export class VoxelWorld {
       this.dirtyChunks.add(this.getChunkId(chunk.chunkX, chunk.chunkZ - 1));
     }
 
-    if (z % this.config.chunkSize === this.config.chunkSize - 1 && chunk.chunkZ < CHUNKS_PER_AXIS - 1) {
+    if (z % this.config.chunkSize === this.config.chunkSize - 1 && chunk.chunkZ < chunkCounts.z - 1) {
       this.dirtyChunks.add(this.getChunkId(chunk.chunkX, chunk.chunkZ + 1));
     }
   }
@@ -553,8 +555,9 @@ export class VoxelWorld {
   }
 
   markAllFluidChunksDirty() {
-    for (let chunkZ = 0; chunkZ < CHUNKS_PER_AXIS; chunkZ += 1) {
-      for (let chunkX = 0; chunkX < CHUNKS_PER_AXIS; chunkX += 1) {
+    const chunkCounts = getChunkCounts(this.config);
+    for (let chunkZ = 0; chunkZ < chunkCounts.z; chunkZ += 1) {
+      for (let chunkX = 0; chunkX < chunkCounts.x; chunkX += 1) {
         this.dirtyFluidChunks.add(this.getChunkId(chunkX, chunkZ));
       }
     }
@@ -602,15 +605,16 @@ export class VoxelWorld {
       fluidSources,
       fallingFluidCells,
       renderedInstances,
-      chunks: WORLD_CHUNK_COUNT,
+      chunks: getWorldChunkCount(this.config),
     };
   }
 
   createRenderChunks(): RenderChunk[] {
     const chunks: RenderChunk[] = [];
+    const chunkCounts = getChunkCounts(this.config);
 
-    for (let chunkZ = 0; chunkZ < CHUNKS_PER_AXIS; chunkZ += 1) {
-      for (let chunkX = 0; chunkX < CHUNKS_PER_AXIS; chunkX += 1) {
+    for (let chunkZ = 0; chunkZ < chunkCounts.z; chunkZ += 1) {
+      for (let chunkX = 0; chunkX < chunkCounts.x; chunkX += 1) {
         chunks.push(this.createRenderChunk(chunkX, chunkZ));
       }
     }
@@ -635,13 +639,14 @@ export class VoxelWorld {
   }
 
   createRenderChunk(chunkX: number, chunkZ: number): RenderChunk {
+    const chunkCounts = getChunkCounts(this.config);
     if (
       !Number.isInteger(chunkX) ||
       !Number.isInteger(chunkZ) ||
       chunkX < 0 ||
-      chunkX >= CHUNKS_PER_AXIS ||
+      chunkX >= chunkCounts.x ||
       chunkZ < 0 ||
-      chunkZ >= CHUNKS_PER_AXIS
+      chunkZ >= chunkCounts.z
     ) {
       throw new RangeError(`Chunk coordinates out of bounds: ${chunkX}, ${chunkZ}`);
     }
@@ -722,14 +727,15 @@ export class VoxelWorld {
 
     const chunkX = Number(match[1]);
     const chunkZ = Number(match[2]);
+    const chunkCounts = getChunkCounts(this.config);
 
     if (
       !Number.isInteger(chunkX) ||
       !Number.isInteger(chunkZ) ||
       chunkX < 0 ||
-      chunkX >= CHUNKS_PER_AXIS ||
+      chunkX >= chunkCounts.x ||
       chunkZ < 0 ||
-      chunkZ >= CHUNKS_PER_AXIS
+      chunkZ >= chunkCounts.z
     ) {
       return null;
     }
@@ -745,15 +751,31 @@ export class VoxelWorld {
     if (x % this.config.chunkSize === 0 && chunk.chunkX > 0) {
       target.add(this.getChunkId(chunk.chunkX - 1, chunk.chunkZ));
     }
-    if (x % this.config.chunkSize === this.config.chunkSize - 1 && chunk.chunkX < CHUNKS_PER_AXIS - 1) {
+    const chunkCounts = getChunkCounts(this.config);
+    if (x % this.config.chunkSize === this.config.chunkSize - 1 && chunk.chunkX < chunkCounts.x - 1) {
       target.add(this.getChunkId(chunk.chunkX + 1, chunk.chunkZ));
     }
     if (z % this.config.chunkSize === 0 && chunk.chunkZ > 0) {
       target.add(this.getChunkId(chunk.chunkX, chunk.chunkZ - 1));
     }
-    if (z % this.config.chunkSize === this.config.chunkSize - 1 && chunk.chunkZ < CHUNKS_PER_AXIS - 1) {
+    if (z % this.config.chunkSize === this.config.chunkSize - 1 && chunk.chunkZ < chunkCounts.z - 1) {
       target.add(this.getChunkId(chunk.chunkX, chunk.chunkZ + 1));
     }
+  }
+}
+
+function validateWorldConfig(config: WorldConfig) {
+  for (const [name, value] of Object.entries(config)) {
+    if (!Number.isFinite(value)) throw new RangeError(`World config ${name} must be finite.`);
+  }
+  if (!Number.isInteger(config.width) || !Number.isInteger(config.depth) || !Number.isInteger(config.height) || !Number.isInteger(config.minY) || !Number.isInteger(config.chunkSize)) {
+    throw new RangeError("World dimensions, minY, and chunk size must be integers.");
+  }
+  if (config.width <= 0 || config.depth <= 0 || config.height <= 0 || config.blockSize <= 0 || config.chunkSize <= 0) {
+    throw new RangeError("World dimensions, block size, and chunk size must be positive.");
+  }
+  if (config.width % config.chunkSize !== 0 || config.depth % config.chunkSize !== 0) {
+    throw new RangeError("World width and depth must be divisible by chunk size.");
   }
 }
 
@@ -854,6 +876,6 @@ export const EXPECTED_WORLD_STATS = {
   fluidCells: 0,
   fluidSources: 0,
   fallingFluidCells: 0,
-  chunks: WORLD_CHUNK_COUNT,
+  chunks: getWorldChunkCount(),
   instancesPerFlatChunk: CHUNK_SURFACE_CELL_COUNT * WORLD_FOUNDATION_LEVEL_COUNT,
 } as const;

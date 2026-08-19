@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { getShapeDefinition } from "@/lib/voxel-shapes/shape-registry";
 import { isRenderableBlock } from "@/lib/world/block-registry";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
-import { getWorldMaxY, type GridCoordinate, type WorldPosition } from "@/lib/world/world-config";
+import { getChunkCounts, getWorldMaxY, type GridCoordinate, type WorldPosition } from "@/lib/world/world-config";
 import { getTerrainSurfaceAt } from "@/lib/world/surface-query";
 
 export type ZoneOverlayChunkMeshData = {
@@ -39,10 +39,10 @@ const BOUNDARY_OFFSET = 0.026;
 export function buildZoneOverlayMeshes(world: VoxelWorld): ZoneOverlayBuildResult {
   const startedAt = now();
   const chunks: ZoneOverlayChunkMeshData[] = [];
-  const chunksPerAxis = world.config.width / world.config.chunkSize;
+  const chunkCounts = getChunkCounts(world.config);
 
-  for (let chunkZ = 0; chunkZ < chunksPerAxis; chunkZ += 1) {
-    for (let chunkX = 0; chunkX < chunksPerAxis; chunkX += 1) {
+  for (let chunkZ = 0; chunkZ < chunkCounts.z; chunkZ += 1) {
+    for (let chunkX = 0; chunkX < chunkCounts.x; chunkX += 1) {
       chunks.push(...buildZoneOverlayChunkMeshes(world, chunkX, chunkZ));
     }
   }

@@ -26,7 +26,7 @@ test("loads the center platform, expands, and enters exploration", async ({ page
   expect(pageErrors).toEqual([]);
 
   const metrics = await page.evaluate(() => window.__portfolioExperienceMetrics);
-  expect(metrics?.logicalCells).toBe(49_152);
+  expect(metrics?.logicalCells).toBe(131_072);
   expect(metrics?.airCells).toBeGreaterThan(0);
   expect(metrics?.nonAirBlocks).toBeGreaterThan(0);
   expect(metrics?.nonAirBlocks).toBeLessThan(metrics?.logicalCells ?? 0);
