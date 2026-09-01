@@ -4,10 +4,9 @@ export type EditorPanelId = "left" | "right" | "bottom" | "outliner" | "inspecto
 
 export const EDITOR_LAYOUT_STORAGE_KEY = "portfolio-editor-layout.v1";
 
-// How close the camera is allowed to get in the editor ("Closest zoom-in
-// distance" in Settings). The camera's near clip plane is 0.1, so this
-// still leaves a wide safety margin against clipping into geometry.
-export const EDITOR_MIN_ZOOM_DISTANCE_FLOOR = 1;
+// How close the camera is allowed to get in the editor ("Minimum camera
+// distance" in View). Keep this above the camera's 0.1 near clip plane.
+export const EDITOR_MIN_ZOOM_DISTANCE_FLOOR = 0.25;
 export const EDITOR_MIN_ZOOM_DISTANCE_CEILING = 22;
 
 export type EditorLayoutState = {

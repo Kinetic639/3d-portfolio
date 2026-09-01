@@ -534,7 +534,7 @@ export default function MapEditorToolbar(props: MapEditorToolbarProps) {
         editorMinZoomDistance={layout.editorMinZoomDistance}
         onEditorMinZoomDistanceChange={(distance) => setLayout((current) => ({
           ...current,
-          editorMinZoomDistance: Math.max(EDITOR_MIN_ZOOM_DISTANCE_FLOOR, Math.min(EDITOR_MIN_ZOOM_DISTANCE_CEILING, Math.round(distance * 2) / 2 || EDITOR_MIN_ZOOM_DISTANCE_FLOOR)),
+          editorMinZoomDistance: Math.max(EDITOR_MIN_ZOOM_DISTANCE_FLOOR, Math.min(EDITOR_MIN_ZOOM_DISTANCE_CEILING, Math.round(distance * 4) / 4 || EDITOR_MIN_ZOOM_DISTANCE_FLOOR)),
         }))}
         onCloseEditor={props.onClose}
       />
@@ -687,21 +687,21 @@ function ViewMenuSettings({
         <input type="color" value={props.mapBackgroundColor} onChange={(event) => props.onMapBackgroundColorChange(event.target.value)} />
       </label>
       <label className="editor-menu-settings__range">
-        <span>Closest zoom-in distance</span>
+        <span>Minimum camera distance</span>
         <input
           type="range"
           min={EDITOR_MIN_ZOOM_DISTANCE_FLOOR}
           max={EDITOR_MIN_ZOOM_DISTANCE_CEILING}
-          step={0.5}
+          step={0.25}
           value={editorMinZoomDistance}
           onChange={(event) => onEditorMinZoomDistanceChange(Number(event.target.value))}
         />
         <input
-          aria-label="Closest zoom-in distance"
+          aria-label="Minimum camera distance"
           type="number"
           min={EDITOR_MIN_ZOOM_DISTANCE_FLOOR}
           max={EDITOR_MIN_ZOOM_DISTANCE_CEILING}
-          step={0.5}
+          step={0.25}
           value={editorMinZoomDistance}
           onChange={(event) => onEditorMinZoomDistanceChange(Number(event.target.value))}
         />

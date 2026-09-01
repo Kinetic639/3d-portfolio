@@ -41,4 +41,9 @@ describe("editor layout store", () => {
     expect(parseEditorLayout({ version: 1, activeBottomTab: "library" }).activeBottomTab).toBe("overview");
     expect(resetEditorLayout().collapsed.bottom).toBe(false);
   });
+
+  it("persists close editor camera distances and clamps unsafe values", () => {
+    expect(parseEditorLayout({ version: 1, editorMinZoomDistance: 0.25 }).editorMinZoomDistance).toBe(0.25);
+    expect(parseEditorLayout({ version: 1, editorMinZoomDistance: 0 }).editorMinZoomDistance).toBe(0.25);
+  });
 });
