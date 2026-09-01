@@ -70,6 +70,10 @@ export type PrefabDefinition = {
     allowedRotations?: number[];
   };
   tags: string[];
+  modelAsset?: {
+    url: string;
+    transform: SerializableTransform;
+  };
   futureAssetSlot?: string;
 };
 

@@ -61,6 +61,11 @@ export function resolvePrefabVisualBounds(entity: PlacedMapEntity): PrefabVisual
     return null;
   }
 
+  if (resolved.ok && resolved.prefab.modelAsset) {
+    const footprint = entity.footprintOverride ?? resolved.variant.footprintOverride ?? resolved.prefab.footprint;
+    return transformFootprintBounds(entity.transform, footprint);
+  }
+
   const bounds: PrefabVisualBounds = {
     minX: Number.POSITIVE_INFINITY,
     maxX: Number.NEGATIVE_INFINITY,
@@ -87,6 +92,35 @@ export function resolvePrefabVisualBounds(entity: PlacedMapEntity): PrefabVisual
       bounds.minZ = Math.min(bounds.minZ, corner.z);
       bounds.maxZ = Math.max(bounds.maxZ, corner.z);
     }
+  }
+
+  return bounds;
+}
+
+function transformFootprintBounds(transform: SerializableTransform, footprint: { width: number; depth: number; height: number }): PrefabVisualBounds {
+  const matrix = new THREE.Matrix4().compose(
+    new THREE.Vector3(transform.position.x, transform.position.y, transform.position.z),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(transform.rotation.x, transform.rotation.y, transform.rotation.z)),
+    new THREE.Vector3(transform.scale.x, transform.scale.y, transform.scale.z),
+  );
+  const bounds: PrefabVisualBounds = {
+    minX: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY,
+    minZ: Number.POSITIVE_INFINITY,
+    maxZ: Number.NEGATIVE_INFINITY,
+  };
+
+  for (const corner of getBoundsCorners({ x: footprint.width / 2, y: footprint.height / 2, z: footprint.depth / 2 })) {
+    corner.y += footprint.height / 2;
+    corner.applyMatrix4(matrix);
+    bounds.minX = Math.min(bounds.minX, corner.x);
+    bounds.maxX = Math.max(bounds.maxX, corner.x);
+    bounds.minY = Math.min(bounds.minY, corner.y);
+    bounds.maxY = Math.max(bounds.maxY, corner.y);
+    bounds.minZ = Math.min(bounds.minZ, corner.z);
+    bounds.maxZ = Math.max(bounds.maxZ, corner.z);
   }
 
   return bounds;

@@ -3,7 +3,7 @@ import { createPlacedEntity } from "@/lib/maps/map-entities";
 import { validateMapDefinition, createBlankMapDefinition, cloneMapDefinition } from "@/lib/maps/map-definition";
 import { BUILT_IN_PREFABS, BUILT_IN_PREFAB_VERSION, getPrefabDefinition } from "./prefab-library";
 import { PREFAB_MATERIAL_ROLES } from "./prefab-materials";
-import { resolvePrefabInstance } from "./prefab-resolver";
+import { resolvePrefabInstance, resolvePrefabVisualBounds } from "./prefab-resolver";
 
 describe("prefab library", () => {
   it("defines stable, versioned, reusable prefab definitions", () => {
@@ -54,6 +54,36 @@ describe("prefab library", () => {
     expect(resolved.parts.length).toBe(prefab?.parts.length);
     expect(resolved.parts.every((part) => part.entityId === entity.id)).toBe(true);
     expect(resolved.parts.some((part) => part.transform.position.x !== 4 || part.transform.position.z !== -3)).toBe(true);
+  });
+
+  it("registers the land rock GLB as a grounded nature prefab", () => {
+    const rock = getPrefabDefinition("rock-land-small-001");
+
+    expect(rock).toMatchObject({
+      name: "Land Rock Small 001",
+      category: "nature",
+      collisionMode: "blocking",
+      modelAsset: {
+        url: "/models/rocks-land/RockLandSmall001.glb",
+        transform: { position: { y: 0.43108 } },
+      },
+    });
+    expect(rock?.footprint).toEqual({ width: 2.43, depth: 1.87, height: 0.99 });
+
+    const entity = createPlacedEntity({
+      id: "land-rock",
+      entityType: "prefab",
+      prefabId: rock?.id,
+      prefabVersion: rock?.version,
+      variantId: rock?.defaultVariantId,
+      transform: {
+        position: { x: 3, y: 2, z: -4 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+      footprint: rock?.footprint,
+    });
+    expect(resolvePrefabVisualBounds(entity)).toMatchObject({ minY: 2, maxY: 2.99 });
   });
 
   it("returns an explicit placeholder for missing prefab definitions", () => {

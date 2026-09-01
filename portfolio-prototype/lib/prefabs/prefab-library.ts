@@ -17,6 +17,7 @@ type CatalogSeed = {
   footprint?: EntityFootprint;
   tags?: string[];
   variants?: Array<{ id: string; label: string; size: PrefabSize; scale: { x: number; y: number; z: number }; footprint?: EntityFootprint }>;
+  modelAsset?: PrefabDefinition["modelAsset"];
   futureAssetSlot?: string;
 };
 
@@ -109,7 +110,9 @@ function createPrefabDefinition(seed: CatalogSeed): PrefabDefinition {
     id: seed.id ?? stableId(seed.name),
     version: BUILT_IN_PREFAB_VERSION,
     name: seed.name,
-    description: `${seed.name} gray-box prefab composed from shared primitive parts.`,
+    description: seed.modelAsset
+      ? `${seed.name} textured model asset.`
+      : `${seed.name} gray-box prefab composed from shared primitive parts.`,
     category: seed.category,
     parts,
     variants: variants.map((variant): PrefabVariantDefinition => ({
@@ -129,6 +132,7 @@ function createPrefabDefinition(seed: CatalogSeed): PrefabDefinition {
       allowedRotations: [0, 90, 180, 270],
     },
     tags: seed.tags ?? [seed.category, seed.archetype],
+    modelAsset: seed.modelAsset,
     futureAssetSlot: seed.futureAssetSlot,
   };
 }
@@ -573,6 +577,22 @@ const shortMediumLong = [
 ];
 
 const CATALOG_SEEDS: CatalogSeed[] = [
+  {
+    id: "rock-land-small-001",
+    name: "Land Rock Small 001",
+    category: "nature",
+    archetype: "rock",
+    footprint: { width: 2.43, depth: 1.87, height: 0.99 },
+    tags: ["nature", "rock", "landscape", "model"],
+    modelAsset: {
+      url: "/models/rocks-land/RockLandSmall001.glb",
+      transform: {
+        position: { x: 0.14278, y: 0.43108, z: -0.10698 },
+        rotation: ZERO_ROTATION,
+        scale: UNIT_SCALE,
+      },
+    },
+  },
   { name: "Enter Signpost", category: "portfolio", archetype: "enter-signpost", collisionMode: "trigger", tags: ["portfolio", "entry", "object-0", "signpost"] },
   { id: "portfolio-v2-scale-reference", name: "Scale Reference", category: "navigation", archetype: "person-scale-marker", collisionMode: "none", tags: ["portfolio-v2", "editor-helper", "scale-reference"] },
   { id: "portfolio-v2-foundation-square", name: "Foundation Square", category: "architecture", archetype: "platform", variants: sizeVariants, tags: ["portfolio-v2", "architecture", "foundation"] },

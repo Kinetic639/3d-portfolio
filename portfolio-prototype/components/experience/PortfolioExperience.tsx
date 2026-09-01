@@ -48,7 +48,7 @@ import {
 import { BUILT_IN_PREFABS, getPrefabDefinition } from "@/lib/prefabs/prefab-library";
 import { groundEntityOnTerrain } from "@/lib/prefabs/prefab-placement";
 import { resolvePrefabInstance } from "@/lib/prefabs/prefab-resolver";
-import type { ResolvedPrefabPart } from "@/lib/prefabs/prefab-types";
+import type { PrefabDefinition, ResolvedPrefabPart } from "@/lib/prefabs/prefab-types";
 import {
   DEFAULT_TERRAIN_BRUSH,
   createTerrainMutations,
@@ -5174,6 +5174,16 @@ function ObjectPlacementPreview({
     }, new Set());
     const grounded = groundEntityOnTerrain(world, entity, { supportMode: "single-cell" });
     if (!grounded.ok) return null;
+    if (prefab.modelAsset) {
+      return (
+        <group
+          position={[grounded.entity.transform.position.x, grounded.entity.transform.position.y, grounded.entity.transform.position.z]}
+          rotation={[grounded.entity.transform.rotation.x, grounded.entity.transform.rotation.y, grounded.entity.transform.rotation.z]}
+        >
+          <PrefabModelVisual prefab={prefab} variantId={grounded.entity.variantId} opacity={0.5} />
+        </group>
+      );
+    }
     const resolved = resolvePrefabInstance(grounded.entity);
     return (
       <group>
@@ -5309,6 +5319,232 @@ function ObjectPopAnimationPreview({
   );
 }
 
+function PrefabModelVisual({
+  prefab,
+  variantId,
+  entityScale = { x: 1, y: 1, z: 1 },
+  opacity,
+}: {
+  prefab: PrefabDefinition;
+  variantId?: string;
+  entityScale?: { x: number; y: number; z: number };
+  opacity?: number;
+}) {
+  const asset = prefab.modelAsset;
+  if (!asset) return null;
+
+  return (
+    <LoadedPrefabModel
+      url={asset.url}
+      transform={asset.transform}
+      variantScale={prefab.variants.find((variant) => variant.id === variantId)?.scale ?? { x: 1, y: 1, z: 1 }}
+      entityScale={entityScale}
+      opacity={opacity}
+    />
+  );
+}
+
+function LoadedPrefabModel({
+  url,
+  transform,
+  variantScale,
+  entityScale,
+  opacity,
+}: {
+  url: string;
+  transform: PlacedMapEntity["transform"];
+  variantScale: { x: number; y: number; z: number };
+  entityScale: { x: number; y: number; z: number };
+  opacity?: number;
+}) {
+  const { scene } = useGLTF(url);
+  const { object, previewMaterials } = useMemo(() => {
+    const clone = scene.clone(true);
+    const materials: THREE.Material[] = [];
+
+    clone.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+      if (opacity === undefined) return;
+
+      const sourceMaterials = Array.isArray(child.material) ? child.material : [child.material];
+      const clonedMaterials = sourceMaterials.map((sourceMaterial) => {
+        const material = sourceMaterial.clone();
+        material.transparent = true;
+        material.opacity = opacity;
+        material.depthWrite = false;
+        materials.push(material);
+        return material;
+      });
+      child.material = Array.isArray(child.material) ? clonedMaterials : clonedMaterials[0];
+    });
+
+    return { object: clone, previewMaterials: materials };
+  }, [opacity, scene]);
+
+  useEffect(() => () => {
+    previewMaterials.forEach((material) => material.dispose());
+  }, [previewMaterials]);
+
+  return (
+    <primitive
+      object={object}
+      position={[transform.position.x, transform.position.y, transform.position.z]}
+      rotation={[transform.rotation.x, transform.rotation.y, transform.rotation.z]}
+      scale={[
+        transform.scale.x * variantScale.x * entityScale.x,
+        transform.scale.y * variantScale.y * entityScale.y,
+        transform.scale.z * variantScale.z * entityScale.z,
+      ]}
+    />
+  );
+}
+
+function ModelPrefabEntity({
+  entity,
+  runtimeMode,
+  runtimeRevealState,
+  revealDelay,
+  reducedMotion,
+  selected,
+  selectedMaterial,
+  transformMode,
+  transformEnabled,
+  popAnimationActive,
+  onPopAnimationComplete,
+  onSelectEntity,
+  onTransformDraggingChange,
+  onTransformEntity,
+}: {
+  entity: PlacedMapEntity;
+  runtimeMode: boolean;
+  runtimeRevealState: RuntimeObjectRevealState;
+  revealDelay: number;
+  reducedMotion: boolean;
+  selected: boolean;
+  selectedMaterial: THREE.Material;
+  transformMode: EntityTransformMode;
+  transformEnabled: boolean;
+  popAnimationActive: boolean;
+  onPopAnimationComplete: () => void;
+  onSelectEntity: (id: string, additive: boolean) => void;
+  onTransformDraggingChange: (dragging: boolean) => void;
+  onTransformEntity: (id: string, transform: Pick<PlacedMapEntity["transform"], "position" | "rotation">) => boolean;
+}) {
+  const prefab = getPrefabDefinition(entity.prefabId ?? "");
+  const groupRef = useRef<THREE.Group>(null);
+  const transformActive = useRef(false);
+  const revealStartedAt = useRef<number | null>(null);
+  const revealFinished = useRef(false);
+  const [transformObject, setTransformObject] = useState<THREE.Group | null>(null);
+  const footprint = entity.footprintOverride ?? prefab?.variants.find((variant) => variant.id === entity.variantId)?.footprintOverride ?? prefab?.footprint ?? entity.footprint;
+  const selectionGeometry = useMemo(() => new THREE.BoxGeometry(footprint.width, footprint.height, footprint.depth), [footprint.depth, footprint.height, footprint.width]);
+
+  const setGroupRef = useCallback((node: THREE.Group | null) => {
+    groupRef.current = node;
+    setTransformObject(node);
+  }, [setTransformObject]);
+
+  const applyPose = useCallback((sample: RuntimeObjectPopSample) => {
+    const group = groupRef.current;
+    if (!group || transformActive.current) return;
+    group.position.set(entity.transform.position.x, entity.transform.position.y + sample.yOffset, entity.transform.position.z);
+    group.rotation.set(
+      entity.transform.rotation.x + sample.tiltX,
+      entity.transform.rotation.y,
+      entity.transform.rotation.z + sample.tiltZ,
+    );
+    group.scale.setScalar(sample.scale);
+  }, [entity.transform.position.x, entity.transform.position.y, entity.transform.position.z, entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z]);
+
+  useLayoutEffect(() => {
+    revealStartedAt.current = null;
+    revealFinished.current = runtimeRevealState === "complete";
+    applyPose(runtimeMode && runtimeRevealState === "revealing" ? sampleRuntimeObjectPop(0, revealDelay, reducedMotion) : RUNTIME_OBJECT_POP_COMPLETE);
+  }, [applyPose, reducedMotion, revealDelay, runtimeMode, runtimeRevealState]);
+
+  useFrame(({ clock }) => {
+    if (!runtimeMode || runtimeRevealState !== "revealing" || revealFinished.current || transformActive.current) return;
+    if (revealStartedAt.current === null) revealStartedAt.current = clock.elapsedTime;
+    const elapsed = clock.elapsedTime - revealStartedAt.current;
+    applyPose(sampleRuntimeObjectPop(elapsed, revealDelay, reducedMotion));
+    if (elapsed >= revealDelay + getRuntimeObjectPopDuration(reducedMotion)) {
+      applyPose(RUNTIME_OBJECT_POP_COMPLETE);
+      revealFinished.current = true;
+    }
+  });
+
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+    if (!group || runtimeMode || !popAnimationActive || transformActive.current) return;
+    group.position.set(entity.transform.position.x, entity.transform.position.y - 0.36, entity.transform.position.z);
+    group.rotation.set(entity.transform.rotation.x - 0.14, entity.transform.rotation.y, entity.transform.rotation.z + 0.08);
+    group.scale.set(0.16, 0.16, 0.16);
+    const timeline = gsap.timeline({ onComplete: onPopAnimationComplete });
+    timeline
+      .to(group.position, { y: entity.transform.position.y + 0.14, duration: 0.34, ease: "back.out(2.1)" }, 0)
+      .to(group.scale, { x: 1.08, y: 1.08, z: 1.08, duration: 0.34, ease: "back.out(2.35)" }, 0)
+      .to(group.rotation, { x: entity.transform.rotation.x + 0.03, z: entity.transform.rotation.z - 0.03, duration: 0.28, ease: "power2.out" }, 0.04)
+      .to(group.position, { y: entity.transform.position.y, duration: 0.2, ease: "power2.inOut" }, 0.34)
+      .to(group.scale, { x: 1, y: 1, z: 1, duration: 0.2, ease: "power2.inOut" }, 0.34)
+      .to(group.rotation, { x: entity.transform.rotation.x, z: entity.transform.rotation.z, duration: 0.22, ease: "power2.inOut" }, 0.32);
+    return () => {
+      timeline.kill();
+    };
+  }, [entity.transform.position.x, entity.transform.position.y, entity.transform.position.z, entity.transform.rotation.x, entity.transform.rotation.y, entity.transform.rotation.z, onPopAnimationComplete, popAnimationActive, runtimeMode]);
+
+  useEffect(() => () => selectionGeometry.dispose(), [selectionGeometry]);
+
+  if (!prefab?.modelAsset) return null;
+
+  const restoreTransform = () => applyPose(RUNTIME_OBJECT_POP_COMPLETE);
+  const commitTransform = () => {
+    const group = groupRef.current;
+    if (!group) return;
+    transformActive.current = false;
+    onTransformDraggingChange(false);
+    const changed = onTransformEntity(entity.id, {
+      position: { x: snapEntityTransformValue(group.position.x), y: snapEntityTransformValue(group.position.y), z: snapEntityTransformValue(group.position.z) },
+      rotation: { x: snapEntityRotationValue(group.rotation.x), y: snapEntityRotationValue(group.rotation.y), z: snapEntityRotationValue(group.rotation.z) },
+    });
+    if (!changed) restoreTransform();
+  };
+
+  return (
+    <>
+      <group
+        ref={setGroupRef}
+        userData={{ portfolioEntityId: entity.id, portfolioPrefabModel: prefab.modelAsset.url }}
+        onPointerUp={(event) => {
+          if (runtimeMode) return;
+          event.stopPropagation();
+          onSelectEntity(entity.id, event.shiftKey);
+        }}
+      >
+        <PrefabModelVisual prefab={prefab} variantId={entity.variantId} entityScale={entity.transform.scale} />
+        {selected ? (
+          <mesh geometry={selectionGeometry} material={selectedMaterial} position={[0, footprint.height / 2, 0]} renderOrder={12} />
+        ) : null}
+      </group>
+      {transformEnabled && transformObject ? (
+        <TransformControls
+          object={transformObject}
+          mode={transformMode}
+          size={0.82}
+          space="world"
+          onMouseDown={() => {
+            transformActive.current = true;
+            onTransformDraggingChange(true);
+          }}
+          onMouseUp={commitTransform}
+          onPointerMissed={restoreTransform}
+        />
+      ) : null}
+    </>
+  );
+}
+
 type PrefabBatch = {
   key: string;
   primitive: PrimitiveType;
@@ -5358,13 +5594,21 @@ function EditorPrefabEntities({
   const selectedEntity = runtimeMode
     ? null
     : visibleEntities.find((entity) => selectedEntityIds.includes(entity.id)) ?? null;
+  const modelEntities = useMemo(
+    () => visibleEntities.filter((entity) => Boolean(getPrefabDefinition(entity.prefabId ?? "")?.modelAsset)),
+    [visibleEntities],
+  );
+  const primitiveEntities = useMemo(
+    () => visibleEntities.filter((entity) => !getPrefabDefinition(entity.prefabId ?? "")?.modelAsset),
+    [visibleEntities],
+  );
   const revealDelays = useMemo(
     () => createRuntimeObjectRevealDelays(visibleEntities, reducedMotion),
     [reducedMotion, visibleEntities],
   );
   const batches = useMemo(
-    () => createPrefabBatches(visibleEntities.filter((entity) => runtimeMode || !selectedEntityIds.includes(entity.id))),
-    [runtimeMode, selectedEntityIds, visibleEntities],
+    () => createPrefabBatches(primitiveEntities.filter((entity) => runtimeMode || !selectedEntityIds.includes(entity.id))),
+    [primitiveEntities, runtimeMode, selectedEntityIds],
   );
 
   useEffect(() => {
@@ -5391,7 +5635,26 @@ function EditorPrefabEntities({
           onSelectEntity={onSelectEntity}
         />
       ))}
-      {selectedEntity ? (
+      {modelEntities.map((entity) => (
+        <ModelPrefabEntity
+          key={entity.id}
+          entity={entity}
+          runtimeMode={runtimeMode}
+          runtimeRevealState={runtimeMode ? runtimeRevealState : "complete"}
+          revealDelay={revealDelays.get(entity.id) ?? 0}
+          reducedMotion={reducedMotion}
+          selected={!runtimeMode && selectedEntityIds.includes(entity.id)}
+          selectedMaterial={selectedMaterial}
+          transformMode={transformMode}
+          transformEnabled={transformEnabled && selectedEntityIds.includes(entity.id)}
+          popAnimationActive={popAnimationEntityId === entity.id}
+          onPopAnimationComplete={onPopAnimationComplete}
+          onSelectEntity={onSelectEntity}
+          onTransformDraggingChange={onTransformDraggingChange}
+          onTransformEntity={onTransformEntity}
+        />
+      ))}
+      {selectedEntity && !getPrefabDefinition(selectedEntity.prefabId ?? "")?.modelAsset ? (
         <EditablePrefabEntity
           entity={selectedEntity}
           geometries={geometries}
@@ -5691,6 +5954,7 @@ function EditablePrefabEntity({
 function createPrefabBatches(entities: PlacedMapEntity[]): PrefabBatch[] {
   const batches = new Map<string, PrefabBatch>();
   for (const entity of entities) {
+    if (getPrefabDefinition(entity.prefabId ?? "")?.modelAsset) continue;
     const resolved = resolvePrefabInstance(entity);
     for (const part of resolved.parts) {
       const chunkX = Math.max(0, Math.min(3, Math.floor((part.transform.position.x + 32) / 16)));
