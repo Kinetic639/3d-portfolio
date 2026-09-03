@@ -1,0 +1,383 @@
+.shell {
+  position: relative;
+  width: 100vw;
+  height: 100svh;
+  overflow: hidden;
+  background: #bfd0c0;
+  color: #e8ece8;
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.panel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  width: min(308px, calc(100vw - 32px));
+  max-height: calc(100svh - 32px);
+  overflow-y: auto;
+  border: 1px solid rgba(232, 236, 232, 0.16);
+  border-radius: 6px;
+  background: rgba(24, 29, 27, 0.92);
+  box-shadow: 0 12px 30px rgba(12, 16, 14, 0.22);
+  font-size: 12px;
+}
+
+.actorPanel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 2;
+  width: min(340px, calc(100vw - 356px));
+  min-width: 292px;
+  max-height: calc(100svh - 32px);
+  overflow-y: auto;
+  border: 1px solid rgba(232, 236, 232, 0.16);
+  border-radius: 6px;
+  background: rgba(24, 29, 27, 0.94);
+  box-shadow: 0 12px 30px rgba(12, 16, 14, 0.22);
+  font-size: 12px;
+}
+
+.treePanel {
+  width: min(360px, calc(100vw - 356px));
+}
+
+.actorHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid rgba(232, 236, 232, 0.12);
+}
+
+.actorHeader h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.actorHeader p {
+  margin: 4px 0 0;
+  color: #aab5af;
+  line-height: 1.35;
+}
+
+.closeButton {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  place-items: center;
+  border: 0;
+  border-radius: 3px;
+  background: #343d38;
+  color: #dce2de;
+  cursor: pointer;
+  font-size: 17px;
+}
+
+.panelHeader,
+.section {
+  padding: 12px;
+}
+
+.panelHeader {
+  border-bottom: 1px solid rgba(232, 236, 232, 0.12);
+}
+
+.panelHeader h1 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.panelHeader p {
+  margin: 5px 0 0;
+  color: #aab5af;
+  line-height: 1.35;
+}
+
+.section {
+  display: grid;
+  gap: 9px;
+  border-bottom: 1px solid rgba(232, 236, 232, 0.1);
+}
+
+.sectionTitle {
+  margin: 0;
+  color: #96a39c;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.control {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 8px;
+}
+
+.control label {
+  color: #d5dbd7;
+}
+
+.control output {
+  color: #aeb9b3;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.control input[type="range"] {
+  width: 100%;
+  accent-color: #d09343;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 5px;
+  background: #111512;
+}
+
+.segmentedThree {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 2px;
+  border-radius: 5px;
+  background: #111512;
+}
+
+.segmented button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #9eaaa4;
+  cursor: pointer;
+}
+
+.segmentedThree button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #9eaaa4;
+  text-transform: capitalize;
+  cursor: pointer;
+}
+
+.segmented button[aria-pressed="true"] {
+  background: #3a4640;
+  color: #ffffff;
+}
+
+.segmentedThree button[aria-pressed="true"] {
+  background: #3a4640;
+  color: #ffffff;
+}
+
+.clipList {
+  display: grid;
+  max-height: 208px;
+  gap: 3px;
+  overflow-y: auto;
+}
+
+.clipButton {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border: 1px solid rgba(232, 236, 232, 0.08);
+  border-radius: 3px;
+  background: #252d29;
+  color: #e2e7e4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.clipButton:hover {
+  border-color: rgba(224, 157, 69, 0.5);
+  background: #303a35;
+}
+
+.clipButton small {
+  color: #929e98;
+  font-size: 10px;
+}
+
+.commandRow {
+  display: grid;
+  grid-template-columns: 1.35fr 0.75fr 1fr;
+  gap: 4px;
+}
+
+.commandRow button {
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 1px solid rgba(232, 236, 232, 0.1);
+  border-radius: 3px;
+  background: #343d38;
+  color: #dce2de;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.presetRow,
+.meshTabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+}
+
+.weatherPresetRow {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.meshTabs {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.presetRow button,
+.weatherPresetRow button,
+.meshTabs button,
+.debugGrid button {
+  min-height: 27px;
+  padding: 4px 6px;
+  border: 1px solid rgba(232, 236, 232, 0.1);
+  border-radius: 3px;
+  background: #29312d;
+  color: #b9c3bd;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.presetRow button {
+  text-transform: capitalize;
+}
+
+.weatherPresetRow button {
+  min-width: 0;
+  font-size: 9px;
+}
+
+.meshTabs button[aria-pressed="true"],
+.debugGrid button[aria-pressed="true"] {
+  border-color: rgba(224, 157, 69, 0.6);
+  background: #4a4030;
+  color: #fff;
+}
+
+.debugGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.selectControl {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: #d5dbd7;
+}
+
+.selectControl select {
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgba(232, 236, 232, 0.14);
+  border-radius: 3px;
+  background: #1c231f;
+  color: #dce2de;
+}
+
+.attributeList {
+  margin: 0;
+  color: #c2cbc6;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.toggleRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #c9d1cc;
+}
+
+.toggle input {
+  accent-color: #d09343;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 12px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats dt {
+  color: #9eaaa4;
+}
+
+.stats dd {
+  margin: 0;
+  color: #f0f3f1;
+  text-align: right;
+}
+
+.note {
+  margin: 0;
+  color: #929e98;
+  line-height: 1.4;
+}
+
+@media (max-width: 700px) {
+  .panel {
+    top: 8px;
+    right: 8px;
+    width: min(280px, calc(100vw - 16px));
+    max-height: calc(100svh - 16px);
+  }
+
+  .actorPanel {
+    top: auto;
+    bottom: 8px;
+    left: 8px;
+    width: min(320px, calc(100vw - 16px));
+    min-width: 0;
+    max-height: 48svh;
+  }
+
+  .treePanel {
+    width: min(340px, calc(100vw - 16px));
+  }
+}
+
+@media (min-width: 701px) and (max-width: 760px) {
+  .actorPanel {
+    width: 292px;
+  }
+}
