@@ -8955,7 +8955,15 @@
       {"x":121,"y":8,"z":93,"blockId":10},
       {"x":122,"y":8,"z":93,"blockId":10},
       {"x":123,"y":8,"z":93,"blockId":10},
-      {"x":124,"y":8,"z":93,"blockId":10}
+      {"x":124,"y":8,"z":93,"blockId":10},
+      {"x":127,"y":1,"z":107,"blockId":1},
+      {"x":127,"y":1,"z":108,"blockId":1},
+      {"x":127,"y":1,"z":109,"blockId":1},
+      {"x":127,"y":1,"z":110,"blockId":1},
+      {"x":127,"y":1,"z":111,"blockId":1},
+      {"x":127,"y":1,"z":112,"blockId":1},
+      {"x":88,"y":2,"z":110,"blockId":1},
+      {"x":88,"y":2,"z":111,"blockId":1}
     ]
   },
   "zoneAssignments": [
@@ -9969,7 +9977,7 @@
   },
   "metadata": {
     "createdAt": "2026-08-03T00:00:00Z",
-    "updatedAt": "2026-11-15T13:02:51.010Z",
+    "updatedAt": "2026-11-15T23:19:02.080Z",
     "authoringVersion": "primary-terrain-v2"
   }
 }
