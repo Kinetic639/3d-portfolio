@@ -6,6 +6,8 @@ export type VoxelRayHit = {
   cell: GridCoordinate;
   /** Distance along the ray, in world units. */
   distance: number;
+  /** Unit normal of the face the ray entered through; zero when the ray started inside the cell. */
+  normal: GridCoordinate;
   point: WorldPosition;
 };
 
@@ -62,6 +64,7 @@ export function raycastVoxels(
   let nextZ = dz !== 0 ? ((dz > 0 ? z + 1 - pz : pz - z) * deltaZ) : Infinity;
   const limit = maxDistance / blockSize;
   let local = 0;
+  const normal = { x: 0, y: 0, z: 0 };
 
   while (travelled + local <= limit) {
     if (x < 0 || x >= width || z < 0 || z >= depth || y < minY || y > maxY) return null;
@@ -70,6 +73,7 @@ export function raycastVoxels(
       return {
         cell: { x, y, z },
         distance,
+        normal: { ...normal },
         point: { x: origin.x + dx * distance, y: origin.y + dy * distance, z: origin.z + dz * distance },
       };
     }
@@ -77,14 +81,23 @@ export function raycastVoxels(
       local = nextX;
       nextX += deltaX;
       x += stepX;
+      normal.x = -stepX;
+      normal.y = 0;
+      normal.z = 0;
     } else if (nextY <= nextZ) {
       local = nextY;
       nextY += deltaY;
       y += stepY;
+      normal.x = 0;
+      normal.y = -stepY;
+      normal.z = 0;
     } else {
       local = nextZ;
       nextZ += deltaZ;
       z += stepZ;
+      normal.x = 0;
+      normal.y = 0;
+      normal.z = -stepZ;
     }
   }
   return null;

@@ -108,3 +108,31 @@ export function setDefaultMapId(id: string, root?: string) {
   fs.writeFileSync(path.join(getMapsRoot(root), "index.json"), `${JSON.stringify(index, null, 2)}\n`);
   return index;
 }
+
+/** Copies a map under a new id and name. */
+export function duplicateMap(sourceId: string, id: string, name: string, root?: string): MapDefinition {
+  if (mapExists(id, root)) {
+    throw new Error(`A map with id ${id} already exists.`);
+  }
+  const source = readMap(sourceId, root);
+  const now = new Date().toISOString();
+  return writeMap({ ...source, id, name, metadata: { ...source.metadata, createdAt: now } }, { root });
+}
+
+/**
+ * Changes a map's name and, optionally, its id. Changing the id moves the
+ * map's directory (baked output included) and follows the default-map index.
+ */
+export function renameMap(id: string, next: { id?: string; name?: string }, root?: string): MapDefinition {
+  const map = readMap(id, root);
+  const nextId = next.id ?? id;
+  if (nextId !== id) {
+    if (!isValidMapId(nextId)) throw new Error(`Invalid map id: ${String(nextId)}.`);
+    if (mapExists(nextId, root)) throw new Error(`A map with id ${nextId} already exists.`);
+    fs.renameSync(path.dirname(mapFile(id, root)), path.dirname(mapFile(nextId, root)));
+    if (readMapIndex(root).defaultMapId === id) {
+      fs.writeFileSync(path.join(getMapsRoot(root), "index.json"), `${JSON.stringify({ defaultMapId: nextId }, null, 2)}\n`);
+    }
+  }
+  return writeMap({ ...map, id: nextId, name: next.name ?? map.name }, { root });
+}

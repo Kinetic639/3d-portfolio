@@ -14,6 +14,8 @@ export type CameraRigOptions = {
   minDistance?: number;
   maxDistance?: number;
   initialDistance?: number;
+  /** Mouse buttons that pan (0 left, 1 middle, 2 right). Touch always pans. Default: left. */
+  panButtons?: number[];
   /** Called for a press-and-release that did not move: a click or tap on the world. */
   onTap?: (clientX: number, clientY: number) => void;
   /** Called whenever the rig needs another frame. */
@@ -63,6 +65,7 @@ export class CameraRig {
       minDistance: options.minDistance ?? 16,
       maxDistance: options.maxDistance ?? 82,
       initialDistance: options.initialDistance ?? 62,
+      panButtons: options.panButtons ?? [0],
       onTap: options.onTap,
       onChange: options.onChange,
     };
@@ -82,6 +85,15 @@ export class CameraRig {
       this.pressStart = null;
       this.heldKeys.clear();
     }
+  }
+
+  /** Changes which mouse buttons pan and the zoom range. */
+  configure(settings: { panButtons?: number[]; minDistance?: number; maxDistance?: number }) {
+    if (settings.panButtons) this.options.panButtons = settings.panButtons;
+    if (settings.minDistance !== undefined) this.options.minDistance = settings.minDistance;
+    if (settings.maxDistance !== undefined) this.options.maxDistance = settings.maxDistance;
+    this.clampGoal();
+    this.options.onChange();
   }
 
   setBounds(bounds: CameraBounds) {
@@ -255,7 +267,7 @@ export class CameraRig {
     const element = this.element;
 
     element.addEventListener("pointerdown", (event) => {
-      if (!this.enabled || (event.pointerType === "mouse" && event.button !== 0)) return;
+      if (!this.enabled || (event.pointerType === "mouse" && !this.options.panButtons.includes(event.button))) return;
       try {
         // Keeps the drag alive when the pointer leaves the canvas.
         element.setPointerCapture(event.pointerId);
