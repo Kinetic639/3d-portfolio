@@ -104,6 +104,28 @@ export class CameraRig {
     this.options.onChange();
   }
 
+  /** True while a pointer is pressed on the canvas (dragging or pinching). */
+  isPointerDown() {
+    return this.pointers.size > 0;
+  }
+
+  /**
+   * Centres a ground point in the part of the viewport that UI does not
+   * cover. `inset` is the size, in CSS pixels, of panels on the right and bottom edges.
+   */
+  focusOn(x: number, z: number, distance: number, inset: { right?: number; bottom?: number } = {}) {
+    this.goalDistance = distance;
+    this.clampGoal();
+    const units = this.worldUnitsPerPixel();
+    this.goalTarget.set(
+      x + ((inset.right ?? 0) / 2) * units,
+      0,
+      z + (((inset.bottom ?? 0) / 2) * units) / this.direction.y,
+    );
+    this.clampGoal();
+    this.options.onChange();
+  }
+
   getView() {
     return { x: this.target.x, z: this.target.z, distance: this.distance };
   }

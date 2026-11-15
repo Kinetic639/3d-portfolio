@@ -31,6 +31,10 @@ All copy is in `content/portfolio.ts`.
 
 Attaching content to an object or zone: set `contentReference: { contentType, contentId }` on a map entity, marker or zone. Editor support arrives in stage 4; until then edit the map file.
 
+Anything with a resolvable `contentReference` becomes clickable automatically: it gets an icon, a hover label and opens the item at its URL. A reference to content that does not exist is ignored at runtime and reported by map validation.
+
+To change how a kind looks in the panel and on its page, edit `components/content/ContentArticle.tsx`.
+
 ## Migrate an old map file
 
 ```bash

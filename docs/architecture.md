@@ -2,7 +2,7 @@
 
 This document describes how the portfolio is built and why. It is updated at the end of every stage of the rebuild; sections marked *planned* describe decisions that are made but not implemented yet.
 
-Status: **stage 1 of 9 complete** (foundation). See [Stage log](#stage-log).
+Status: **stage 2 of 9 complete** (world, camera, interaction). See [Stage log](#stage-log).
 
 ## Overview
 
@@ -36,7 +36,23 @@ Per-frame data never crosses the bridge. Pointer position, camera transform, the
 
 **Why.** The previous implementation kept all world and editor state as React state inside one component rendered in the WebGL canvas. Every pointer move re-rendered that component, serialised roughly a hundred fields, and re-rendered the editor panel. Making the boundary a module with a deliberately narrow vocabulary means the UI cannot depend on high-frequency data even by accident.
 
-**Open content and the URL** (*planned, stage 2*). The open content item is not stored in the bridge. The URL is its source of truth: clicking an interactable emits `content-activated`, the UI pushes the item's URL with `history.pushState` (which the Next.js router observes), and the panel renders from the pathname. Back and Escape therefore close the panel without extra code, and every item has a server-rendered page at the same URL (`lib/content/content.ts`: `getContentPath`, `findContentByPath`).
+**Open content and the URL.** The open content item is not stored in the bridge. The URL is its source of truth:
+
+1. A click on an interactable makes the engine emit `content-activated`.
+2. `useContentRoute` (`components/world/use-content-route.ts`) pushes the item's canonical URL with `history.pushState`. The Next.js router observes this without navigating, so the world is not remounted (an e2e test tags the engine instance and checks that it survives).
+3. The panel renders from `usePathname()`, and an effect sends `focus-content` (or `clear-focus`) to the engine, which moves the camera and remembers the previous view.
+
+Consequences: the close button, Escape and browser Back are the same operation; Forward reopens; a direct link (`/projects/<slug>`) is a statically generated page whose HTML already contains the content, and the world focuses the matching object once it is running. Opening a second item while the panel is open replaces the history entry, so one Back always returns to the world.
+
+## Interaction
+
+`lib/engine/interactables.ts` builds the list of clickable things once per map: entities, markers and zones whose `contentReference` resolves to existing content.
+
+- **Signal.** Every interactable has an icon sprite floating above it. Icons ignore depth, so they are visible and clickable even behind other objects. On hover the icon grows and brightens, the cursor becomes a pointer and the HUD names the item.
+- **Picking.** Icons are tested first (ray against sphere), then object bounding boxes (ray against box, rejected when terrain is closer), then terrain: a voxel ray march (`lib/world/voxel-raycast.ts`) finds the cell under the pointer and its zone. No render geometry is involved. Measured cost: 0.02 ms per pick.
+- **Frequency.** Pointer moves are coalesced to at most one pick per animation frame. A frame is rendered and the bridge is updated only when the hovered item changes. Touch has no hover; a tap picks directly.
+- **Occlusion.** Objects whose bounds lie between the camera and the hovered or focused interactable are drawn with an ordered-dither fade (a per-instance attribute in `entity-meshes.ts`), which needs no transparency sorting. Terrain is not faded; the fixed camera angle and the always-visible icons cover that case.
+- **Keyboard and screen readers.** A canvas cannot expose its objects to assistive technology, so the HUD menu lists every content item as a real link; activating one is the same as clicking the object.
 
 ## How the world is built
 
@@ -97,6 +113,8 @@ Measured in Chromium with a real GPU (RTX 2060), 1440×900. "Before" is commit `
 | JS heap (visitor, production) | 284 MB | 37 MB |
 | Frame pacing while panning (visitor) | p95 33 ms (production, idle camera) | median 16.7 ms, p95 16.8 ms, max 67 ms (dev) |
 | Draw calls / triangles in view | 53 / 66 k | 32–35 / 30–37 k |
+| Click on an object to content panel in the DOM | no working path on the main map | 30 ms (dev build, stage 2) |
+| 80 pointer moves crossing zones and objects | not applicable | 91 ms script, 80 picks, 4 frames (dev build, stage 2) |
 | Unit test suite | 57 s, 1–3 flaky timeouts | 6 s, 124 tests, stable |
 | `pnpm lint` | 5 errors, 41 warnings | 0 errors, 0 warnings |
 
@@ -115,3 +133,12 @@ Remaining known costs, with the stage that addresses them:
 - Content model with one canonical URL per item.
 - World bridge, engine skeleton (on-demand rendering, fixed camera with mouse, touch and keyboard, environment uniforms), thin React mount.
 - Not in this stage: clicking objects, content panels, landing page, editor, baking.
+
+### Stage 2: world, camera, interaction
+
+- Interactables with always-visible icons, hover signal, voxel-ray zone picking and occluder fade.
+- Content panel driven by the URL: close, Escape, Back and Forward; a statically generated page per content item; camera focus that accounts for the panel and restores the previous view.
+- HUD menu as the keyboard and screen-reader path to all content.
+- The default map's two objects and four of its zones are linked to placeholder content (`scripts/assign-placeholder-content.ts`).
+- e2e (11 tests): hover, click, URL, Escape, close, Back/Forward, zone click, direct link, keyboard only, touch tap and drag.
+- Not in this stage: a zone highlight on the ground (waits for the baked look) and leaving the world (there is no landing page yet).

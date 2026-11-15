@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { PORTFOLIO_CONTENT } from "@/content/portfolio";
 import { worldBridge } from "@/lib/bridge/world-bridge";
+import { resolveContentReference } from "@/lib/content/content";
 import { migrateMapDefinition } from "@/lib/maps/map-definition";
 import WorldStatus from "./WorldStatus";
 import styles from "./WorldView.module.css";
@@ -41,6 +43,7 @@ export default function WorldView({ mapId }: { mapId: string }) {
 
       await engine.loadMap(migrateMapDefinition(rawMap), {
         signal,
+        describeContent: (reference) => resolveContentReference(PORTFOLIO_CONTENT, reference)?.title ?? null,
         onProgress: (fraction) => worldBridge.set({ progress: fraction * 0.9 }),
       });
       if (signal.aborted) return;
@@ -73,8 +76,9 @@ export default function WorldView({ mapId }: { mapId: string }) {
       <canvas
         ref={canvasRef}
         className={styles.canvas}
+        data-world
         tabIndex={0}
-        aria-label="Interactive 3D world. Drag or use arrow keys to move, scroll or use plus and minus to zoom."
+        aria-label="Interactive 3D world. Drag or use arrow keys to move, scroll or use plus and minus to zoom. Use the menu to open content with the keyboard."
       />
       <WorldStatus />
     </div>

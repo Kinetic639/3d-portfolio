@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import WorldView from "@/components/world/WorldView";
+import WorldExperience from "@/components/world/WorldExperience";
 import { listMapIds, mapExists } from "@/lib/maps/map-store";
 
 // Only maps that exist in the repository at build time are reachable.
@@ -15,7 +15,7 @@ export default async function MapPage({ params }: { params: Promise<{ mapId: str
 
   return (
     <main>
-      <WorldView mapId={mapId} />
+      <WorldExperience mapId={mapId} worldPath={`/map/${mapId}`} />
     </main>
   );
 }

@@ -1,4 +1,4 @@
-import WorldView from "@/components/world/WorldView";
+import WorldExperience from "@/components/world/WorldExperience";
 import { readMapIndex } from "@/lib/maps/map-store";
 
 export default function Home() {
@@ -7,7 +7,7 @@ export default function Home() {
 
   return (
     <main>
-      <WorldView mapId={defaultMapId} />
+      <WorldExperience mapId={defaultMapId} worldPath="/" />
     </main>
   );
 }

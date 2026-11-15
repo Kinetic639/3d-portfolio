@@ -9673,7 +9673,11 @@
       "visibleInLegend": true,
       "overlayVisible": false,
       "locked": false,
-      "focusDirection": "southwest"
+      "focusDirection": "southwest",
+      "contentReference": {
+        "contentType": "skillGroup",
+        "contentId": "frontend"
+      }
     },
     {
       "id": "zone-3",
@@ -9686,7 +9690,11 @@
       "visibleInLegend": true,
       "overlayVisible": false,
       "locked": false,
-      "focusDirection": "northwest"
+      "focusDirection": "northwest",
+      "contentReference": {
+        "contentType": "project",
+        "contentId": "project-placeholder-2"
+      }
     },
     {
       "id": "zone-4",
@@ -9699,7 +9707,11 @@
       "visibleInLegend": true,
       "overlayVisible": false,
       "locked": false,
-      "focusDirection": "east"
+      "focusDirection": "east",
+      "contentReference": {
+        "contentType": "experience",
+        "contentId": "experience-placeholder-1"
+      }
     },
     {
       "id": "zone-5",
@@ -9712,7 +9724,11 @@
       "visibleInLegend": true,
       "overlayVisible": false,
       "locked": false,
-      "focusDirection": "southeast"
+      "focusDirection": "southeast",
+      "contentReference": {
+        "contentType": "about",
+        "contentId": "about"
+      }
     },
     {
       "id": "zone-6",
@@ -9831,7 +9847,11 @@
         "communication-station",
         "prefab-instance"
       ],
-      "locked": false
+      "locked": false,
+      "contentReference": {
+        "contentType": "contact",
+        "contentId": "contact"
+      }
     },
     {
       "id": "portfolio-workshop-compound",
@@ -9886,7 +9906,11 @@
         "workshop-compound",
         "prefab-instance"
       ],
-      "locked": false
+      "locked": false,
+      "contentReference": {
+        "contentType": "project",
+        "contentId": "project-placeholder-1"
+      }
     }
   ],
   "entityGroups": [],
@@ -9945,7 +9969,7 @@
   },
   "metadata": {
     "createdAt": "2026-08-03T00:00:00Z",
-    "updatedAt": "2026-11-15T09:18:53.408Z",
+    "updatedAt": "2026-11-15T13:02:51.010Z",
     "authoringVersion": "primary-terrain-v2"
   }
 }
