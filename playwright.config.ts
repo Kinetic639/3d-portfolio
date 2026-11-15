@@ -10,6 +10,10 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "on-first-retry",
+    // Use the real GPU when there is one: software WebGL makes frame-pacing checks meaningless.
+    launchOptions: {
+      args: ["--enable-gpu", "--ignore-gpu-blocklist", ...(process.platform === "win32" ? ["--use-angle=d3d11"] : [])],
+    },
   },
   webServer: {
     command: `pnpm exec next ${serverMode} -p ${port}`,

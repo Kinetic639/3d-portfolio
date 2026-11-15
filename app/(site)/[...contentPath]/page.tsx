@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import WorldExperience from "@/components/world/WorldExperience";
+import LandingPage from "@/components/site/LandingPage";
 import { PORTFOLIO_CONTENT } from "@/content/portfolio";
 import { findContentByPath, getContentPath } from "@/lib/content/content";
-import { readMapIndex } from "@/lib/maps/map-store";
 
 type Params = { contentPath: string[] };
 
@@ -24,15 +23,10 @@ export async function generateMetadata({ params }: { params: Promise<Params> }):
   };
 }
 
+/** An item's own page: the landing page with that item first. Entering the world from here goes straight to it. */
 export default async function ContentPage({ params }: { params: Promise<Params> }) {
   const { contentPath } = await params;
-  if (!findContentByPath(PORTFOLIO_CONTENT, `/${contentPath.join("/")}`)) notFound();
-
-  // Same shell as the home page: the open item comes from the URL, so the
-  // content is in the server-rendered HTML and the world focuses it once ready.
-  return (
-    <main>
-      <WorldExperience mapId={readMapIndex().defaultMapId} worldPath="/" />
-    </main>
-  );
+  const item = findContentByPath(PORTFOLIO_CONTENT, `/${contentPath.join("/")}`);
+  if (!item) notFound();
+  return <LandingPage featured={item} />;
 }

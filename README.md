@@ -2,7 +2,7 @@
 
 Michał Stępień's portfolio: a Next.js site whose centrepiece is an interactive 3D world built from voxels in a local editor and baked into static geometry for production.
 
-The project is being rebuilt in stages on the `rebuild/base` branch. Stage 1 (foundation) is done: map format, content model, the engine skeleton and the bridge between the 3D world and the page UI. The landing page, the editor, baking, the asset pipeline and the mini-game follow.
+The project is being rebuilt in stages on the `rebuild/base` branch. Stages 1–3 are done: the map format and content model, the engine and its bridge to the page UI, clickable objects with a content panel and a URL per item, and the landing page with background loading, warm-up and the entry transition. The editor, baking, the asset pipeline and the mini-game follow.
 
 ## Run it
 
@@ -11,7 +11,7 @@ pnpm install
 pnpm dev
 ```
 
-Open http://localhost:3000. Drag or use the arrow keys to move, scroll or press + and - to zoom.
+Open http://localhost:3000. The page is the portfolio as plain HTML; once the world behind it is ready, an "Enter the world" button appears at the bottom. Inside, drag or use the arrow keys to move, scroll or press + and - to zoom, and click the icons to open content.
 
 ## Checks
 
@@ -19,6 +19,7 @@ Open http://localhost:3000. Drag or use the arrow keys to move, scroll or press 
 pnpm lint
 pnpm typecheck
 pnpm test
+pnpm e2e
 pnpm build
 ```
 

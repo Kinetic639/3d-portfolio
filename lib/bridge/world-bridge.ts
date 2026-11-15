@@ -64,8 +64,8 @@ export type WorldBridgeState = {
 };
 
 export type WorldCommand =
-  | { type: "enter"; focus?: MapContentReference }
-  | { type: "exit" }
+  | { type: "enter"; focus?: MapContentReference; inset?: { right?: number; bottom?: number }; reducedMotion?: boolean }
+  | { type: "exit"; reducedMotion?: boolean }
   | { type: "focus-content"; content: MapContentReference; inset?: { right?: number; bottom?: number } }
   | { type: "clear-focus" }
   | { type: "set-quality"; quality: QualityTier }

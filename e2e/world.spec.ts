@@ -1,59 +1,9 @@
-import { expect, test, type Page } from "@playwright/test";
-
-type Vec3 = { x: number; y: number; z: number; clone: () => Vec3; project: (camera: unknown) => Vec3 };
-type EngineProbe = {
-  stats: { frames: number; picks: number; drawCalls: number; triangles: number };
-  rig: { camera: unknown; getView: () => { x: number; z: number; distance: number } };
-  interaction: { items: Array<{ id: string; label: string; anchor: Vec3 }> };
-};
-
-declare global {
-  interface Window {
-    __worldEngine?: EngineProbe;
-  }
-}
-
-async function openWorld(page: Page, path = "/") {
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(String(error)));
-  page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
-  });
-  await page.goto(path);
-  await page.waitForFunction(() => (window.__worldEngine?.stats.frames ?? 0) > 0, null, { timeout: 60_000 });
-  await expect(page.getByRole("status")).toHaveCount(0);
-  // Let any opening camera move finish so positions are stable.
-  await settle(page);
-  return errors;
-}
-
-/** Waits until the engine has stopped drawing frames. */
-async function settle(page: Page) {
-  await page.waitForFunction(() => new Promise<boolean>((resolve) => {
-    const before = window.__worldEngine!.stats.frames;
-    setTimeout(() => resolve(window.__worldEngine!.stats.frames === before), 250);
-  }), null, { timeout: 15_000 });
-}
-
-const view = (page: Page) => page.evaluate(() => window.__worldEngine!.rig.getView());
-const frames = (page: Page) => page.evaluate(() => window.__worldEngine!.stats.frames);
-
-/** Screen position of an interactable's icon. */
-async function iconPosition(page: Page, id: string) {
-  return page.evaluate((targetId) => {
-    const engine = window.__worldEngine!;
-    const item = engine.interaction.items.find((candidate) => candidate.id === targetId)!;
-    const ndc = item.anchor.clone().project(engine.rig.camera);
-    const rect = document.querySelector("canvas")!.getBoundingClientRect();
-    return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
-  }, id);
-}
-
-const PROJECT_OBJECT = "entity:portfolio-workshop-compound";
-const PROJECT_PATH = "/projects/project-placeholder-one";
+import { expect, test } from "@playwright/test";
+import { frames, iconPosition, openWorld, PROJECT_OBJECT, PROJECT_PATH, settle, trackErrors, view } from "./helpers";
 
 test("the default map renders without errors", async ({ page }) => {
-  const errors = await openWorld(page);
+  const errors = trackErrors(page);
+  await openWorld(page);
   const stats = await page.evaluate(() => window.__worldEngine!.stats);
   expect(stats.drawCalls).toBeGreaterThan(0);
   expect(stats.triangles).toBeGreaterThan(1000);
@@ -199,25 +149,6 @@ test("clicking terrain inside a content zone opens that zone's content", async (
   await page.mouse.click(icon.x, icon.y + 60);
   await expect(page.getByRole("dialog").getByRole("heading", { name: "About" })).toBeVisible();
   await expect(page).toHaveURL(/\/about$/);
-});
-
-test("a direct link serves the content as HTML and focuses it in the world", async ({ page, request }) => {
-  const html = await (await request.get(PROJECT_PATH)).text();
-  expect(html).toContain("Project Placeholder One");
-  expect(html).toContain("Placeholder for a future featured project.");
-  expect((await request.get("/projects/nope")).status()).toBe(404);
-
-  await openWorld(page, PROJECT_PATH);
-  const panel = page.getByRole("dialog");
-  await expect(panel.getByRole("heading", { name: "Project Placeholder One" })).toBeVisible();
-  await expect(page).toHaveTitle(/Project Placeholder One/);
-  const focused = await view(page);
-  expect(focused.distance).toBeLessThan(62);
-
-  // No in-app history to go back to: closing lands on the world's own URL.
-  await panel.getByRole("button", { name: /close/i }).click();
-  await expect(panel).toHaveCount(0);
-  await expect(page).toHaveURL(/\/$/);
 });
 
 test("content can be opened from the menu with the keyboard alone", async ({ page }) => {
