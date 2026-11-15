@@ -1,12 +1,14 @@
 import * as THREE from "three";
 import type { QualityTier, WorldBridge, WorldCommand } from "@/lib/bridge/world-bridge";
+import { decodeBakedWorld, type RuntimeMap } from "@/lib/bake/baked-format";
 import type { MapContentReference, MapDefinition } from "@/lib/maps/map-definition";
-import type { VoxelWorld } from "@/lib/world/voxel-world";
+import { createBakedQuery, createBakedTerrain } from "./baked-terrain";
 import { CameraRig } from "./camera-rig";
 import { buildEntityLayer, type EntityLayer } from "./entity-meshes";
 import { Environment } from "./environment";
 import { InteractionLayer, type Interactable } from "./interactables";
 import { buildWorldForMap, type TerrainSource } from "./terrain-meshes";
+import { createVoxelWorldQuery, type WorldQuery } from "./world-query";
 
 /**
  * The 3D runtime. Plain TypeScript on three.js: no React anywhere in this
@@ -87,7 +89,6 @@ export class WorldEngine {
   private readonly rehearsalCamera = new THREE.PerspectiveCamera();
   private readonly resizeObserver: ResizeObserver;
   private readonly cleanup: Array<() => void> = [];
-  private world: VoxelWorld | null = null;
   private terrain: TerrainSource | null = null;
   private entities: EntityLayer | null = null;
   private interaction: InteractionLayer | null = null;
@@ -147,7 +148,10 @@ export class WorldEngine {
     this.cleanup.push(bridge.commands.subscribe((command) => this.handleCommand(command)));
   }
 
-  /** Builds everything a map needs. Resolves once the scene can be rendered. */
+  /**
+   * Loads a map from its voxels: the unbaked path, used for maps without a
+   * current bake. The voxel world is built and meshed in a worker.
+   */
   async loadMap(definition: MapDefinition, options: LoadMapOptions = {}) {
     this.unloadMap();
     const { world, terrain } = await buildWorldForMap(definition, options);
@@ -155,13 +159,23 @@ export class WorldEngine {
       terrain.dispose();
       return;
     }
+    this.install(definition, terrain, createVoxelWorldQuery(world), options);
+  }
 
-    this.world = world;
+  /** Loads a baked world file: static geometry, no voxel data, nothing to build. */
+  loadBaked(file: ArrayBuffer, options: LoadMapOptions = {}) {
+    this.unloadMap();
+    const baked = decodeBakedWorld(file);
+    this.install(baked.header.map, createBakedTerrain(baked), createBakedQuery(baked), options);
+    options.onProgress?.(1);
+  }
+
+  private install(definition: RuntimeMap, terrain: TerrainSource, query: WorldQuery, options: LoadMapOptions) {
     this.terrain = terrain;
     this.entities = buildEntityLayer(definition.entities);
     this.interaction = new InteractionLayer({
       map: definition,
-      world,
+      query,
       entities: this.entities,
       describeContent: options.describeContent ?? (() => null),
     });
@@ -169,13 +183,13 @@ export class WorldEngine {
     this.environment.apply(definition.environment);
 
     // The camera may only centre on the playable area; backdrop scenery stays out of reach.
-    const min = world.gridToWorld(definition.playableBounds.minX, 0, definition.playableBounds.minZ);
-    const max = world.gridToWorld(definition.playableBounds.maxX, 0, definition.playableBounds.maxZ);
+    const min = query.cellToWorld(definition.playableBounds.minX, 0, definition.playableBounds.minZ);
+    const max = query.cellToWorld(definition.playableBounds.maxX, 0, definition.playableBounds.maxZ);
     const margin = 6;
     this.rig.setBounds({ minX: min.x + margin, maxX: max.x - margin, minZ: min.z + margin, maxZ: max.z - margin });
     const spawn = definition.spawnPoints.find((candidate) => candidate.id === definition.defaultSpawnId) ?? definition.spawnPoints[0];
     const focus = spawn
-      ? world.gridToWorld(spawn.cameraTarget?.x ?? spawn.position.x, 0, spawn.cameraTarget?.z ?? spawn.position.z)
+      ? query.cellToWorld(spawn.cameraTarget?.x ?? spawn.position.x, 0, spawn.cameraTarget?.z ?? spawn.position.z)
       : { x: (min.x + max.x) / 2, z: (min.z + max.z) / 2 };
     this.rig.lookAt(focus.x, focus.z, undefined, true);
   }
@@ -337,7 +351,6 @@ export class WorldEngine {
       this.entities.dispose();
       this.entities = null;
     }
-    this.world = null;
     this.viewBeforeFocus = null;
     this.bridge.set({ hovered: null });
   }

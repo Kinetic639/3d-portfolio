@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { PORTFOLIO_CONTENT } from "@/content/portfolio";
 import { worldBridge, type QualityTier } from "@/lib/bridge/world-bridge";
 import { resolveContentReference } from "@/lib/content/content";
-import { migrateMapDefinition } from "@/lib/maps/map-definition";
+import { migrateMapDefinition, type MapContentReference } from "@/lib/maps/map-definition";
 
 type Disposable = { dispose: () => void };
 
@@ -58,7 +58,7 @@ function prefersSavingData() {
  * initial JavaScript. With the Save-Data preference, loading waits for the
  * visitor to ask for it (the returned `start`).
  */
-export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasElement | null>) {
+export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasElement | null>, bakeHash?: string) {
   const startRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
@@ -78,9 +78,24 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
       const context = canvas.getContext("webgl2", { antialias: true, alpha: false, powerPreference: "high-performance" });
       if (!context) return unavailable();
       worldBridge.set({ phase: "loading", progress: 0, quality: guessQuality() });
-      const [{ WorldEngine }, { default: rawMap }] = await Promise.all([
+      // A baked world is one binary file. Without a current bake, or if the file
+      // cannot be fetched, the voxel map is the fallback: slower, but the world still opens.
+      const voxelMap = () => import(`@/maps/${mapId}/map.json`).then((module: { default: unknown }) => module.default);
+      const bakedWorld = (hash: string) =>
+        fetch(`/world-data/${mapId}/${hash}.bin`, { signal })
+          .then((response) => {
+            if (!response.ok) throw new Error(`Baked world request failed (${response.status}).`);
+            // The file is stored gzip-compressed; decompression runs off the main thread.
+            return new Response(response.body!.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+          })
+          .catch((error: unknown) => {
+            if (signal.aborted) throw error;
+            console.warn("Falling back to the voxel map:", error);
+            return voxelMap();
+          });
+      const [{ WorldEngine }, source] = await Promise.all([
         import("@/lib/engine/world-engine"),
-        import(`@/maps/${mapId}/map.json`),
+        bakeHash ? bakedWorld(bakeHash) : voxelMap(),
       ]);
       if (signal.aborted) return;
 
@@ -90,11 +105,13 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
         (window as unknown as { __worldEngine?: unknown }).__worldEngine = instance;
       }
 
-      await instance.loadMap(migrateMapDefinition(rawMap), {
+      const loadOptions = {
         signal,
-        describeContent: (reference) => resolveContentReference(PORTFOLIO_CONTENT, reference)?.title ?? null,
-        onProgress: (fraction) => worldBridge.set({ progress: fraction * 0.6 }),
-      });
+        describeContent: (reference: MapContentReference) => resolveContentReference(PORTFOLIO_CONTENT, reference)?.title ?? null,
+        onProgress: (fraction: number) => worldBridge.set({ progress: fraction * 0.6 }),
+      };
+      if (source instanceof ArrayBuffer) instance.loadBaked(source, loadOptions);
+      else await instance.loadMap(migrateMapDefinition(source), loadOptions);
       if (signal.aborted) return;
 
       worldBridge.set({ phase: "warming", progress: 0.6 });
@@ -135,7 +152,7 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
       engine?.dispose();
       worldBridge.reset();
     };
-  }, [mapId, canvasRef]);
+  }, [mapId, canvasRef, bakeHash]);
 
   /** Starts loading now. Only needed when automatic loading was held back. */
   return useCallback(() => startRef.current(), []);

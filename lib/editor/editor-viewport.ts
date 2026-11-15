@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { decodeBakedWorld } from "@/lib/bake/baked-format";
+import { createBakedTerrain } from "@/lib/engine/baked-terrain";
 import { CameraRig } from "@/lib/engine/camera-rig";
 import { buildEntityLayer, type EntityLayer } from "@/lib/engine/entity-meshes";
 import { Environment } from "@/lib/engine/environment";
@@ -116,6 +118,8 @@ export class EditorViewport {
   private settings: ToolSettings;
   private selection: string[] = [];
   private preview = false;
+  /** The baked terrain, while the baked view is on. Editing is off in that view. */
+  private baked: TerrainSource | null = null;
   private viewBeforePreview: { x: number; z: number; distance: number } | null = null;
   private zonesVisible = true;
   private pointer: { x: number; y: number } | null = null;
@@ -214,7 +218,36 @@ export class EditorViewport {
 
   setZonesVisible(visible: boolean) {
     this.zonesVisible = visible;
-    this.zoneGroup.visible = visible;
+    this.zoneGroup.visible = visible && this.baked === null;
+    this.invalidate();
+  }
+
+  get isBakedView() {
+    return this.baked !== null;
+  }
+
+  /**
+   * Shows a baked world file in place of the voxel terrain, or the voxels
+   * again with null. The baked view is for looking: tools are off until the
+   * voxels are back.
+   */
+  setBakedView(file: ArrayBuffer | null) {
+    if (this.baked) {
+      this.scene.remove(this.baked.group);
+      this.baked.dispose();
+      this.baked = null;
+    }
+    if (file) {
+      this.baked = createBakedTerrain(decodeBakedWorld(file));
+      this.scene.add(this.baked.group);
+    }
+    this.terrain.group.visible = this.baked === null;
+    this.zoneGroup.visible = this.zonesVisible && this.baked === null;
+    this.stroke = null;
+    this.hoverKey = "";
+    this.setPreviewCells([], false);
+    this.callbacks.onHover(null);
+    this.canvas.style.cursor = "default";
     this.invalidate();
   }
 
@@ -255,6 +288,7 @@ export class EditorViewport {
     this.resizeObserver.disconnect();
     this.rig.dispose();
     this.entities.dispose();
+    this.baked?.dispose();
     this.terrain.dispose();
     for (const id of [...this.zoneChunks.keys()]) this.clearZoneChunk(id);
     this.zoneMaterials.forEach(({ fill, line }) => {
@@ -511,13 +545,13 @@ export class EditorViewport {
   }
 
   private schedulePick() {
-    if (!this.pointer || this.preview) return;
+    if (!this.pointer || this.preview || this.baked) return;
     this.pickPending = true;
     this.invalidate();
   }
 
   private updateHover() {
-    if (!this.pointer || this.preview) {
+    if (!this.pointer || this.preview || this.baked) {
       this.setPreviewCells([], false);
       return;
     }
@@ -764,7 +798,7 @@ export class EditorViewport {
 
     canvas.addEventListener("pointerdown", (event) => {
       canvas.focus({ preventScroll: true });
-      if (this.preview || event.button !== 0 || event.pointerType === "touch") return;
+      if (this.preview || this.baked || event.button !== 0 || event.pointerType === "touch") return;
       this.pointer = { x: event.clientX, y: event.clientY };
       const ray = this.setRay(event.clientX, event.clientY);
       const { tool } = this.settings;

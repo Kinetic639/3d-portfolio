@@ -1,4 +1,5 @@
 import WorldLayer from "@/components/world/WorldLayer";
+import { listFreshBakes } from "@/lib/bake/bake-records";
 import { readMapIndex } from "@/lib/maps/map-store";
 
 /**
@@ -13,7 +14,8 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
   return (
     <>
       {children}
-      <WorldLayer defaultMapId={defaultMapId} />
+      {/* Maps with a current bake load it; the rest fall back to their voxel map. */}
+      <WorldLayer defaultMapId={defaultMapId} bakes={listFreshBakes()} />
     </>
   );
 }

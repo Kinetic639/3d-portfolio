@@ -62,6 +62,20 @@
   color: var(--dsd-accent-3);
 }
 
+.bakeState {
+  font-size: 12px;
+  color: var(--dsd-muted);
+}
+
+.bakeState[data-bake="stale"],
+.bakeState[data-bake="missing"] {
+  color: var(--dsd-accent-2);
+}
+
+.bakeState[data-bake="fresh"] {
+  color: var(--dsd-accent);
+}
+
 .title {
   margin: 0 6px;
 }

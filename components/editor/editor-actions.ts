@@ -36,11 +36,72 @@ export async function saveMap(editor: EditorContextValue) {
     await api(`/api/editor/maps/${mapId}`, { method: "PUT", body: JSON.stringify(session.toDefinition()) });
     session.markSaved();
     store.setState({ notice: { kind: "info", text: `Saved to maps/${mapId}/map.json at ${new Date().toLocaleTimeString()}.` } });
+    void refreshBakeStatus(editor);
     return true;
   } catch (error) {
     store.setState({ notice: { kind: "error", text: `Not saved: ${error instanceof Error ? error.message : String(error)}` } });
     return false;
   }
+}
+
+type BakeStatusResponse = { state: "missing" | "stale" | "fresh"; record?: { fileBytes: number; stats: { playableTriangles: number; backdropTriangles: number; bytes: number; bakeMs: number } } };
+
+export async function refreshBakeStatus(editor: EditorContextValue) {
+  try {
+    const status = await api<BakeStatusResponse>(`/api/editor/maps/${editor.mapId}/bake`);
+    editor.store.setState({ bake: status.state });
+  } catch {
+    editor.store.setState({ bake: "unknown" });
+  }
+}
+
+/** Saves if needed, then bakes the saved map into maps/<id>/baked. */
+export async function bakeSavedMap(editor: EditorContextValue) {
+  const { store, session, mapId } = editor;
+  if (session.isDirty && !(await saveMap(editor))) return false;
+  store.setState({ notice: { kind: "info", text: "Baking…" } });
+  try {
+    const { record } = await api<Required<BakeStatusResponse>>(`/api/editor/maps/${mapId}/bake`, { method: "POST" });
+    const { stats } = record;
+    store.setState({
+      bake: "fresh",
+      notice: { kind: "info", text: `Baked to maps/${mapId}/baked: ${(stats.playableTriangles + stats.backdropTriangles).toLocaleString("en")} triangles, ${Math.round(record.fileBytes / 1024)} KB, ${stats.bakeMs} ms.` },
+    });
+    return true;
+  } catch (error) {
+    store.setState({ notice: { kind: "error", text: `Bake failed: ${error instanceof Error ? error.message : String(error)}` } });
+    return false;
+  }
+}
+
+/**
+ * Switches the viewport between the voxels and a bake of the map as it is
+ * now, unsaved edits included. The bake runs in a worker and writes nothing.
+ */
+export function setTerrainView(editor: EditorContextValue, view: "voxels" | "baked") {
+  const { store, viewport, session } = editor;
+  if (view === "voxels") {
+    viewport.setBakedView(null);
+    store.setState({ terrainView: "voxels" });
+    return;
+  }
+  if (store.getState().terrainView !== "voxels") return;
+  store.setState({ terrainView: "baking" });
+  const worker = new Worker(new URL("../../lib/editor/bake.worker.ts", import.meta.url), { type: "module" });
+  const finish = (file: ArrayBuffer | null, error?: string) => {
+    worker.terminate();
+    // The user may have gone back to voxels while the bake was running.
+    if (store.getState().terrainView !== "baking") return;
+    if (file) {
+      viewport.setBakedView(file);
+      store.setState({ terrainView: "baked" });
+    } else {
+      store.setState({ terrainView: "voxels", notice: { kind: "error", text: `Bake preview failed: ${error ?? "unknown error"}` } });
+    }
+  };
+  worker.onmessage = (event: MessageEvent<{ file?: ArrayBuffer; error?: string }>) => finish(event.data.file ?? null, event.data.error);
+  worker.onerror = (event) => finish(null, event.message);
+  worker.postMessage(session.toDefinition());
 }
 
 export function deleteSelection(editor: EditorContextValue) {

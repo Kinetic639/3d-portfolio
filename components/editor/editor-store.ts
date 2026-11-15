@@ -26,6 +26,10 @@ export type EditorUiState = {
   entitiesRevision: number;
   /** Inspector tab. It follows what the user is doing: selecting shows objects, the zone tool shows zones. */
   inspectorTab: "object" | "zones" | "map";
+  /** Whether maps/<id>/baked matches the saved map. "unknown" until the first check. */
+  bake: "unknown" | "missing" | "stale" | "fresh";
+  /** What the viewport shows as terrain. */
+  terrainView: "voxels" | "baking" | "baked";
   notice: { kind: "info" | "error"; text: string } | null;
   validation: string[] | null;
 };
@@ -57,6 +61,8 @@ export function createEditorStore() {
     metaRevision: 0,
     entitiesRevision: 0,
     inspectorTab: "object",
+    bake: "unknown",
+    terrainView: "voxels",
     notice: null,
     validation: null,
   }));

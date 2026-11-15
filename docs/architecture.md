@@ -125,6 +125,55 @@ How it is checked: the e2e test `entering loads nothing, compiles nothing and ru
 
 **Quality tiers.** The starting tier is a guess from device hints (coarse pointer, memory, cores); warm-up lowers it from measurement. Today a tier only caps the device pixel ratio (1.5 / 1.25 / 1). Shadows and post-processing will hang off the same value.
 
+## Baking
+
+A map is authored as voxels and shipped as a **baked world**: smooth static geometry plus the little data the runtime needs. `pnpm bake` (or **Bake** in the editor) writes it next to the map, and it is committed with the map:
+
+```
+maps/<id>/map.json           the voxel map (source)
+maps/<id>/baked/world.bin    what visitors download (gzip)
+maps/<id>/baked/bake.json    which map content it was baked from, sizes, counts
+```
+
+**Pipeline** (`lib/bake/`):
+
+1. **Density.** One sample per cell: 1 solid, 0 air, the filled fraction for partial shapes. Below the world is solid and the edge columns repeat outwards, so the surface has no floor and no walls at the map's edge.
+2. **Blur.** One separable [1, 2, 1] pass. A one-block step becomes a slope; a flat top stays exactly at its height.
+3. **Surface Nets.** One vertex per grid cube the surface crosses, at the mean of the edge crossings. Normals come from the density gradient, colours from the highest solid cell touching the vertex.
+4. **Cut and simplify.** Triangles are split into the playable area (plus an 8-cell ring) and the backdrop. Each part is simplified with meshoptimizer with its open borders locked, so the parts still meet exactly. Allowed error: 0.02 units in the playable area, 0.35 in the backdrop. Normals and colours take part in the error so material edges keep their vertices.
+5. **Tiles.** 32-unit tiles in the playable area, 64-unit in the backdrop, for frustum culling.
+6. **Grids.** A height and a zone id per column replace the voxel world for picking (`createHeightfieldQuery`).
+
+Steps 1–3 depend only on the density around a point, so meshes built from overlapping parts of one world agree exactly where they meet (tested). Two things rest on that: the cut in step 4, and mini-game zones.
+
+**Mini-game zones stay voxels.** Columns of zones with `kind: "minigame"` are left out of the static mesh. The bake stores the mesher's input for each such zone (density and material around its bounding rectangle), and the runtime runs the same mesher on it (`createBakedTerrain`). The zone therefore looks like the terrain around it, meets it without a gap (tested: the re-meshed zone equals the part missing from the static mesh, triangle for triangle), and can be re-meshed when a mini-game changes its voxels.
+
+**What the visitor loads.** The site layout lists every map whose bake is *fresh* (its `sourceHash` matches the map file, ignoring the save timestamp). For those, the browser fetches `/world-data/<id>/<hash>.bin` (a statically generated route, immutable caching) and never downloads the voxel map. A map without a fresh bake falls back to the voxel path. `pnpm test` fails when the default map's bake is stale, and `pnpm bake --check` reports it.
+
+**One runtime, two terrain sources.** The engine installs a `TerrainSource` (meshes) and a `WorldQuery` (ray against terrain, ground height, zone of a column). Voxel maps provide them from the voxel world, baked maps from the file; interaction code only sees the query.
+
+**Look.** Baked terrain is drawn with flat shading (facets). With smooth shading the smoothed relief was hard to read. Materials blend across one cell because colour is per vertex; this is the placeholder look, and the place where textures or a splat shader would attach later is the single material in `lib/engine/baked-terrain.ts`.
+
+Measured on the default map (192×192, RTX 2060, production build):
+
+| Measure | Voxel path (stage 3) | Baked |
+|---|---|---|
+| Triangles in the world | 76 940 (smooth, unsimplified) / ~37 k voxel faces in view | 9 676 |
+| World data downloaded | 344 KB map chunk | 91 KB (248 KB after decompression) |
+| JavaScript fetched for the world | 937 KB | 609 KB |
+| World ready after navigation start | 3.1–3.9 s | 1.1–1.4 s |
+| Same with 4× CPU throttling | 4.9–5.3 s | 2.4–2.8 s |
+| Total blocking time while loading | 16–18 ms | 38–69 ms (one task of 88–108 ms) |
+| Warm-up | 630 ms | 570–640 ms, slowest rehearsal frame 0.9–2.9 ms |
+| Draw calls in view | 32–35 | 39 |
+| Entry transition: frames, slowest | 95, 16.8 ms | 95, 16.8 ms, 0 long tasks, 0 scripts fetched |
+| JS heap after entering | 33 MB | 12 MB |
+| Bake time | – | 0.7–0.9 s |
+
+The blocking time went up slightly: decoding the file and creating 32 geometries now happens on the main thread in one go, where the voxel path received chunks from a worker one at a time. It is one task of about 0.1 s; splitting it across frames is possible if it ever matters.
+
+Known limits: the heightfield query knows one height per column, so picking ignores overhangs; partial shapes (slabs, kerbs, rubble: about 200 cells in the default map) are baked as soft bumps, not as their exact form; the backdrop is flat-shaded with large triangles and shows faint facet edges at a low sun.
+
 ## Editor
 
 The editor is at `/editor` (`/editor?map=<id>`) and exists only in development.
@@ -140,6 +189,8 @@ The editor is at `/editor` (`/editor?map=<id>`) and exists only in development.
 | UI | `components/editor/` | React panels over a small zustand store that mirrors history state and two revision counters. Terrain edits change none of those values, so painting does not re-render React. Hover text and frame times are written to the DOM directly. |
 
 **Saving.** `PUT /api/editor/maps/<id>` validates and writes `maps/<id>/map.json` through `lib/maps/map-store.ts`. The editor validates first (including content references) and refuses to save an invalid map. The map manager creates, duplicates, renames and deletes maps and sets the default map in `maps/index.json`; those actions write to disk at once and are not part of the undo history.
+
+**Baking from the editor.** **Bake** saves if needed and writes `maps/<id>/baked` through `POST /api/editor/maps/<id>/bake` (the same code as `pnpm bake`). The label next to it says whether the bake matches the map. The **Voxels / Baked** switch bakes the map as it is in the editor, unsaved edits included, in a worker, and shows the result in the viewport without writing anything; tools are off in that view, and any edit returns to the voxels.
 
 **Visitor preview.** "Preview as visitor" switches the same viewport to the visitor's camera limits, fog and no overlays. It does not show interaction icons or panels; "Open saved map in site" opens the last saved version in the real runtime at `/map/<id>`.
 
@@ -208,7 +259,7 @@ Remaining known costs:
 
 - One frame of about 165 ms on the landing page when the browser initialises its GPU process for the first WebGL context. No script is running at that moment (the long-animation-frame entry reports 0 ms of blocking), so it cannot be sliced from page code; it happens once, about half a second after load, and only shows if the visitor is scrolling at that instant.
 - One task of about 66 ms when the engine chunk (three.js, 570 KB) is evaluated. On a 4×-throttled CPU this becomes about 270 ms. The remedy would be to run the renderer in a worker with `OffscreenCanvas`, which is a larger change not planned here.
-- The map JSON (344 KB chunk) is still downloaded by visitors; stage 5 replaces it with baked assets.
+- (Resolved in stage 5: visitors download the 91 KB baked world instead of the 344 KB map chunk.)
 - Lighthouse itself was not run; the numbers above come from `PerformanceObserver` in headless Chromium.
 
 ## Stage log
@@ -250,3 +301,14 @@ Remaining known costs:
 - Removed unused pre-rebuild editor modules (command palette, layout store, counters, map presets, navigation authoring).
 - e2e (8 tests) on scratch maps that are created and deleted through the editor's API; they run after the site tests because saving a map reloads site pages in development.
 - Not in this stage: baking and its preview toggle (stage 5), model library with thumbnails (stage 6).
+- Later fix: saving, renaming or baking writes under `maps/`, which reloads site pages in development.
+
+### Stage 5: baking
+
+- `lib/bake/`: smooth mesher (density, blur, Surface Nets), bake (cut, simplify, tiles, grids, voxel zones), file format, store. `pnpm bake [id...|--all|--check]`.
+- Engine: `loadBaked`, `TerrainSource` from the baked file, `WorldQuery` in place of direct voxel access; the site loads a fresh bake and falls back to voxels otherwise.
+- Editor: Bake button with freshness label, Voxels / Baked view.
+- The default map is baked and committed; a unit test fails when its bake is stale.
+- Tests: 10 unit tests (mesher, bake, zone re-meshing, heightfield rays against voxel rays, freshness), 2 editor e2e tests; all 19 site e2e tests now run against the baked world.
+- New dev dependency: meshoptimizer (simplification, bake time only; not in the visitor bundle).
+- Not in this stage: digging in mini-game zones (stage 8), textures or other art for the baked terrain.

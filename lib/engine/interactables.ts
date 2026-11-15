@@ -1,8 +1,8 @@
 import * as THREE from "three";
-import { isInsidePlayableBounds, type MapContentReference, type MapDefinition } from "@/lib/maps/map-definition";
-import { raycastVoxels } from "@/lib/world/voxel-raycast";
-import type { VoxelWorld } from "@/lib/world/voxel-world";
+import type { RuntimeMap } from "@/lib/bake/baked-format";
+import { isInsidePlayableBounds, type MapContentReference } from "@/lib/maps/map-definition";
 import type { EntityLayer } from "./entity-meshes";
+import type { WorldQuery } from "./world-query";
 
 /**
  * Everything a visitor can click: objects, markers and zones that reference
@@ -29,8 +29,9 @@ export type Interactable = {
 };
 
 export type InteractionLayerOptions = {
-  map: MapDefinition;
-  world: VoxelWorld;
+  map: RuntimeMap;
+  /** Terrain questions, answered by the voxel world or by a baked world's grids. */
+  query: WorldQuery;
   entities: EntityLayer;
   /** Display title for a content reference, or null when the content does not exist. */
   describeContent: (reference: MapContentReference) => string | null;
@@ -66,8 +67,8 @@ function createIconTexture() {
 export class InteractionLayer {
   readonly group = new THREE.Group();
   readonly items: Interactable[] = [];
-  private readonly world: VoxelWorld;
-  private readonly map: MapDefinition;
+  private readonly query: WorldQuery;
+  private readonly map: RuntimeMap;
   private readonly entities: EntityLayer;
   private readonly sprites = new Map<string, THREE.Sprite>();
   private readonly zoneItems = new Map<number, Interactable>();
@@ -79,7 +80,7 @@ export class InteractionLayer {
   private focusedId: string | null = null;
 
   constructor(options: InteractionLayerOptions) {
-    this.world = options.world;
+    this.query = options.query;
     this.map = options.map;
     this.entities = options.entities;
     this.group.name = "interactables";
@@ -138,7 +139,7 @@ export class InteractionLayer {
     }
     if (best) return best;
 
-    const terrain = raycastVoxels(this.world, this.ray.origin, this.ray.direction);
+    const terrain = this.query.raycast(this.ray.origin, this.ray.direction);
     const terrainDistance = terrain?.distance ?? Infinity;
     for (const item of this.items) {
       if (!item.box) continue;
@@ -153,8 +154,8 @@ export class InteractionLayer {
     }
     if (best) return best;
 
-    if (terrain && isInsidePlayableBounds(this.map, terrain.cell.x, terrain.cell.z)) {
-      return this.zoneItems.get(this.world.getColumnZone(terrain.cell.x, terrain.cell.z)) ?? null;
+    if (terrain && isInsidePlayableBounds(this.map, terrain.x, terrain.z)) {
+      return this.zoneItems.get(this.query.columnZone(terrain.x, terrain.z)) ?? null;
     }
     return null;
   }
@@ -187,7 +188,7 @@ export class InteractionLayer {
     this.group.clear();
   }
 
-  private collect({ map, world, entities, describeContent }: InteractionLayerOptions) {
+  private collect({ map, query, entities, describeContent }: InteractionLayerOptions) {
     for (const entity of map.entities) {
       const box = entities.bounds.get(entity.id);
       if (!entity.contentReference || !box) continue;
@@ -211,7 +212,7 @@ export class InteractionLayer {
       if (!marker.contentReference || !marker.runtimeVisible) continue;
       const label = describeContent(marker.contentReference);
       if (!label) continue;
-      const base = world.gridToWorld(marker.gridPosition.x, marker.gridPosition.y, marker.gridPosition.z);
+      const base = query.cellToWorld(marker.gridPosition.x, marker.gridPosition.y, marker.gridPosition.z);
       const radius = Math.max(0.5, marker.interactionRadius);
       const center = new THREE.Vector3(base.x + (marker.offset?.x ?? 0), base.y + (marker.offset?.y ?? 0), base.z + (marker.offset?.z ?? 0));
       this.items.push({
@@ -227,19 +228,31 @@ export class InteractionLayer {
       });
     }
 
+    // Reachable columns of each zone, read from the terrain rather than from the map file.
+    const zoneColumns = new Map<number, Array<{ x: number; z: number }>>();
+    for (let z = map.playableBounds.minZ; z <= map.playableBounds.maxZ; z += 1) {
+      for (let x = map.playableBounds.minX; x <= map.playableBounds.maxX; x += 1) {
+        const zoneId = query.columnZone(x, z);
+        if (zoneId === 0) continue;
+        const list = zoneColumns.get(zoneId);
+        if (list) list.push({ x, z });
+        else zoneColumns.set(zoneId, [{ x, z }]);
+      }
+    }
+
     for (const zone of map.zones) {
       if (!zone.contentReference) continue;
       const label = describeContent(zone.contentReference);
       if (!label) continue;
-      const columns = map.zoneAssignments.filter((assignment) => assignment.zoneId === zone.numericId && isInsidePlayableBounds(map, assignment.x, assignment.z));
-      if (columns.length === 0) continue;
+      const columns = zoneColumns.get(zone.numericId);
+      if (!columns) continue;
       const meanX = columns.reduce((sum, column) => sum + column.x, 0) / columns.length;
       const meanZ = columns.reduce((sum, column) => sum + column.z, 0) / columns.length;
       // The centroid of an L-shaped zone can fall outside it; use the member column nearest to it.
       const nearest = columns.reduce((best, column) =>
         (column.x - meanX) ** 2 + (column.z - meanZ) ** 2 < (best.x - meanX) ** 2 + (best.z - meanZ) ** 2 ? column : best);
-      const top = world.getHighestNonAirY(nearest.x, nearest.z) ?? 0;
-      const position = world.gridToWorld(nearest.x, top, nearest.z);
+      // The cell whose top face is the ground: its centre is half a cell below the surface.
+      const position = query.cellToWorld(nearest.x, query.surfaceHeight(nearest.x, nearest.z) - 1, nearest.z);
       const item: Interactable = {
         id: `zone:${zone.id}`,
         kind: "zone",

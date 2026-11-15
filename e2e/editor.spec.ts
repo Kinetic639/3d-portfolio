@@ -286,3 +286,47 @@ test("map manager creates, duplicates, renames and deletes maps", async ({ page,
   expect(after.defaultMapId).toBe(defaultBefore);
   await expect(row(defaultBefore).getByRole("button", { name: "Delete" })).toBeDisabled();
 });
+
+test("the baked view shows a bake of the map as it is and switches editing off", async ({ page }) => {
+  await openEditor(page);
+  const baked = page.getByRole("radio", { name: /Baked|Baking/ });
+  await baked.click();
+  await expect.poll(() => page.evaluate(() => (window.__editor!.viewport as unknown as { isBakedView: boolean }).isBakedView), { timeout: 30_000 }).toBe(true);
+  await expect(baked).toHaveAttribute("aria-checked", "true");
+
+  // Tools do nothing while the bake is shown.
+  await page.keyboard.press("2");
+  const point = await columnTop(page, 50, 50);
+  await page.mouse.click(point.x, point.y);
+  expect(await topOf(page, 50, 50)).toBe(point.top);
+
+  await page.getByRole("radio", { name: "Voxels" }).click();
+  expect(await page.evaluate(() => (window.__editor!.viewport as unknown as { isBakedView: boolean }).isBakedView)).toBe(false);
+  await page.mouse.click(point.x, point.y);
+  await expect.poll(() => topOf(page, 50, 50)).toBe(point.top + 1);
+  await page.keyboard.press("Control+z");
+});
+
+test("Bake writes the baked world next to the map and tracks whether it is current", async ({ page, request }) => {
+  await openEditor(page);
+  const status = async () => ((await (await request.get(`/api/editor/maps/${SCRATCH}/bake`)).json()) as { state: string }).state;
+  expect(await status()).toBe("missing");
+  await expect(page.getByText("not baked")).toBeVisible();
+
+  await page.getByRole("button", { name: "Bake", exact: true }).click();
+  await expect(page.getByText("bake up to date")).toBeVisible({ timeout: 30_000 });
+  expect(await status()).toBe("fresh");
+
+  // The site serves it under its content hash.
+  const { record } = (await (await request.get(`/api/editor/maps/${SCRATCH}/bake`)).json()) as { record: { hash: string; fileBytes: number } };
+  const file = await request.get(`/world-data/${SCRATCH}/${record.hash}.bin`);
+  expect(file.ok()).toBe(true);
+  expect((await file.body()).byteLength).toBe(record.fileBytes);
+
+  await page.keyboard.press("5");
+  const point = await columnTop(page, 12, 50);
+  await page.mouse.click(point.x, point.y);
+  await expect(page.getByText("bake out of date")).toBeVisible();
+  await page.keyboard.press("Control+s");
+  await expect.poll(status).toBe("stale");
+});

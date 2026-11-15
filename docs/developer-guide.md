@@ -48,6 +48,27 @@ Accepts schema v1–v4, writes `maps/my-map/map.json` in v5. `--backdrop N` adds
 - Any map in `maps/` is reachable at `/map/<id>`.
 - The default map shown on `/` is `defaultMapId` in `maps/index.json`. Commit and deploy to change it for visitors. In the editor: **Maps → Make default**.
 
+## Bake a map
+
+```bash
+pnpm bake            # the default map
+pnpm bake my-map     # one or more maps by id
+pnpm bake --all
+pnpm bake --check    # bakes nothing; exits 1 if a bake is missing or out of date
+```
+
+Or press **Bake** in the editor. Either way the result is `maps/<id>/baked/` (`world.bin`, `bake.json`); commit it with the map. The site uses a bake only while it matches the map file; after any saved change, bake again. `pnpm test` fails if the default map's bake is out of date.
+
+To look at the result before saving anything, use the **Voxels / Baked** switch in the editor.
+
+To change how baked terrain looks:
+
+- shape: `DEFAULT_BAKE_OPTIONS` in `lib/bake/bake-map.ts` (`smoothing`, allowed simplification error for the playable area and the backdrop, width of the full-quality ring);
+- shading and material: the one material in `lib/engine/baked-terrain.ts`;
+- colours: block colours in `lib/world/block-registry.ts`.
+
+Changing the file layout means raising `BAKE_FORMAT_VERSION` in `lib/bake/baked-format.ts`; older bakes then count as out of date and are re-baked.
+
 ## Use the editor
 
 `pnpm dev`, then open http://localhost:3000/editor (or `/editor?map=<id>`). It is not part of a production build.
@@ -64,6 +85,7 @@ Accepts schema v1–v4, writes `maps/my-map/map.json` in v5. `--backdrop N` adds
 | Undo / redo | **Ctrl+Z**, **Ctrl+Y** or **Ctrl+Shift+Z**: one history for everything |
 | Save | **Ctrl+S** writes `maps/<id>/map.json`. Validation runs first; errors are listed in the **Map** tab |
 | Maps | **Maps** button: create, duplicate, rename, delete, make default |
+| Bake | **Bake** writes `maps/<id>/baked`; **Voxels / Baked** previews a bake of the current state |
 | See it as a visitor | **Preview as visitor** (camera limits and fog), or **Open saved map in site** for the real runtime |
 
 ## Add a tool to the editor
@@ -88,7 +110,6 @@ A new kind of edit that the session cannot express yet (not terrain cells, zone 
 
 | Recipe | Stage |
 |---|---|
-| Bake a map | 5 |
 | Add a model or object type | 6 |
-| Replace or add a material, shader or post-processing effect | 5–6 |
+| Replace or add a material, shader or post-processing effect | 6 |
 | Add a mini-game | 8 |

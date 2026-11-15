@@ -6,7 +6,7 @@ import { EditorViewport, MAX_BRUSH_SIZE, type HoverInfo } from "@/lib/editor/edi
 import { buildWorldForMap } from "@/lib/engine/terrain-meshes";
 import { migrateMapDefinition } from "@/lib/maps/map-definition";
 import { ROTATION_VALUES } from "@/lib/voxel-shapes/shape-ids";
-import { api, deleteSelection, duplicateSelection, rotateSelection, saveMap } from "./editor-actions";
+import { api, bakeSavedMap, deleteSelection, duplicateSelection, refreshBakeStatus, rotateSelection, saveMap, setTerrainView } from "./editor-actions";
 import { createEditorStore, EditorContext, setSelection, updateSettings, useEditor, useEditorState, type EditorContextValue } from "./editor-store";
 import InspectorPanel from "./InspectorPanel";
 import MapsDialog from "./MapsDialog";
@@ -51,6 +51,11 @@ export default function EditorApp({ mapId, notice }: { mapId: string; notice?: s
       });
       session.subscribe((change) => {
         const state = store.getState();
+        // The baked view shows a bake of an earlier state; an edit sends the view back to the voxels.
+        if (state.terrainView !== "voxels" && (change.terrainChunks.length > 0 || change.zoneChunks.length > 0 || change.meta || change.entitiesStructural)) {
+          viewport?.setBakedView(null);
+          store.setState({ terrainView: "voxels" });
+        }
         store.setState({
           canUndo: session.canUndo,
           canRedo: session.canRedo,
@@ -62,6 +67,7 @@ export default function EditorApp({ mapId, notice }: { mapId: string; notice?: s
         });
       });
       const value = { mapId, session, viewport, store };
+      void refreshBakeStatus(value);
       (window as unknown as { __editor?: EditorContextValue }).__editor = value;
       setEditor(value);
     };
@@ -116,6 +122,9 @@ function Chrome({ hoverRef, notice }: { hoverRef: React.RefObject<HTMLSpanElemen
   const undoLabel = useEditorState((state) => state.undoLabel);
   const redoLabel = useEditorState((state) => state.redoLabel);
   const message = useEditorState((state) => state.notice);
+  const bake = useEditorState((state) => state.bake);
+  const terrainView = useEditorState((state) => state.terrainView);
+  const [baking, setBaking] = useState(false);
   useEditorState((state) => state.metaRevision);
   const [mapsOpen, setMapsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -217,7 +226,28 @@ function Chrome({ hoverRef, notice }: { hoverRef: React.RefObject<HTMLSpanElemen
         <button type="button" className={styles.primary} onClick={save} disabled={saving || !dirty} title="Save (Ctrl+S)">{saving ? "Saving…" : "Save"}</button>
         <button type="button" onClick={() => session.undo()} disabled={!canUndo} title={undoLabel ? `Undo ${undoLabel} (Ctrl+Z)` : "Nothing to undo"}>Undo</button>
         <button type="button" onClick={() => session.redo()} disabled={!canRedo} title={redoLabel ? `Redo ${redoLabel} (Ctrl+Y)` : "Nothing to redo"}>Redo</button>
+        <button
+          type="button"
+          disabled={baking}
+          title="Saves if needed, then writes maps/<id>/baked. Same as pnpm bake."
+          onClick={async () => {
+            setBaking(true);
+            await bakeSavedMap(editor);
+            setBaking(false);
+          }}
+        >
+          {baking ? "Baking…" : "Bake"}
+        </button>
+        <span className={styles.bakeState} data-bake={dirty && bake === "fresh" ? "stale" : bake} title="Whether maps/<id>/baked matches this map">
+          {dirty && bake === "fresh" ? "bake out of date" : bake === "fresh" ? "bake up to date" : bake === "stale" ? "bake out of date" : bake === "missing" ? "not baked" : ""}
+        </span>
         <span className={styles.spacer} />
+        <span className={styles.segmented} role="radiogroup" aria-label="Terrain view">
+          <button type="button" role="radio" aria-checked={terrainView === "voxels"} onClick={() => setTerrainView(editor, "voxels")}>Voxels</button>
+          <button type="button" role="radio" aria-checked={terrainView !== "voxels"} onClick={() => setTerrainView(editor, "baked")} title="Bakes the map as it is now and shows the result. Editing is off in this view.">
+            {terrainView === "baking" ? "Baking…" : "Baked"}
+          </button>
+        </span>
         <label className={styles.check}>
           <input
             type="checkbox"
