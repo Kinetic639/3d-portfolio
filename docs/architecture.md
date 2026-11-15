@@ -21,7 +21,8 @@ components/site/            Landing page (server components)
 components/world/           World layer: boot, entry prompt, HUD, content panel
 components/content/         Content rendering shared by pages and the panel
 components/ui/              DOM UI primitives (design tokens)
-lib/editor/                 Pure editing logic kept for the editor rebuild (stage 4)
+lib/editor/                 Editor document, history, tools and 3D viewport (no React)
+components/editor/          Editor UI (development only)
 scripts/                    CLI tools (map migration; baking in stage 5)
 ```
 
@@ -124,11 +125,40 @@ How it is checked: the e2e test `entering loads nothing, compiles nothing and ru
 
 **Quality tiers.** The starting tier is a guess from device hints (coarse pointer, memory, cores); warm-up lowers it from measurement. Today a tier only caps the device pixel ratio (1.5 / 1.25 / 1). Shadows and post-processing will hang off the same value.
 
-## Editor separation (*planned, stage 4*)
+## Editor
 
-The editor will be a development-only route with its own store, saving through development-only endpoints to `maps/`. The production build is checked for editor code. `lib/maps/map-store.ts` (file storage, default-map index) already exists and is Node-only.
+The editor is at `/editor` (`/editor?map=<id>`) and exists only in development.
 
-Since stage 1 the production bundle contains no editor code (verified by searching the build output); the old editor was removed and the new one does not exist yet.
+**Kept out of production by construction.** Its page is `app/editor/page.dev.tsx` and its endpoints are `app/api/editor/**/route.dev.ts`. `next.config.ts` adds `dev.tsx` and `dev.ts` to `pageExtensions` only when `NODE_ENV` is not `production`, so in a production build those files are not routes, and nothing else imports `components/editor` or `lib/editor/editor-viewport.ts`. Checked after `pnpm build`: the route list has no `/editor` or `/api/editor`, and the compiled output contains no editor strings. The endpoints also refuse to run in a production process (`devOnly` in `lib/editor/server/editor-api.ts`).
+
+**Three parts, same separation as the visitor runtime.**
+
+| Part | File | Role |
+|---|---|---|
+| Document and history | `lib/editor/editor-session.ts` | Owns the voxel world, entities and map fields. Every edit is a command that stores only what it changed; one undo stack for everything; strokes and drags are grouped into one step. Emits which chunks and entities changed. |
+| Viewport | `lib/editor/editor-viewport.ts` | three.js, no React. Picks, previews the brush, applies tools to the session, and rebuilds only what the session reported, once per frame. Renders on demand. |
+| UI | `components/editor/` | React panels over a small zustand store that mirrors history state and two revision counters. Terrain edits change none of those values, so painting does not re-render React. Hover text and frame times are written to the DOM directly. |
+
+**Saving.** `PUT /api/editor/maps/<id>` validates and writes `maps/<id>/map.json` through `lib/maps/map-store.ts`. The editor validates first (including content references) and refuses to save an invalid map. The map manager creates, duplicates, renames and deletes maps and sets the default map in `maps/index.json`; those actions write to disk at once and are not part of the undo history.
+
+**Visitor preview.** "Preview as visitor" switches the same viewport to the visitor's camera limits, fog and no overlays. It does not show interaction icons or panels; "Open saved map in site" opens the last saved version in the real runtime at `/map/<id>`.
+
+**Cost of an edit** (development build, the 192×192 default map, RTX 2060):
+
+| Operation | Result |
+|---|---|
+| Open the map | 1.4 s with a warm dev server |
+| Raise stroke across 32 columns, brush 1 | 39 chunk rebuilds, median frame 1.3 ms, slowest 32 ms, 0 long tasks |
+| Same, brush 9 | 77 chunk rebuilds, median 1.7 ms, slowest 32 ms, 0 long tasks |
+| Same, brush 31 (961 columns per step) | 118 chunk rebuilds, median 1.2 ms, slowest 89 ms, 2 long tasks |
+| Zone paint stroke, brush 31 | no terrain rebuilds, slowest 25 ms |
+| Place-blocks stroke, brush 31 | 107 chunk rebuilds, slowest 25 ms, 0 long tasks |
+| Undo of any of the above | 0.3–4.2 ms |
+| Building the file contents on save | 150–250 ms |
+
+Rebuilding one terrain chunk costs 2–4 ms. It was 13–25 ms when the editor was first measured: the mesher rebuilt each shape's face list for every cell and neighbour, looked shape ids up with a linear search, and filled twelve vertex attributes nobody reads. It now caches faces per (shape, rotation, state), reads the world's arrays directly and has a `renderOnly` mode. The same change shortens the visitor's world build.
+
+Known limits: entities are re-instanced as a whole when any entity changes (fine for hundreds, not for tens of thousands); a brush of 31 can produce a frame of about 90 ms on its first step; there is no box selection and no on-canvas rotate or scale handle (rotation and scale are set from the inspector and shortcuts).
 
 ## Performance: findings and results
 
@@ -136,7 +166,7 @@ Measured in Chromium with a real GPU (RTX 2060), 1440×900. "Before" is commit `
 
 | Finding | Before | After stage 1 |
 |---|---|---|
-| World state lived in React: 80 pointer moves over the scene (editor) | 45 panel publishes, 52 toolbar renders, 3 828 ms script | not applicable (editor returns in stage 4) |
+| World state lived in React: 80 pointer moves over the scene (editor) | 45 panel publishes, 52 toolbar renders, 3 828 ms script | 0 React renders; hover text is written to the DOM directly (stage 4) |
 | 80 pointer moves over the scene (visitor) | 1 486 ms script (dev) | 9 ms script, 0 frames, 0 layouts (dev) |
 | `getStats()` scanned all 1.18 M cells several times per render | 1 462 ms of the 3 828 ms above | O(1) counters |
 | Idle scene kept rendering | ~270–340 ms script per second (visitor) | 0 frames, 0 ms script in 3 s |
@@ -209,3 +239,14 @@ Remaining known costs:
 - Global stylesheet pruned from 3 118 to about 490 lines (dead rules of the old interface removed).
 - e2e: 19 tests (9 new for the landing page and entry).
 - Not in this stage: a styled design; the landing page is a plain placeholder layout on the existing tokens.
+
+### Stage 4: editor
+
+- `/editor`: development-only page and endpoints (`.dev.tsx` / `.dev.ts` page extensions), absent from the production build.
+- Session with one diff-based undo stack; viewport with tools for placing, removing and painting blocks (material, shape, facing), raising and lowering terrain with a sized brush, painting zones, and placing, selecting (multi), moving, rotating, scaling, duplicating and deleting objects.
+- Inspector: object fields and content assignment; zones with content or a mini-game; map name, playable area, environment; validation.
+- Map manager: create, duplicate, rename, delete, default map. Saving writes `maps/<id>/map.json`.
+- Surface mesher made 3–6× faster (see Editor above).
+- Removed unused pre-rebuild editor modules (command palette, layout store, counters, map presets, navigation authoring).
+- e2e (8 tests) on scratch maps that are created and deleted through the editor's API; they run after the site tests because saving a map reloads site pages in development.
+- Not in this stage: baking and its preview toggle (stage 5), model library with thumbnails (stage 6).

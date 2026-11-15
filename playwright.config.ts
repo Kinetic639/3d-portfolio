@@ -20,9 +20,19 @@ export default defineConfig({
     url: baseURL,
     reuseExistingServer: !process.env.CI,
   },
+  // The editor tests write map files. In development the site watches those
+  // files and reloads pages that use them, so the editor runs after the site
+  // tests instead of beside them.
   projects: [
     {
-      name: "chromium",
+      name: "site",
+      testIgnore: /editor.spec.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "editor",
+      testMatch: /editor.spec.ts/,
+      dependencies: ["site"],
       use: { ...devices["Desktop Chrome"] },
     },
   ],

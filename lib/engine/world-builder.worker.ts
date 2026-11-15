@@ -56,7 +56,7 @@ scope.onmessage = (event: MessageEvent<WorldBuildRequest>) => {
     let done = 0;
     for (let chunkZ = 0; chunkZ < counts.z; chunkZ += 1) {
       for (let chunkX = 0; chunkX < counts.x; chunkX += 1) {
-        const data = buildSurfaceChunkMesh(world, chunkX, chunkZ);
+        const data = buildSurfaceChunkMesh(world, chunkX, chunkZ, { renderOnly: true });
         done += 1;
         if (data.indices.length === 0) continue;
         const colors = new Float32Array(data.colors.length);

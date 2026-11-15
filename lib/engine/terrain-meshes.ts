@@ -58,7 +58,7 @@ function createGeometry(buffers: ChunkBuffers) {
 }
 
 function meshChunk(world: VoxelWorld, chunkX: number, chunkZ: number): ChunkBuffers | null {
-  const data = buildSurfaceChunkMesh(world, chunkX, chunkZ);
+  const data = buildSurfaceChunkMesh(world, chunkX, chunkZ, { renderOnly: true });
   if (data.indices.length === 0) return null;
   // The mesher emits sRGB block colours; three.js lights in linear space.
   const colors = new Float32Array(data.colors.length);
