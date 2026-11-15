@@ -10,12 +10,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest --passWithNoTests",
-    "e2e": "playwright test --pass-with-no-tests"
+    "e2e": "playwright test",
+    "migrate:map": "tsx scripts/migrate-legacy-map.ts"
   },
   "dependencies": {
-    "@gsap/react": "^2.1.2",
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.6.1",
     "gsap": "^3.15.0",
     "lucide-react": "^1.28.0",
     "next": "16.2.12",
@@ -23,22 +21,19 @@
     "react-dom": "19.2.4",
     "three": "^0.185.1",
     "zustand": "^5.0.14"
-  }, 
+  },
   "devDependencies": {
     "@gltf-transform/cli": "^4.4.2",
     "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
-    "@testing-library/jest-dom": "^7.0.0",
-    "@testing-library/react": "^16.3.2",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.185.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
-    "gltfjsx": "^6.5.3",
-    "jsdom": "^30.0.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }

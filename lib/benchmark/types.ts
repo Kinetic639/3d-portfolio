@@ -1,5 +1,3 @@
-import type { MapRegistryEntry } from "@/lib/maps/map-registry";
-
 export const BENCHMARK_SCHEMA_VERSION = 1;
 export const BENCHMARK_STORAGE_KEY = "portfolio.performanceBenchmarks.v1";
 export const MAX_BENCHMARK_HISTORY = 100;
@@ -199,7 +197,7 @@ export type BenchmarkHistory = {
   runs: BenchmarkRun[];
 };
 
-export type BenchmarkMapOption = MapRegistryEntry & {
+export type BenchmarkMapOption = { id: string; name: string } & {
   sourceLabel: string;
 };
 

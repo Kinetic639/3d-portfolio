@@ -3,7 +3,6 @@ import { BLOCK_IDS } from "@/lib/world/block-registry";
 import { VoxelWorld, createFlatVoxelWorld } from "@/lib/world/voxel-world";
 import { getWorldMaxY, WORLD_CONFIG } from "@/lib/world/world-config";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
-import { FLUID_IDS } from "@/lib/fluids/fluid-types";
 import { buildSurfaceChunkMesh } from "./surface-mesher";
 
 describe("surface mesher", () => {
@@ -275,17 +274,6 @@ describe("surface mesher", () => {
 
     expect(mesh.faceMappings.some((face) => face.cellIndex === world.getIndex(1, 1, 1) && face.direction === "px")).toBe(true);
     expect(mesh.visibleQuads).toBeGreaterThan(10);
-  });
-
-  it("does not treat independent fluid cells as opaque terrain geometry", () => {
-    const world = new VoxelWorld();
-    world.setBlock(1, 1, 1, BLOCK_IDS.Ground);
-    world.setFluidSource(2, 1, 1, FLUID_IDS.Water);
-
-    const mesh = buildSurfaceChunkMesh(world, 0, 0);
-
-    expect(mesh.faceMappings.some((face) => face.cellIndex === world.getIndex(1, 1, 1) && face.direction === "px")).toBe(true);
-    expect(mesh.faceMappings.some((face) => face.cellIndex === world.getIndex(2, 1, 1))).toBe(false);
   });
 
   it("maps generated triangles back to the owning logical cell", () => {

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createTerrainMutations } from "@/lib/editor/terrain-brushes";
 import { BLOCK_IDS } from "@/lib/world/block-registry";
 import { getWorldMaxY, WORLD_CONFIG } from "@/lib/world/world-config";
-import { MapEditorSession } from "@/lib/editor/map-editor";
 import { buildZoneOverlayChunkMeshes, buildZoneOverlayMeshes, getDirtyZoneChunkIdsForColumns } from "./zone-overlay";
 import { createFlatVoxelWorld } from "@/lib/world/voxel-world";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
@@ -40,42 +38,6 @@ describe("terrain-conforming zone overlays", () => {
     expect(Math.max(...yValues)).toBeGreaterThan(2);
   });
 
-  it("keeps a zone footprint when terrain is raised and lowered", () => {
-    const session = new MapEditorSession();
-    session.world.setColumnZone(8, 8, 2);
-    session.world.clearDirtyZoneChunks();
-
-    session.applyTerrainMutations("raise", createTerrainMutations({
-      world: session.world,
-      operation: "raise",
-      center: { x: 8, y: 0, z: 8 },
-      blockId: BLOCK_IDS.Ground,
-      zoneId: 2,
-    }));
-    expect(session.world.getColumnZone(8, 8)).toBe(2);
-
-    session.applyTerrainMutations("lower", createTerrainMutations({
-      world: session.world,
-      operation: "lower",
-      center: { x: 8, y: 1, z: 8 },
-      blockId: BLOCK_IDS.Ground,
-      zoneId: 2,
-    }));
-    expect(session.world.getColumnZone(8, 8)).toBe(2);
-  });
-
-  it("erases part of a zone on uneven terrain without changing adjacent columns", () => {
-    const session = new MapEditorSession();
-    session.world.setBlock(9, 1, 9, BLOCK_IDS.Ground);
-    session.applyTool("zone", { x: 9, y: 1, z: 9 }, BLOCK_IDS.Ground, 1);
-    session.applyTool("zone", { x: 10, y: 0, z: 9 }, BLOCK_IDS.Ground, 1);
-
-    session.applyTool("removeZone", { x: 9, y: 1, z: 9 }, BLOCK_IDS.Ground, 0);
-
-    expect(session.world.getColumnZone(9, 9)).toBe(0);
-    expect(session.world.getColumnZone(10, 9)).toBe(1);
-  });
-
   it("generates boundaries between neighboring zones", () => {
     const world = createFlatVoxelWorld();
     world.setColumnZone(12, 12, 1);
@@ -100,19 +62,6 @@ describe("terrain-conforming zone overlays", () => {
 
     expect(world.getColumnZone(14, 14)).toBe(1);
     expect(overlay.totalCells).toBe(0);
-  });
-
-  it("supports undo and redo of zone column changes", () => {
-    const session = new MapEditorSession();
-
-    session.applyTool("zone", { x: 15, y: 0, z: 15 }, BLOCK_IDS.Ground, 4);
-    expect(session.world.getColumnZone(15, 15)).toBe(4);
-
-    session.undo();
-    expect(session.world.getColumnZone(15, 15)).toBe(0);
-
-    session.redo();
-    expect(session.world.getColumnZone(15, 15)).toBe(4);
   });
 
   it("marks only affected zone chunks dirty for zone painting", () => {

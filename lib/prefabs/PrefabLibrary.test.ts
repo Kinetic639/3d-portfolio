@@ -75,7 +75,7 @@ describe("prefab library", () => {
   it("persists prefab instances through map validation and cloning", () => {
     const prefab = getPrefabDefinition("bench");
     expect(prefab).not.toBeNull();
-    const map = createBlankMapDefinition({ id: "prefab-roundtrip", name: "Prefab Roundtrip", flatBaseLayer: true });
+    const map = createBlankMapDefinition({ id: "prefab-roundtrip", name: "Prefab Roundtrip" });
     map.entities = [createPlacedEntity({
       id: "bench-one",
       name: "Bench One",
