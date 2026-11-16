@@ -5,6 +5,8 @@ import { CameraRig, VISITOR_CAMERA } from "@/lib/engine/camera-rig";
 import { buildEntityLayer, type EntityLayer } from "@/lib/engine/entity-meshes";
 import { POP_COMPLETE } from "@/lib/engine/entry-sequence";
 import { Environment } from "@/lib/engine/environment";
+import { ModelWindRegistry } from "@/lib/engine/model-wind";
+import { createWindDebugMaterial, type WindDebugView } from "./wind-debug";
 import type { ModelLibrary } from "@/lib/engine/model-library";
 import type { TerrainSource } from "@/lib/engine/terrain-meshes";
 import type { MapMarkerDefinition } from "@/lib/maps/map-definition";
@@ -182,6 +184,13 @@ export class EditorViewport {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly environment: Environment;
+  /** Per-model wind bindings; live values for the response, rebuild on a new weight source. */
+  private readonly windModels: ModelWindRegistry;
+  private readonly frustum = new THREE.Frustum();
+  private readonly viewProjection = new THREE.Matrix4();
+  /** A model shown in a debug view instead of its material (wind weights, vertex colours, UV sets). */
+  private debugView: { modelId: string; view: Exclude<WindDebugView, "normal"> } | null = null;
+  private debugMaterials: THREE.Material[] = [];
   private readonly rig: CameraRig;
   private readonly raycaster = new THREE.Raycaster();
   private readonly overlays = new THREE.Group();
@@ -256,7 +265,9 @@ export class EditorViewport {
     this.rig = new CameraRig(canvas, { onChange: () => this.invalidate(), ...EDITOR_CAMERA, minDistance: view.minDistance, initialDistance: 90, pitchDegrees: 35, yawDegrees: 45 });
     this.camera = this.rig.camera;
 
-    this.entities = buildEntityLayer(session.getEntities(), models);
+    this.environment.apply(session.getMeta().environment);
+    this.windModels = new ModelWindRegistry(models, this.environment.wind, session.getMeta().modelSettings);
+    this.entities = buildEntityLayer(session.getEntities(), models, { wind: this.windModels.options() });
     this.scene.add(terrain.group, this.entities.group, this.helpers, this.overlays);
 
     // Surface plates: depth test off, so a plate is never hidden by the block it sits on.
@@ -574,9 +585,10 @@ export class EditorViewport {
       this.entitiesDirty = false;
       this.scene.remove(this.entities.group);
       this.entities.dispose();
-      this.entities = buildEntityLayer(this.session.getEntities(), this.models);
+      this.entities = buildEntityLayer(this.session.getEntities(), this.models, { wind: this.windModels.options() });
       this.entities.group.visible = !this.view.hidden.has("entities");
       this.scene.add(this.entities.group);
+      this.applyDebugView();
       this.stats.entityRebuilds += 1;
       this.selectionDirty = true;
     }
@@ -591,6 +603,13 @@ export class EditorViewport {
 
     const moving = this.rig.update(delta);
     let animating = this.entities.update(delta);
+    if (this.environment.wind.active && this.entities.group.visible) {
+      this.camera.updateMatrixWorld();
+      this.viewProjection.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+      this.frustum.setFromProjectionMatrix(this.viewProjection);
+      if (this.entities.windInView(this.frustum)) animating = true;
+    }
+    this.environment.update(this.lastTickAt / 1000, delta);
     if (this.popClock !== null) {
       this.popClock += delta;
       const done = this.popClock > this.entities.popDuration + 0.1;
@@ -657,9 +676,41 @@ export class EditorViewport {
     };
   }
 
+  /** Shows every instance of a model in a debug view; "normal" (or no model) restores its material. */
+  setModelDebugView(modelId: string | null, view: WindDebugView) {
+    this.debugView = modelId && view !== "normal" ? { modelId, view } : null;
+    this.applyDebugView();
+    this.invalidate();
+  }
+
+  private applyDebugView() {
+    this.entities.group.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (mesh.userData.originalMaterial) {
+        mesh.material = mesh.userData.originalMaterial as THREE.Material;
+        delete mesh.userData.originalMaterial;
+      }
+    });
+    this.debugMaterials.forEach((material) => material.dispose());
+    this.debugMaterials = [];
+    const debug = this.debugView;
+    const entry = debug ? this.models.entry(debug.modelId) : null;
+    if (!debug || !entry) return;
+    const binding = this.windModels.forModel(debug.modelId);
+    for (const mesh of this.entities.modelMeshes(debug.modelId)) {
+      const original = mesh.material as THREE.Material;
+      const material = createWindDebugMaterial(debug.view, original, binding, entry.bounds, this.environment.wind.uniforms);
+      mesh.userData.originalMaterial = original;
+      mesh.material = material;
+      this.debugMaterials.push(material);
+    }
+  }
+
   private applyMeta() {
     const meta = this.session.getMeta();
     this.environment.apply(meta.environment);
+    // Response values are uniforms; a new weight source is a new shader.
+    if (this.windModels.update(meta.modelSettings)) this.entitiesDirty = true;
     this.environment.background.set(this.view?.background ?? "#edf1ed");
     for (const zone of meta.zones) {
       const materials = this.zoneMaterials.get(zone.numericId);

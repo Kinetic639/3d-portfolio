@@ -20,6 +20,7 @@ import { buildBakedTerrain, buildWorldForMap, type TerrainSource } from "./terra
 import { buildSurfaceChunkMesh } from "@/lib/terrain/surface-mesher";
 import { createVoxelWorldQuery, type WorldQuery } from "./world-query";
 import { FrameRecorder } from "@/lib/perf/frame-recorder";
+import { ModelWindRegistry } from "./model-wind";
 
 /**
  * The 3D runtime. Plain TypeScript on three.js: no React anywhere in this
@@ -110,6 +111,8 @@ export class WorldEngine {
   readonly stats: EngineStats = { frames: 0, loaderFrames: 0, picks: 0, frameCpuMs: 0, frameIntervalMs: 0, worstFrameIntervalMs: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, programs: 0 };
   /** The last few seconds of world frames (not warm-up or loader frames), for the perf HUD. */
   readonly frames = new FrameRecorder();
+  private readonly frustum = new THREE.Frustum();
+  private readonly viewProjection = new THREE.Matrix4();
   warmUpReport: WarmUpReport | null = null;
   private readonly canvas: HTMLCanvasElement;
   private readonly bridge: WorldBridge;
@@ -220,6 +223,15 @@ export class WorldEngine {
       this.schedulePick();
     });
     this.cleanup.push(bridge.commands.subscribe((command) => this.handleCommand(command)));
+    // Wind is motion nobody asked for: still for visitors who prefer reduced motion.
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onMotionPreference = () => {
+      this.environment.wind.setStilled(reducedMotion.matches);
+      this.invalidate();
+    };
+    onMotionPreference();
+    reducedMotion.addEventListener("change", onMotionPreference);
+    this.cleanup.push(() => reducedMotion.removeEventListener("change", onMotionPreference));
   }
 
   /**
@@ -303,7 +315,9 @@ export class WorldEngine {
       this.minigames = new MinigameHost({ map: definition, ...minigameVoxels });
       this.scene.add(this.minigames.group);
     }
-    this.entities = buildEntityLayer(definition.entities, models);
+    this.environment.apply(definition.environment);
+    const wind = new ModelWindRegistry(models, this.environment.wind, definition.modelSettings);
+    this.entities = buildEntityLayer(definition.entities, models, { wind: wind.options() });
     this.interaction = new InteractionLayer({
       map: definition,
       query,
@@ -311,7 +325,6 @@ export class WorldEngine {
       describeContent: options.describeContent ?? (() => null),
     });
     this.scene.add(terrain.group, this.entities.group, this.interaction.group);
-    this.environment.apply(definition.environment);
 
     // The camera may only centre on the playable area; backdrop scenery stays out of reach.
     const min = query.cellToWorld(definition.playableBounds.minX, 0, definition.playableBounds.minZ);
@@ -902,8 +915,10 @@ export class WorldEngine {
     const waving = this.advanceWave(delta);
     // Animated models need a frame every frame for as long as the world is shown.
     const bursting = this.minigames?.update(delta) ?? false;
-    const animating = (this.entities?.update(delta) ?? false) || waving || bursting;
-    this.environment.update(this.elapsedSeconds);
+    // Wind needs frames only while it blows and something it moves is in view.
+    const windy = this.environment.wind.active && this.windInView();
+    const animating = (this.entities?.update(delta) ?? false) || waving || bursting || windy;
+    this.environment.update(this.elapsedSeconds, delta);
     if (this.terrain?.uniforms) this.terrain.uniforms.uTime.value = this.elapsedSeconds;
     // While the camera leaves the loader, the page is still fading out underneath: no sky yet,
     // so the canvas covers the whole viewport at once without a visible edge.
@@ -986,6 +1001,15 @@ export class WorldEngine {
     }
     uniforms.uExpansionProgress.value = this.wave;
     return true;
+  }
+
+  private windInView() {
+    if (!this.entities) return false;
+    const camera = this.rig.camera;
+    camera.updateMatrixWorld();
+    this.viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.viewProjection);
+    return this.entities.windInView(this.frustum);
   }
 
   private resize() {

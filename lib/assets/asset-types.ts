@@ -1,3 +1,4 @@
+import type { ModelWindSettings } from "@/lib/maps/map-definition";
 import type { CollisionMode } from "@/lib/maps/map-entities";
 import type { PrefabCategory } from "@/lib/prefabs/prefab-types";
 
@@ -65,10 +66,12 @@ export type AssetMetadata = {
   rootMotionNode?: string;
   /** Largest texture side, in pixels; larger textures are scaled down. Default 2048. */
   maxTextureSize?: number;
+  /** Present when the model sways in the wind: its default response, which a map can override per model. */
+  wind?: ModelWindSettings;
 };
 
 export type AssetManifestEntry = Required<Pick<AssetMetadata, "name" | "category" | "scale" | "rotationY" | "anchor" | "collision">> &
-  Pick<AssetMetadata, "description" | "animation"> & {
+  Pick<AssetMetadata, "description" | "animation" | "wind"> & {
     id: string;
     variants: AssetVariant[];
     replacesPrefabs: string[];
@@ -135,6 +138,18 @@ export function validateAssetMetadata(input: unknown): string[] {
   if (input.alpha !== undefined && input.alpha !== "cutout" && input.alpha !== "opaque") errors.push('alpha must be "cutout" or "opaque".');
   if (input.alphaCutoff !== undefined && !(typeof input.alphaCutoff === "number" && input.alphaCutoff > 0 && input.alphaCutoff < 1)) errors.push("alphaCutoff must be between 0 and 1.");
   if (input.maxTextureSize !== undefined && !(Number.isInteger(input.maxTextureSize) && (input.maxTextureSize as number) >= 16)) errors.push("maxTextureSize must be a whole number of pixels, at least 16.");
+  if (input.wind !== undefined) {
+    const wind = input.wind;
+    if (!isRecord(wind)) errors.push("wind must be an object.");
+    else {
+      for (const key of ["sway", "branches", "leaves", "stiffness"]) {
+        if (wind[key] !== undefined && !(typeof wind[key] === "number" && (wind[key] as number) >= 0 && (wind[key] as number) <= 5)) errors.push(`wind.${key} must be a number from 0 to 5.`);
+      }
+      if (wind.weightSource !== undefined && !(typeof wind.weightSource === "string" && /^(height|(color_1|uv|uv1|uv2)-[rgbaxy])$/.test(wind.weightSource))) {
+        errors.push('wind.weightSource must be "height" or like "color_1-r", "uv-y".');
+      }
+    }
+  }
   if (input.rootMotionNode !== undefined && typeof input.rootMotionNode !== "string") errors.push("rootMotionNode must be a node name.");
   for (const key of ["replacesPrefabs", "tags", "animations"] as const) {
     if (input[key] !== undefined && !(Array.isArray(input[key]) && input[key].every((item) => typeof item === "string"))) errors.push(`${key} must be an array of strings.`);

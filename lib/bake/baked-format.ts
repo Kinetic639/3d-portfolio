@@ -26,7 +26,7 @@ const MAGIC = 0x32574b42; // "BKW2", little-endian
 /** The parts of a map the runtime needs once terrain is baked. A `MapDefinition` is also one of these. */
 export type RuntimeMap = Pick<
   MapDefinition,
-  "id" | "name" | "dimensions" | "playableBounds" | "environment" | "entities" | "markers" | "zones" | "spawnPoints" | "defaultSpawnId"
+  "id" | "name" | "dimensions" | "playableBounds" | "environment" | "modelSettings" | "entities" | "markers" | "zones" | "spawnPoints" | "defaultSpawnId"
 >;
 
 export type BufferRef = { offset: number; length: number };
@@ -122,6 +122,7 @@ export function toRuntimeMap(map: MapDefinition): RuntimeMap {
     dimensions: map.dimensions,
     playableBounds: map.playableBounds,
     environment: map.environment,
+    modelSettings: map.modelSettings,
     entities: map.entities,
     markers: map.markers,
     zones: map.zones,

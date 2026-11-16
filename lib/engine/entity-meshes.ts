@@ -4,6 +4,7 @@ import type { PlacedMapEntity, PrimitiveType, SerializableTransform } from "@/li
 import { resolvePrefabInstance } from "@/lib/prefabs/prefab-resolver";
 import { POP_COMPLETE, POP_DROP, POP_SECONDS, POP_TILT_X, POP_TILT_Z, popDelay, samplePop } from "./entry-sequence";
 import type { LoadedModel, ModelLibrary } from "./model-library";
+import { windVertexChunk, type WindResponseUniforms, type WindUniforms } from "./wind";
 
 /**
  * Everything placed on a map, as renderable objects.
@@ -37,7 +38,25 @@ export type EntityLayer = {
   setPopTime: (seconds: number) => void;
   /** Seconds from the first pop to the last object at rest. */
   popDuration: number;
+  /** Whether any wind-reactive batch intersects the frustum: wind needs frames only then. */
+  windInView: (frustum: THREE.Frustum) => boolean;
+  /** Batches of a model, by model id: for the editor's debug views. */
+  modelMeshes: (modelId: string) => THREE.InstancedMesh[];
   dispose: () => void;
+};
+
+/** How one model reacts to the wind: its response uniforms (shared by its batches) and the vertex data that weights the motion. */
+export type ModelWindBinding = {
+  uniforms: WindResponseUniforms;
+  weightSource: string;
+  /** glTF attributes of the model, from the manifest. */
+  attributes: readonly string[];
+};
+
+export type EntityWindOptions = {
+  global: WindUniforms;
+  /** The binding for a model, or null when it does not react to wind. */
+  forModel: (modelId: string) => ModelWindBinding | null;
 };
 
 type Batch = {
@@ -45,12 +64,15 @@ type Batch = {
   material: THREE.Material;
   /** Whether this layer created the geometry's buffers (primitives) or borrows them (models). */
   items: Array<{ entityId: string; matrix: THREE.Matrix4 }>;
+  modelId?: string;
+  wind?: ModelWindBinding | null;
 };
 
 export type EntityLayerOptions = {
   /** Where the pop wave starts (the loader platform), and the distance at which it is at its latest. */
   popOrigin?: { x: number; z: number };
   popRadius?: number;
+  wind?: EntityWindOptions;
 };
 
 /** The original's: half the diagonal of its 64 x 64 map. */
@@ -116,12 +138,14 @@ const POP_VERTEX = /* glsl */ `
  * keeps the material opaque (no sorting, no extra pass) while letting the
  * scene behind show through.
  */
-function addInstanceEffects(material: THREE.Material, popTime: { value: number }) {
+function addInstanceEffects(material: THREE.Material, popTime: { value: number }, wind?: { global: WindUniforms; binding: ModelWindBinding }) {
+  const windChunk = wind ? windVertexChunk(wind.binding.weightSource, wind.binding.attributes) : "";
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uPopTime = popTime;
+    if (wind) Object.assign(shader.uniforms, wind.global, wind.binding.uniforms);
     shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nattribute float aFade;\nattribute vec4 aPop;\nuniform float uPopTime;\nvarying float vFade;")
-      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFade = aFade;")
+      .replace("#include <common>", `#include <common>\nattribute float aFade;\nattribute vec4 aPop;\nuniform float uPopTime;\nvarying float vFade;\n${windChunk}`)
+      .replace("#include <begin_vertex>", wind ? "#include <begin_vertex>\nvFade = aFade;\ntransformed += windOffset(position);" : "#include <begin_vertex>\nvFade = aFade;")
       .replace("#include <project_vertex>", POP_VERTEX);
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <common>", "#include <common>\nvarying float vFade;")
@@ -136,6 +160,9 @@ function addInstanceEffects(material: THREE.Material, popTime: { value: number }
         }`,
       );
   };
+  // three.js caches programs by the hook's source text, which is the same with and without wind:
+  // wind materials get their own key, per weight source.
+  if (wind) material.customProgramCacheKey = () => `entity-wind|${wind.binding.weightSource}|${wind.binding.attributes.includes("COLOR_1") ? "c1" : ""}`;
 }
 
 /** A geometry that draws another geometry's buffers, so per-layer attributes can be added without touching the original. */
@@ -179,7 +206,7 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
     else bounds.set(entityId, box.clone());
   };
 
-  const addToBatch = (key: string, entityId: string, matrix: THREE.Matrix4, create: () => Pick<Batch, "geometry" | "material">) => {
+  const addToBatch = (key: string, entityId: string, matrix: THREE.Matrix4, create: () => Pick<Batch, "geometry" | "material" | "modelId" | "wind">) => {
     let batch = batches.get(key);
     if (!batch) {
       batch = { ...create(), items: [] };
@@ -203,7 +230,7 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
         const material = part.material.clone();
         const colored = material as THREE.MeshStandardMaterial;
         if (tint && colored.color) colored.color.multiply(new THREE.Color(tint));
-        return { geometry: borrowGeometry(part.geometry), material };
+        return { geometry: borrowGeometry(part.geometry), material, modelId: model.entry.id, wind: options.wind?.forModel(model.entry.id) ?? null };
       });
     });
   };
@@ -279,6 +306,8 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
 
   /** For each entity, where its instances live: [fade attribute, instance index]. */
   const instances = new Map<string, Array<[THREE.InstancedBufferAttribute, number]>>();
+  const windMeshes: THREE.InstancedMesh[] = [];
+  const meshesByModel = new Map<string, THREE.InstancedMesh[]>();
   for (const [key, batch] of batches) {
     const { geometry, material, items } = batch;
     if (!geometry.boundingBox) geometry.computeBoundingBox();
@@ -291,9 +320,15 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
       pop.set([pivot.x, pivot.y, pivot.z, delays.get(item.entityId) ?? 0], index * 4);
     });
     geometry.setAttribute("aPop", new THREE.InstancedBufferAttribute(pop, 4));
-    addInstanceEffects(material, popTime);
+    addInstanceEffects(material, popTime, batch.wind && options.wind ? { global: options.wind.global, binding: batch.wind } : undefined);
     const mesh = new THREE.InstancedMesh(geometry, material, items.length);
     mesh.name = `entities:${key}`;
+    if (batch.wind) windMeshes.push(mesh);
+    if (batch.modelId) {
+      const list = meshesByModel.get(batch.modelId);
+      if (list) list.push(mesh);
+      else meshesByModel.set(batch.modelId, [mesh]);
+    }
 
     items.forEach((item, index) => {
       mesh.setMatrixAt(index, item.matrix);
@@ -314,9 +349,23 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
   const popMatrix = new THREE.Matrix4();
   const popRotation = new THREE.Euler();
 
+  const windSphere = new THREE.Sphere();
   return {
     group,
     bounds,
+    windInView(frustum) {
+      for (const mesh of windMeshes) {
+        if (!mesh.visible || !mesh.boundingSphere) continue;
+        // Wind moves leaves a little beyond the rest bounds.
+        windSphere.copy(mesh.boundingSphere).applyMatrix4(mesh.matrixWorld);
+        windSphere.radius += 0.5;
+        if (frustum.intersectsSphere(windSphere)) return true;
+      }
+      return false;
+    },
+    modelMeshes(modelId) {
+      return meshesByModel.get(modelId) ?? [];
+    },
     setFaded(next) {
       let changed = false;
       const apply = (entityId: string, value: number) => {

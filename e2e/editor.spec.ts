@@ -15,7 +15,12 @@ type EditorProbe = {
   session: {
     world: { getHighestNonAirY: (x: number, z: number) => number | null; getBlock: (x: number, y: number, z: number) => number; getColumnZone: (x: number, z: number) => number; gridToWorld: (x: number, y: number, z: number) => { x: number; y: number; z: number } };
     getEntities: () => Array<{ id: string; transform: { position: { x: number; y: number; z: number }; rotation: { y: number }; scale: { x: number } }; contentReference?: { contentId: string } }>;
-    getMeta: () => { name: string; zones: Array<{ numericId: number; label: string; kind?: string; minigame?: { gameId: string } }> };
+    getMeta: () => {
+      name: string;
+      zones: Array<{ numericId: number; label: string; kind?: string; minigame?: { gameId: string } }>;
+      environment: { wind: { strength: number } & Record<string, unknown> };
+      modelSettings?: Record<string, unknown>;
+    };
     undoLabel: string | null;
     isDirty: boolean;
   };
@@ -25,7 +30,7 @@ type EditorProbe = {
     resetWorstFrame: () => void;
     isBakedView: boolean;
   };
-  store: { getState: () => { selection: string[]; settings: { tool: string; brush: { size: number } } } };
+  store: { getState: () => { selection: string[]; settings: { tool: string; brush: { size: number } } }; setState: (patch: { selection: string[] }) => void };
 };
 
 declare global {
@@ -432,4 +437,43 @@ test("models from the asset pipeline appear in the object palette with a picture
   await expect(page.locator(".editor-validation-list")).toContainText("No validation issues");
   await page.keyboard.press("Control+z");
   await page.keyboard.press("Control+z");
+});
+
+test("wind: presets and values in the Map workspace, a model's response and debug views in the inspector", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openEditor(page);
+  await workspace(page, "Objects");
+  await leftDock(page).getByRole("combobox", { name: "Category" }).selectOption("nature");
+  await leftDock(page).getByRole("option", { name: /Pine Tree \(fluffy\)/ }).click();
+  const spot = await columnTop(page, 20, 20);
+  await page.mouse.click(spot.x, spot.y);
+  const pine = (await entities(page)).find((entity) => (entity as { assetReference?: string }).assetReference === "pine-tree-fluffy")!;
+  expect(pine).toBeTruthy();
+
+  await workspace(page, "Map");
+  const panel = page.locator("details[aria-label='Weather and wind']");
+  await panel.getByRole("button", { name: "Windy" }).click();
+  await expect(panel.getByRole("button", { name: "Windy" })).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().environment.wind)).toMatchObject({ strength: 0.72, gustStrength: 0.28, turbulence: 0.3 });
+  // The tree is in view and the wind blows: the viewport keeps drawing.
+  const framesWhile = async () => { const before = (await stats(page)).frames; await page.waitForTimeout(600); return (await stats(page)).frames - before; };
+  expect(await framesWhile()).toBeGreaterThan(10);
+  await panel.getByRole("button", { name: "Calm" }).click();
+  await page.waitForTimeout(300);
+  expect(await framesWhile()).toBeLessThan(3);
+  await page.keyboard.press("Control+z");
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().environment.wind.strength)).toBe(0.72);
+
+  await page.evaluate((id) => window.__editor!.store.setState({ selection: [id] }), pine.id);
+  const response = page.locator("details[aria-label='Wind response']");
+  await expect(response).toContainText("Pine Tree (fluffy)");
+  await response.getByRole("combobox", { name: "Wind weight source" }).selectOption("height");
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().modelSettings)).toEqual({ "pine-tree-fluffy": { wind: { weightSource: "height" } } });
+  const debug = page.getByRole("combobox", { name: "Model debug view" });
+  for (const view of ["weight", "color_1-g", "color-r", "uv", "normal"]) await debug.selectOption(view);
+  await response.getByRole("button", { name: "Reset to model defaults" }).click();
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().modelSettings)).toBeUndefined();
+  // Every shader compiled: a GLSL error would be logged here.
+  await page.waitForTimeout(300);
+  expect(errors).toEqual([]);
 });

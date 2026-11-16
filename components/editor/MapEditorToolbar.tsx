@@ -83,6 +83,9 @@ import { BLOCK_IDS, RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type Block
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
 import { getShapeDefinition, getShapePitch, getShapeStateValue, setShapePitch, TERRAIN_PALETTE_SHAPE_DEFINITIONS, type ShapeCategory } from "@/lib/voxel-shapes/shape-registry";
 import { SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
+import type { MapEnvironment, MapWind, ModelWindSettings } from "@/lib/maps/map-definition";
+import type { WindDebugView } from "@/lib/editor/wind-debug";
+import { ModelSection, WindSection, type SelectedModelInfo } from "./WindPanels";
 
 export type EntityTransformMode = "translate" | "rotate";
 export type ZoneFocusDirection = MapZoneFocusDirection;
@@ -130,6 +133,16 @@ export type EditorInspectorState = {
   /** What the viewport shows as terrain: the voxels, or the current bake. */
   renderMode: "voxels" | "baked";
   bakeStatus: string;
+  environment: MapEnvironment;
+  onWindChange: (patch: Partial<MapWind>) => void;
+  /** Starts (label) or ends (null) a group of changes that undo as one step, e.g. a slider drag. */
+  onEditGroup: (label: string | null) => void;
+  /** The selected model's data and wind response; null when the selection is not one model. */
+  selectedModel: SelectedModelInfo | null;
+  modelDebugView: WindDebugView;
+  onModelDebugViewChange: (view: WindDebugView) => void;
+  /** Changes this map's settings for the selected model; null resets them to the model's defaults. */
+  onModelWindChange: (patch: ModelWindSettings | null) => void;
   zoneId: number;
   zoneEditMode: ZoneEditMode;
   zoneSelectionMode: ZoneSelectionMode;
@@ -931,6 +944,7 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
           <ActionButton icon="bake" onClick={props.onBake}>Bake Map</ActionButton>
           <ActionButton icon="preview" className={props.renderMode === "baked" ? "active" : ""} onClick={() => props.onRenderModeChange(props.renderMode === "baked" ? "voxels" : "baked")}>{props.renderMode === "baked" ? "Show Voxels" : "Show Baked"}</ActionButton>
         </Section>
+        <WindSection wind={props.environment.wind} onChange={props.onWindChange} onGroup={props.onEditGroup} />
       </Panel>
     );
   }
@@ -1427,6 +1441,9 @@ function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspa
             <button type="button" className={entity.appearance.visibleAtRuntime ? "" : "active"} onClick={props.onToggleEntityHidden}>{entity.appearance.visibleAtRuntime ? "Hide" : "Hidden"}</button>
           </div>
         </Section>
+        {props.selectedModel ? (
+          <ModelSection model={props.selectedModel} debugView={props.modelDebugView} onWindChange={props.onModelWindChange} onDebugViewChange={props.onModelDebugViewChange} onGroup={props.onEditGroup} />
+        ) : null}
       </Panel>
     );
   }

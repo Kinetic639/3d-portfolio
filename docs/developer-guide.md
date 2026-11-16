@@ -154,6 +154,24 @@ The engine handles picking, the outline, remeshing, the burst, the camera, the H
 - `pnpm perf` before merging anything that touches the engine, the world UI or the landing page. A failure names the metric and its budget; if the change is intended, re-measure with `pnpm perf --update` and edit `perf/budgets.json` with the reason.
 - Something the engine animates must still show up as frames in the badge only while it moves; if it reads a number while nothing moves, it is asking for frames it does not need.
 
+## Make a model sway in the wind
+
+1. The model needs vertex data that says how much each vertex moves (0 at the base, 1 at the tips). Exported vegetation usually has it in a colour set (the pine: `COLOR_1` red), otherwise use `"height"`.
+2. In its `asset.json`, keep that data and give the default response:
+
+   ```json
+   "attributes": ["COLOR_1"],
+   "wind": { "sway": 0.7, "branches": 0.55, "leaves": 0.32, "stiffness": 1, "weightSource": "color_1-r" }
+   ```
+
+   `weightSource` is `color_1-r|g|b|a`, `uv-x|y`, `uv1-x|y`, `uv2-x|y` or `height`. The pipeline refuses a source the model does not have.
+3. Run `pnpm assets`. Every instance of the model now sways.
+4. In the editor, select an instance: **Wind response** changes the response for all instances of that model in this map (stored in the map's `modelSettings`; **Reset to model defaults** removes it). **Debug view** shows the weight, height, vertex colours or UV sets, to pick the source by eye.
+
+The wind itself is a map setting: **Map** workspace, **Weather · Wind**: presets (calm, light breeze, windy, strong wind, storm), on/off, direction (where it blows to), strength, speed, gust strength and frequency, turbulence. A slider drag is one undo step.
+
+Wind costs almost no CPU (the motion is in the vertex shader), but it needs continuous frames: the world redraws every frame while the wind blows and a wind-reactive model is in view, and is still otherwise. Visitors who prefer reduced motion see no wind.
+
 ## Add an engine system (wind, weather, time of day)
 
 1. Put shared values in `Environment.uniforms` (`lib/engine/environment.ts`) and update them in `Environment.update` or a setter.

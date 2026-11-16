@@ -26,7 +26,8 @@ import { BASE_VERTEX_ATTRIBUTES, isAssetId, validateAssetMetadata, type AssetMan
  * Work is skipped for models whose source and metadata have not changed.
  */
 /** Raise when the optimisation steps change, so every output is rebuilt. */
-const PIPELINE_VERSION = 3;
+// 4: prune keeps the attributes prepareDocument chose (it dropped COLOR_1 before).
+const PIPELINE_VERSION = 4;
 
 /** Largest texture side kept unless asset.json says otherwise. */
 export const DEFAULT_MAX_TEXTURE_SIZE = 2048;
@@ -222,13 +223,21 @@ export async function processAssets(options: { root?: string; force?: boolean } 
           fail(problem);
           continue;
         }
-        await document.transform(dedup(), prune(), resample(), weld(), meshopt({ encoder: MeshoptEncoder, level: "medium" }));
+        await document.transform(dedup(), prune({ keepAttributes: true }), resample(), weld(), meshopt({ encoder: MeshoptEncoder, level: "medium" }));
         await compressTextures(document, metadata.maxTextureSize ?? DEFAULT_MAX_TEXTURE_SIZE);
       } catch (error) {
         fail(`could not be read or optimised (${error instanceof Error ? error.message : String(error)}).`);
         continue;
       }
       const stats = describe(document);
+      const windSource = metadata.wind?.weightSource;
+      if (windSource && windSource !== "height") {
+        const attribute = { color_1: "COLOR_1", uv: "TEXCOORD_0", uv1: "TEXCOORD_1", uv2: "TEXCOORD_2" }[windSource.split("-")[0]];
+        if (!attribute || !stats.attributes.includes(attribute)) {
+          fail(`wind.weightSource ${windSource} needs ${attribute ?? "an attribute"}; keep it with "attributes" in asset.json.`);
+          continue;
+        }
+      }
       if (metadata.animation && !stats.animations.includes(metadata.animation)) {
         fail(`animation "${metadata.animation}" is not in the model (it has: ${stats.animations.join(", ") || "none"}).`);
         continue;
@@ -245,6 +254,7 @@ export async function processAssets(options: { root?: string; force?: boolean } 
         anchor: metadata.anchor ?? "bottom",
         collision: metadata.collision ?? "blocking",
         animation: metadata.animation,
+        wind: metadata.wind,
         variants: metadata.variants ?? [],
         replacesPrefabs: metadata.replacesPrefabs ?? [],
         tags: metadata.tags ?? [],

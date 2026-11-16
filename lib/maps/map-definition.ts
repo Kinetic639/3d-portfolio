@@ -152,15 +152,45 @@ export type MapPresentationConfig = {
   backgroundId?: string;
 };
 
+export type MapWind = {
+  /** Compass degrees the wind blows towards, 0 = north (-Z). */
+  direction: number;
+  /** 0 (still) to 2; the storm preset is 1.6. */
+  strength: number;
+  /** Off: nothing moves, whatever the other values. Default on. */
+  enabled?: boolean;
+  /** Tempo of the sway, 0-3. Default 1. */
+  speed?: number;
+  /** How much a gust adds to the strength, 0-1. Default 0. */
+  gustStrength?: number;
+  /** Gusts per second, 0-1. Default 0.1. */
+  gustFrequency?: number;
+  /** Fine, irregular motion of leaves, 0-1. Default 0. */
+  turbulence?: number;
+};
+
 export type MapEnvironment = {
   /** Hours, 0-24. */
   timeOfDay: number;
-  wind: {
-    /** Compass degrees the wind blows towards, 0 = north (-Z). */
-    direction: number;
-    /** 0 (still) to 1 (storm). */
-    strength: number;
-  };
+  wind: MapWind;
+};
+
+/** How a wind-reactive model moves; omitted fields use the model's defaults from asset.json. */
+export type ModelWindSettings = {
+  /** Whole-tree sway. */
+  sway?: number;
+  branches?: number;
+  /** Leaf flutter. */
+  leaves?: number;
+  /** Divides the sway and branch motion; higher is stiffer. */
+  stiffness?: number;
+  /** Which vertex data says how much each vertex moves: "color_1-r", "uv-y", "height"... */
+  weightSource?: string;
+};
+
+/** Per-model settings for this map, by model id. They apply to every placed instance of the model. */
+export type ModelSettings = {
+  wind?: ModelWindSettings;
 };
 
 export type MapDefinition = {
@@ -184,6 +214,8 @@ export type MapDefinition = {
   defaultCameraPresetId?: string;
   presentation: MapPresentationConfig;
   environment: MapEnvironment;
+  /** Settings for models used in this map, by model id. */
+  modelSettings?: Record<string, ModelSettings>;
   metadata: {
     createdAt?: string;
     updatedAt?: string;
@@ -283,6 +315,7 @@ export function createMapDefinitionFromWorld(input: {
   defaultCameraPresetId?: string;
   presentation?: Partial<MapPresentationConfig>;
   environment?: MapEnvironment;
+  modelSettings?: Record<string, ModelSettings>;
   metadata?: MapDefinition["metadata"];
 }): MapDefinition {
   const { edits, zoneAssignments } = serializeWorldEdits(input.world);
@@ -318,6 +351,7 @@ export function createMapDefinitionFromWorld(input: {
       backgroundId: input.presentation?.backgroundId,
     },
     environment: cloneEnvironment(input.environment ?? DEFAULT_MAP_ENVIRONMENT),
+    modelSettings: cloneModelSettings(input.modelSettings),
     metadata: { ...input.metadata },
   };
 }
@@ -374,6 +408,7 @@ export function cloneMapDefinition(map: MapDefinition): MapDefinition {
     cameraPresets: map.cameraPresets.map(cloneCameraPreset),
     presentation: { ...map.presentation },
     environment: cloneEnvironment(map.environment),
+    modelSettings: cloneModelSettings(map.modelSettings),
     metadata: { ...map.metadata },
   };
 }
@@ -475,6 +510,7 @@ export function migrateMapDefinition(input: unknown): MapDefinition {
     environment: isRecord(source.environment)
       ? cloneEnvironment(source.environment as MapEnvironment)
       : cloneEnvironment(DEFAULT_MAP_ENVIRONMENT),
+    modelSettings: isRecord(source.modelSettings) ? cloneModelSettings(source.modelSettings as Record<string, ModelSettings>) : undefined,
     metadata: isRecord(source.metadata) ? { ...(source.metadata as MapDefinition["metadata"]) } : {},
   };
 }
@@ -689,10 +725,17 @@ export function validateMapDefinition(input: unknown, options: MapValidationOpti
     !isRecord(environment) || !isRecord(environment.wind) ||
     !isFiniteInRange(environment.timeOfDay, 0, 24) ||
     !isFiniteInRange(environment.wind.direction, 0, 360) ||
-    !isFiniteInRange(environment.wind.strength, 0, 1)
+    !isFiniteInRange(environment.wind.strength, 0, 2)
   ) {
-    errors.push("Environment must define timeOfDay (0-24) and wind direction (0-360) and strength (0-1).");
+    errors.push("Environment must define timeOfDay (0-24) and wind direction (0-360) and strength (0-2).");
+  } else {
+    const wind = environment.wind as Record<string, unknown>;
+    if (wind.enabled !== undefined && typeof wind.enabled !== "boolean") errors.push("Wind enabled must be true or false.");
+    for (const [key, max] of [["speed", 3], ["gustStrength", 1], ["gustFrequency", 1], ["turbulence", 1]] as const) {
+      if (wind[key] !== undefined && !isFiniteInRange(wind[key], 0, max)) errors.push(`Wind ${key} must be between 0 and ${max}.`);
+    }
   }
+  errors.push(...validateModelSettings(map.modelSettings));
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true, map: cloneMapDefinition(map) };
 }
@@ -963,6 +1006,38 @@ function cloneCameraPreset(preset: MapCameraPreset): MapCameraPreset {
 
 function cloneEnvironment(environment: MapEnvironment): MapEnvironment {
   return { timeOfDay: environment.timeOfDay, wind: { ...environment.wind } };
+}
+
+function cloneModelSettings(settings: Record<string, ModelSettings> | undefined): Record<string, ModelSettings> | undefined {
+  if (!settings) return undefined;
+  return Object.fromEntries(Object.entries(settings).map(([id, value]) => [id, { ...value, wind: value.wind ? { ...value.wind } : undefined }]));
+}
+
+const WIND_RESPONSE_LIMITS = { sway: 3, branches: 3, leaves: 3, stiffness: 5 } as const;
+
+function validateModelSettings(settings: unknown): string[] {
+  if (settings === undefined) return [];
+  if (!isRecord(settings)) return ["modelSettings must be an object keyed by model id."];
+  const errors: string[] = [];
+  for (const [id, value] of Object.entries(settings)) {
+    if (!isStableId(id) || !isRecord(value)) {
+      errors.push(`modelSettings.${id} must be settings for a model id.`);
+      continue;
+    }
+    if (value.wind === undefined) continue;
+    if (!isRecord(value.wind)) {
+      errors.push(`modelSettings.${id}.wind must be an object.`);
+      continue;
+    }
+    for (const [key, max] of Object.entries(WIND_RESPONSE_LIMITS)) {
+      const field = value.wind[key];
+      if (field !== undefined && !isFiniteInRange(field, key === "stiffness" ? 0.1 : 0, max)) errors.push(`modelSettings.${id}.wind.${key} is out of range.`);
+    }
+    if (value.wind.weightSource !== undefined && !(typeof value.wind.weightSource === "string" && /^(height|(color_1|uv|uv1|uv2)-[rgbaxy])$/.test(value.wind.weightSource))) {
+      errors.push(`modelSettings.${id}.wind.weightSource is not a known source.`);
+    }
+  }
+  return errors;
 }
 
 function isStableId(value: unknown): value is string {

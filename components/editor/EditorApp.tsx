@@ -14,7 +14,10 @@ import { Thumbnailer } from "@/lib/editor/thumbnailer";
 import { getModelLibrary } from "@/lib/engine/model-library";
 import { getTerrainAtlas } from "@/lib/engine/terrain-material";
 import { buildWorldForMap } from "@/lib/engine/terrain-meshes";
-import { migrateMapDefinition, type MapDefinition } from "@/lib/maps/map-definition";
+import { migrateMapDefinition, type MapDefinition, type ModelSettings } from "@/lib/maps/map-definition";
+import { resolveWindResponse, windWeightSources } from "@/lib/engine/wind";
+import { windDebugViews, type WindDebugView } from "@/lib/editor/wind-debug";
+import type { SelectedModelInfo } from "./WindPanels";
 import { BUILT_IN_PREFABS } from "@/lib/prefabs/prefab-library";
 import { getDefaultShapeState } from "@/lib/voxel-shapes/shape-registry";
 import type { CellRotation } from "@/lib/voxel-shapes/shape-ids";
@@ -263,8 +266,9 @@ function download(name: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
+/** Sliders and checkboxes have no typing or undo of their own, so editor shortcuts (Ctrl+Z after a drag) still apply to them. */
 function isTyping(target: EventTarget | null) {
-  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+  return target instanceof HTMLElement && Boolean(target.closest("input:not([type='range']):not([type='checkbox']), textarea, select, [contenteditable='true']"));
 }
 
 /** Builds the toolbar's props from the session, the store and the viewport. */
@@ -276,6 +280,7 @@ function ConnectedToolbar({ onLayoutChange }: { onLayoutChange: (layout: EditorV
   const meta = session.getMeta();
   const [availableMaps, setAvailableMaps] = useState<Array<{ id: string; name: string }>>([{ id: mapId, name: meta.name }]);
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
+  const [debug, setDebug] = useState<{ modelId: string; view: WindDebugView } | null>(null);
 
   useEffect(() => {
     api<{ maps: Array<{ id: string; name: string }> }>("/api/editor/maps")
@@ -321,6 +326,26 @@ function ConnectedToolbar({ onLayoutChange }: { onLayoutChange: (layout: EditorV
   const message = (text: string, type: "info" | "error" = "info") => store.setState({ message: { type, text } });
 
   const selectedEntity = state.selection.length === 1 ? session.getEntity(state.selection[0]) ?? null : null;
+  const selectedModel = useMemo<SelectedModelInfo | null>(() => {
+    const entry = selectedEntity?.entityType === "model" && selectedEntity.assetReference ? models.entry(selectedEntity.assetReference) : null;
+    if (!entry) return null;
+    const attributes = entry.attributes ?? [];
+    const sources = windWeightSources(attributes);
+    const overrides = meta.modelSettings?.[entry.id]?.wind;
+    const wind = entry.wind ? resolveWindResponse(entry.wind, overrides) : null;
+    if (wind && !sources.includes(wind.weightSource)) wind.weightSource = "height";
+    return {
+      id: entry.id, name: entry.name, attributes, triangles: entry.triangles, vertices: entry.vertices, meshes: entry.meshes,
+      materials: entry.materials, textures: entry.textures, bytes: entry.bytes, animations: entry.animations, bounds: entry.bounds,
+      wind, windOverridden: overrides !== undefined && Object.keys(overrides).length > 0, windSources: sources,
+      debugViews: windDebugViews(attributes, Boolean(entry.wind)),
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- meta is read fresh from the session; metaRevision says when it changed.
+  }, [selectedEntity, models, state.metaRevision]);
+  const debugView: WindDebugView = debug && selectedModel && debug.modelId === selectedModel.id ? debug.view : "normal";
+  useEffect(() => {
+    viewport.setModelDebugView(selectedModel && debugView !== "normal" ? selectedModel.id : null, debugView);
+  }, [viewport, selectedModel, debugView]);
   const cell = state.selectedCell;
   const world = session.world;
   const zoneAssignmentCount = useMemo(() => {
@@ -596,6 +621,26 @@ function ConnectedToolbar({ onLayoutChange }: { onLayoutChange: (layout: EditorV
       if (store.getState().cleanPreview === cleanPreview) return;
       store.setState({ cleanPreview });
       viewport.setCleanPreview(cleanPreview);
+    },
+    environment: meta.environment,
+    onWindChange: (patch) => session.updateMeta("Change wind", { environment: { ...meta.environment, wind: { ...meta.environment.wind, ...patch } } }),
+    onEditGroup: (label) => (label ? session.beginGroup(label) : session.endGroup()),
+    selectedModel,
+    modelDebugView: debugView,
+    onModelDebugViewChange: (view) => setDebug(selectedModel ? { modelId: selectedModel.id, view } : null),
+    onModelWindChange: (patch) => {
+      if (!selectedModel) return;
+      const next: Record<string, ModelSettings> = { ...(meta.modelSettings ?? {}) };
+      const current = next[selectedModel.id] ?? {};
+      if (patch === null) {
+        const rest = { ...current };
+        delete rest.wind;
+        if (Object.keys(rest).length > 0) next[selectedModel.id] = rest;
+        else delete next[selectedModel.id];
+      } else {
+        next[selectedModel.id] = { ...current, wind: { ...current.wind, ...patch } };
+      }
+      session.updateMeta(patch === null ? "Reset model wind" : "Model wind", { modelSettings: Object.keys(next).length > 0 ? next : undefined });
     },
     onEntityContentChange: (key) => {
       const reference = parseContentKey(key);

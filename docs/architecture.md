@@ -237,6 +237,17 @@ Measured: the sample crate is 3 KB and 24 triangles; three placed crates cost tw
 
 Known limits: a mesh with several materials is drawn with its first; animated models are not instanced and are not faded when they hide something; the occluder fade and tinting assume the model's materials have a base colour.
 
+### Wind (from the style lab)
+
+Ported from the style-lab branch (`environment-controller.ts`, `tree-wind.ts`) with the same presets, gust curve and per-vertex motion (pendulum sway, branches at their own phase, leaf flutter), fitted to the engine:
+
+- **Global wind** (`lib/engine/wind.ts`, `Wind`): the map's `environment.wind` (direction, strength, enabled, speed, gust strength and frequency, turbulence) as one set of uniforms shared by every wind-reactive material. Changing the weather changes values, never shaders.
+- **Per model** (`lib/engine/model-wind.ts`): defaults in `asset.json` `wind`, overrides in the map's `modelSettings[modelId].wind`; one uniform block per model, shared by all its instanced batches, so the editor's sliders change it live.
+- **Shader**: the wind code is added to the instanced batches' existing hook (pop-up and occlusion fade) and gets its own program cache key, because three.js keys programs by the hook's source text. The weight source is compiled in (the lab chose it per vertex through eleven branches); changing it in the editor rebuilds that model's material. Rotated and scaled instances bend with the wind, not with their own axes.
+- **Frames**: wind needs continuous frames only while it blows and a wind-reactive batch intersects the view frustum (`EntityLayer.windInView`); otherwise the world stays still and draws nothing. `prefers-reduced-motion` stills it.
+- **Measured** (production, RTX 2060, 60 pines in view while panning): frame p95 16.8 ms with and without wind, engine CPU 1.4-1.6 ms per frame either way, no extra draw calls; 60 frames per second when idle with trees in view and wind, 0 without wind.
+- **Editor**: Weather · Wind in the Map workspace; Wind response, Model data and Debug view (weight, height, vertex colours, UV sets) in the inspector of a selected model. The lab's mask and detail texture views are not ported: those textures are not part of the model.
+
 ## Editor
 
 The editor is at `/editor` (`/editor?map=<id>`) and exists only in development.
@@ -485,3 +496,8 @@ The first bake smoothed the terrain (density, blur, Surface Nets, simplification
 - `pnpm perf`: production build, real GPU, 25 budgets in `perf/budgets.json` covering load, entry, pan, idle, hover and digging with the CPU slowed 4×. Shown to fail when a known regression is put back.
 - The entry-start and entry-end hitches are gone (worst entry frame 16.8 ms).
 - `lib/benchmark` reduced to the frame statistics the test uses (`lib/perf/frame-statistics.ts`).
+
+### Style-lab port, point 2: wind
+
+- Global wind with presets in the map, per-model response in `asset.json` and the map, GPU sway on instanced batches, frames only while wind blows in view, reduced motion respected. Editor panels for all of it, debug views included.
+- The model pipeline now keeps the attributes asset.json asks for: gltf-transform's `prune` dropped `COLOR_1` before.
