@@ -2,7 +2,7 @@
 
 Michał Stępień's portfolio: a Next.js site whose centrepiece is an interactive 3D world built from voxels in a local editor and baked into static geometry for production.
 
-The project is being rebuilt in stages on the `rebuild/base` branch. Stages 1–6 are done: the map format and content model, the engine and its bridge to the page UI, clickable objects with a content panel and a URL per item, the landing page with background loading, warm-up and the entry transition, the map editor, baking of voxel maps, and the model pipeline. The original look is being brought back on the new engine: textured voxel terrain, the low rotatable camera, the loader with its entry (wave and object pop-up), the original editor and a bake that keeps the terrain exactly are done; the mini-game, a performance overlay and a performance regression test are next.
+The project was rebuilt in stages on a new core (map format and content model, engine and its bridge to the page UI, clickable objects with a content panel and a URL per item, landing page with background loading, warm-up and the entry, the map editor, baking, the model pipeline), and the original look was brought back on top of it: textured voxel terrain, the low rotatable camera, the loader with its entry wave and object pop-up, the original editor, an exact bake, a dig mini-game, the FPS badge and a performance regression test.
 
 ## Run it
 
@@ -11,7 +11,7 @@ pnpm install
 pnpm dev
 ```
 
-Open http://localhost:3000. The page is the portfolio as plain HTML; the loader (a gold platform with a floating crystal) sits at the bottom; once the world is ready, click it to enter. Inside, drag or use the arrow keys to move, scroll or press + and - to zoom, Ctrl + right drag or Q and E to turn, and click the icons to open content.
+Open http://localhost:3000. The page is the portfolio as plain HTML; the loader (a gold platform with a floating crystal) sits at the bottom; once the world is ready, click it to enter. Inside, drag or use the arrow keys to move, scroll or press + and - to zoom, Ctrl + right drag or Q and E to turn, and click the icons to open content, or the play icon on the stone hill to dig in the mine.
 
 ## Edit maps
 
@@ -24,6 +24,7 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm e2e
+pnpm perf          # production build, real GPU, about 1.5 min
 pnpm bake --check
 pnpm build
 ```
@@ -37,6 +38,8 @@ pnpm build
 | `lib/engine/` | 3D runtime (three.js, no React) |
 | `lib/bridge/` | The single channel between the engine and the UI |
 | `lib/editor/`, `components/editor/` | Map editor (development only) |
+| `lib/minigames/`, `lib/engine/minigame-host.ts` | Mini-games: one file per game, the shared host in the engine |
+| `lib/perf/`, `perf/` | Frame and UI-cost meters behind the FPS badge; the performance regression test and its budgets |
 | `lib/bake/` | Baking voxels into the world visitors load (`pnpm bake`) |
 | `assets/models/`, `lib/assets/` | Model sources and the pipeline that optimises them (`pnpm assets`) |
 | `lib/maps/`, `lib/world/` | Map format and voxel world |

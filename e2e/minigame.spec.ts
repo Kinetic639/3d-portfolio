@@ -72,7 +72,6 @@ for (const world of ["voxels", "baked"] as const) {
 }
 
 test("leaving the mine with its button restores the view", async ({ page }) => {
-  test.skip(process.env.PLAYWRIGHT_PROD === "1", "Reads the camera through the development probe.");
   await openWorld(page);
   await lookAtMine(page);
   const before = await page.evaluate(() => (window.__worldEngine as unknown as { rig: { getView: () => { pitchDegrees: number; distance: number } } }).rig.getView());
