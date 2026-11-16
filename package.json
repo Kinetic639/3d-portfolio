@@ -11,6 +11,7 @@
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest --passWithNoTests",
     "e2e": "playwright test",
+    "perf": "tsx scripts/perf.ts",
     "migrate:map": "tsx scripts/migrate-legacy-map.ts",
     "bake": "tsx scripts/bake.ts",
     "assets": "tsx scripts/assets.ts"

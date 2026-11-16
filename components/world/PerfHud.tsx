@@ -12,6 +12,12 @@ type Field = "fps" | "median" | "p95" | "worst" | "cpu" | "calls" | "triangles" 
 
 const ms = (value: number | null) => (value === null ? "–" : `${value.toFixed(1)} ms`);
 
+/**
+ * 47052 -> "47,052". Not toLocaleString: its first call loads the browser's
+ * locale data, 20-70 ms, which landed on the last frame of the entry.
+ */
+export const thousands = (value: number) => String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
 /** The text of every field, from what the engine and the UI meter recorded. */
 export function readPerf(now: number): Record<Field, string> {
   const engine = worldBridge.diagnostics.engine;
@@ -25,7 +31,7 @@ export function readPerf(now: number): Record<Field, string> {
     worst: ms(frames?.intervalMax ?? null),
     cpu: frames?.cpuMean == null ? "–" : `${frames.cpuMean.toFixed(1)} / ${(frames.cpuMax ?? 0).toFixed(1)} ms`,
     calls: engine ? String(engine.stats.drawCalls) : "–",
-    triangles: engine ? engine.stats.triangles.toLocaleString("en-US") : "–",
+    triangles: engine ? thousands(engine.stats.triangles) : "–",
     ui: `${ui.updates} · ${ui.totalMs.toFixed(1)} ms`,
     uiWorst: ms(ui.updates === 0 ? null : ui.maxMs),
   };
@@ -46,15 +52,17 @@ export function readPerf(now: number): Record<Field, string> {
  *
  * The numbers are written into the DOM twice a second without React, so the
  * HUD adds nothing to what it measures except two short text updates.
+ * It refreshes only while `active` (the visitor is in the world); it stays
+ * mounted on the landing page so it is already rasterized when they enter.
  */
-export default function PerfHud() {
+export default function PerfHud({ active }: { active: boolean }) {
   useUiWork();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const element = root.current;
-    if (!element) return;
+    if (!element || !active) return;
     const cells = new Map<string, HTMLElement>();
     element.querySelectorAll<HTMLElement>("[data-perf]").forEach((cell) => cells.set(cell.dataset.perf!, cell));
     const refresh = () => {
@@ -67,7 +75,7 @@ export default function PerfHud() {
     refresh();
     const timer = window.setInterval(refresh, REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [open]);
+  }, [open, active]);
 
   return (
     <aside ref={root} className={styles.hud} data-open={open || undefined} aria-label="Rendering performance">

@@ -314,6 +314,40 @@ The world shows the original's FPS badge at the bottom left (`components/world/P
 - **Bridge rule 3 holds.** Per-frame data never enters the bridge's state; the engine puts its recorder in `bridge.diagnostics`, a plain slot that readers poll.
 - **UI time** is measured from the start of a component's render to its layout effect, which works in production builds (React's Profiler does not). The browser's own style and layout work afterwards is not included.
 - The Next.js development indicator moved to the bottom right to make room.
+- The badge is mounted on the landing page too (at 1 % opacity like the rest of the world's controls, see below) and only refreshes in the world. Numbers are formatted without `toLocaleString`: its first call loads the browser's locale data, 20-70 ms.
+
+### Performance regression test
+
+`pnpm perf` (`scripts/perf.ts`, `perf/world.perf.ts`) builds for production with `NEXT_PUBLIC_WORLD_PROBE=1` (the only difference: the test may read the engine's counters), serves it on port 3218, measures it in Chromium with the real GPU and compares every number with `perf/budgets.json`. One run takes about 1.5 minutes. It skips itself on a software renderer, where frame times mean nothing.
+
+| Scenario | What is checked |
+|---|---|
+| Load (3 fresh pages) | time to a warmed-up world, main-thread blocking, warm-up created nothing afterwards |
+| Entry (3 runs, median) | worst frame, p95, frames over 33 ms, long tasks, shaders compiled (must be 0) |
+| Pan, 3 s | p95 and worst frame, long tasks, engine CPU per frame, draw calls, triangles |
+| Idle, 2 s | frames drawn (must be 0) |
+| Hover across an object | frames, picks and React updates per 80 pointer moves |
+| Dig, CPU slowed 4× | blocks dug, worst frame, frames over 50 ms, long tasks, shaders compiled |
+
+- **Two kinds of budget.** Counts that do not depend on the machine (draw calls, shaders compiled, idle frames, React updates per interaction) are exact. Times were set from runs on the reference machine (RTX 2060) with about one dropped frame of headroom; `pnpm perf --update` prints the measurements without failing, for other hardware.
+- **Frame times are what the visitor sees**: intervals between `requestAnimationFrame` callbacks in the page, so React, style and layout work counts as well as the engine's.
+- **The server is started and stopped by the script**, not by Playwright: on Windows a server started through a shell and pnpm outlived the run and kept the port.
+- **Proof it works.** Putting the `toLocaleString` back into the badge fails the run: `entry.maxFrameMs` 50.1 (budget 34) and `entry.longTasks` 1 (budget 0).
+- Kept from the original benchmark: `lib/perf/frame-statistics.ts` (percentiles, slow-frame counts). Its run comparison, renderer sampling and environment code belonged to the removed in-app benchmark page and were deleted.
+
+### Entry without a hitch (step 6c)
+
+The test found four causes of the 50-220 ms frames at the start and end of the entry, all fixed:
+
+| Cause | Fix |
+|---|---|
+| Entering hides the page's scrollbar; on Windows the canvas widened (1425 → 1440 px) and reallocated its drawing buffer | The world layer is always `100vw` wide |
+| The loader's bottom padding was removed when entering, laying out the whole landing page again | The padding stays while the world is up |
+| The first raster of the world's controls (blurred shadows) cost 55-180 ms in the GPU process | They are drawn at 1 % opacity on the landing page instead of `visibility: hidden` (which skips raster); the layer stays inert, aria-hidden and ignores the pointer. The landing page has `will-change` for its fade while the loader waits |
+| The perf badge's first `toLocaleString` at the end of the entry, 20-70 ms | A plain formatter |
+
+Result on the production build: worst entry frame 16.8 ms (median of 3; was 33-200 ms), no long tasks, no shaders compiled.
+
 
 ### Landing page and entry (stage 3, production build)
 
@@ -445,3 +479,9 @@ The first bake smoothed the terrain (density, blur, Surface Nets, simplification
 - The original's bottom-left FPS badge, now with details: frame time median / p95 / worst, engine CPU per frame, draw calls, triangles, and the cost of the world's React UI.
 - Engine `FrameRecorder` (ring buffer) and `useUiWork()` meter (`lib/perf/`); readers poll `bridge.diagnostics`.
 - Tests: unit tests for the recorder and the meter; e2e for idle, panning and the details.
+
+### Restoration, step 6c: performance regression test
+
+- `pnpm perf`: production build, real GPU, 25 budgets in `perf/budgets.json` covering load, entry, pan, idle, hover and digging with the CPU slowed 4×. Shown to fail when a known regression is put back.
+- The entry-start and entry-end hitches are gone (worst entry frame 16.8 ms).
+- `lib/benchmark` reduced to the frame statistics the test uses (`lib/perf/frame-statistics.ts`).

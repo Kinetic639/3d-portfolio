@@ -1,4 +1,35 @@
-import type { FrameTimeSummary, ThresholdCount } from "./types";
+/**
+ * Summaries of frame-time samples: percentiles, FPS and slow-frame counts.
+ * Kept from the original benchmark; the perf regression test uses it.
+ */
+export type FrameTimeSummary = {
+  frames: number;
+  measuredDurationMs: number;
+  meanFrameMs: number;
+  p50FrameMs: number;
+  p75FrameMs: number;
+  p90FrameMs: number;
+  p95FrameMs: number;
+  p99FrameMs: number;
+  minFrameMs: number;
+  maxFrameMs: number;
+  meanFps: number;
+  medianFpsEquivalent: number;
+  onePercentLowFps: number;
+  slowestOnePercentFrameMs: number;
+  above10Ms: ThresholdCount;
+  above12_5Ms: ThresholdCount;
+  above16_7Ms: ThresholdCount;
+  above25Ms: ThresholdCount;
+  above33_3Ms: ThresholdCount;
+  longFramesAbove50Ms: number;
+  longestSequenceAbove16_7Ms: number;
+};
+
+export type ThresholdCount = {
+  count: number;
+  percentage: number;
+};
 
 export function calculateFrameSummary(samples: ArrayLike<number>, durationMs?: number): FrameTimeSummary {
   const frames = samples.length;

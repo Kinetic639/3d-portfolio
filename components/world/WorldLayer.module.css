@@ -2,10 +2,16 @@
    canvas must have its real dimensions while the engine warms up. On the
    landing page the engine draws only the loader at the bottom centre and
    keeps the rest of the canvas transparent. (No clip-path: changing it on
-   the canvas layer costs the browser a 50-150 ms frame at the start of the entry.) */
+   the canvas layer costs the browser a 50-150 ms frame at the start of the entry.)
+   The layer is as wide as the viewport including the scrollbar (100vw): the
+   page stops scrolling when the world is entered, and a canvas that widened
+   then would reallocate its drawing buffer at the start of the entry. */
 .layer {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 100vw;
   z-index: 20;
   visibility: hidden;
   opacity: 0;
@@ -21,9 +27,13 @@
   transition: opacity 0.5s ease, visibility 0s;
 }
 
-/* Only the canvas (the loader) belongs on the landing page; the world's controls do not. */
+/* Only the canvas (the loader) belongs on the landing page; the world's controls do not.
+   They are kept at 1 % opacity rather than hidden so the browser has already
+   rasterized them (their blurred shadows cost 50-180 ms the first time) when
+   the visitor clicks in; opacity 0 or visibility: hidden would skip that.
+   The layer is inert, aria-hidden and ignores the pointer in this view. */
 .layer[data-view="loader"] > :not(canvas) {
-  visibility: hidden;
+  opacity: 0.01;
 }
 
 .layer[data-view="world"] {
@@ -305,7 +315,8 @@
    The loader itself is the canvas underneath. */
 .loaderButton {
   position: fixed;
-  left: 50%;
+  /* The centre of the canvas, which is 100vw wide. */
+  left: 50vw;
   bottom: 8px;
   z-index: 21;
   display: flex;
@@ -352,7 +363,7 @@
 
 .prompt {
   position: fixed;
-  left: 50%;
+  left: 50vw;
   bottom: 24px;
   z-index: 10;
   transform: translateX(-50%);

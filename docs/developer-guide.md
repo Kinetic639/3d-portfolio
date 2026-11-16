@@ -10,6 +10,7 @@ pnpm lint         # ESLint
 pnpm typecheck    # TypeScript
 pnpm test         # unit tests (Vitest, node environment)
 pnpm e2e          # end-to-end tests (Playwright, starts a dev server)
+pnpm perf         # performance regression test on a production build (about 1.5 min, needs a GPU)
 pnpm build        # production build
 ```
 
@@ -139,6 +140,7 @@ The engine handles picking, the outline, remeshing, the burst, the camera, the H
 
 - In the world, click the **FPS** badge (bottom left) for frame times, engine CPU, draw calls, triangles and the UI's cost. "idle" means nothing is being drawn, which is how a still world should read.
 - A new component in the world UI that reads the bridge calls `useUiWork()` (`lib/perf/ui-work.ts`) as its first hook, so its updates count in "UI".
+- `pnpm perf` before merging anything that touches the engine, the world UI or the landing page. A failure names the metric and its budget; if the change is intended, re-measure with `pnpm perf --update` and edit `perf/budgets.json` with the reason.
 - Something the engine animates must still show up as frames in the badge only while it moves; if it reads a number while nothing moves, it is asking for frames it does not need.
 
 ## Add an engine system (wind, weather, time of day)
