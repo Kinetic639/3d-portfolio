@@ -1,15 +1,15 @@
 {
   "format": 2,
-  "sourceHash": "eb91f717c08d32b6",
-  "hash": "39efadf714ddd902",
-  "fileBytes": 11932,
-  "bakedAt": "2026-11-16T12:16:43.706Z",
+  "sourceHash": "b02b19e5842ccbb3",
+  "hash": "e21310204b728b7f",
+  "fileBytes": 12133,
+  "bakedAt": "2026-11-16T15:25:27.643Z",
   "stats": {
     "sourceFaces": 50792,
-    "faces": 50792,
-    "cells": 46606,
+    "faces": 50546,
+    "cells": 46446,
     "tiles": 9,
-    "bytes": 642732,
-    "bakeMs": 717
+    "bytes": 664328,
+    "bakeMs": 786
   }
 }

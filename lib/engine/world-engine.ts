@@ -8,12 +8,18 @@ import { buildEntityLayer, type EntityLayer } from "./entity-meshes";
 import { ENTRY_SECONDS, FOCUS_SECONDS, loaderView, POP_COMPLETE, rehearsalTimes, sampleEntry, WAVE_UNITS_PER_SECOND, WAVE_WINDOW, type EntryPlan } from "./entry-sequence";
 import { Environment } from "./environment";
 import { LoaderBeacon } from "./loader-beacon";
+import { MinigameHost, type MinigameHostOptions } from "./minigame-host";
+import { buildZoneWorld, meshVoxelZone } from "@/lib/bake/baked-decode";
+import type { VoxelWorld } from "@/lib/world/voxel-world";
+import type { GridCoordinate } from "@/lib/world/world-config";
 import { InteractionLayer, type Interactable } from "./interactables";
 import { getModelLibrary, type ModelLibrary } from "./model-library";
 import type { TerrainChunkSummary } from "./terrain-chunk";
 import { getTerrainAtlas, REVEAL_COMPLETE } from "./terrain-material";
 import { buildBakedTerrain, buildWorldForMap, type TerrainSource } from "./terrain-meshes";
+import { buildSurfaceChunkMesh } from "@/lib/terrain/surface-mesher";
 import { createVoxelWorldQuery, type WorldQuery } from "./world-query";
+import { FrameRecorder } from "@/lib/perf/frame-recorder";
 
 /**
  * The 3D runtime. Plain TypeScript on three.js: no React anywhere in this
@@ -83,6 +89,9 @@ export type WarmUpReport = {
 const PIXEL_RATIO_CAP: Record<QualityTier, number> = { low: 1, medium: 1.25, high: 1.5 };
 const LOWER_QUALITY: Record<QualityTier, QualityTier | null> = { high: "medium", medium: "low", low: null };
 const FOCUS_DISTANCE = 38;
+/** How close the camera comes to a mini-game zone, and how steeply it looks down on it, so nothing around the zone stands in front of the blocks. */
+const MINIGAME_DISTANCE = 26;
+const MINIGAME_PITCH = 52;
 const LEAVE_MS = 450;
 /** The box at the bottom centre of the canvas where the loader is drawn on the landing page, in CSS pixels. */
 export const LOADER_VIEWPORT = { width: 260, height: 200 } as const;
@@ -99,6 +108,8 @@ const nextFrame = () => new Promise<number>((resolve) => requestAnimationFrame(r
 
 export class WorldEngine {
   readonly stats: EngineStats = { frames: 0, loaderFrames: 0, picks: 0, frameCpuMs: 0, frameIntervalMs: 0, worstFrameIntervalMs: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, programs: 0 };
+  /** The last few seconds of world frames (not warm-up or loader frames), for the perf HUD. */
+  readonly frames = new FrameRecorder();
   warmUpReport: WarmUpReport | null = null;
   private readonly canvas: HTMLCanvasElement;
   private readonly bridge: WorldBridge;
@@ -137,6 +148,10 @@ export class WorldEngine {
   private terrain: TerrainSource | null = null;
   private entities: EntityLayer | null = null;
   private interaction: InteractionLayer | null = null;
+  private minigames: MinigameHost | null = null;
+  /** Where the camera was before a mini-game started. */
+  private viewBeforeMinigame: ReturnType<CameraRig["getGoal"]> | null = null;
+  private readonly ray = new THREE.Ray();
   private active = false;
   private entering = false;
   private leaveTimer = 0;
@@ -166,6 +181,7 @@ export class WorldEngine {
       onTap: (clientX, clientY) => this.handleTap(clientX, clientY),
     });
     this.rig.setEnabled(false);
+    bridge.diagnostics.engine = { frames: this.frames, stats: this.stats };
 
     this.beacon.group.traverse((object) => object.layers.enable(LOADER_LAYER));
     this.scene.add(this.beacon.group);
@@ -218,7 +234,19 @@ export class WorldEngine {
       terrain.dispose();
       return;
     }
-    this.install(definition, terrain, createVoxelWorldQuery(world), models, options);
+    const query = createVoxelWorldQuery(world);
+    // Mini-games dig in the voxel world itself; a changed cell remeshes its chunk and the neighbours it borders.
+    this.install(definition, terrain, query, models, options, {
+      world,
+      query,
+      remesh: (_zoneId, cells) => terrain.rebuildChunks(chunksAround(world, cells)),
+      rehearse: () => {
+        for (const zone of MinigameHost.playableZones(definition)) {
+          const column = firstColumn(world, zone.numericId);
+          if (column) buildSurfaceChunkMesh(world, Math.floor(column.x / world.config.chunkSize), Math.floor(column.z / world.config.chunkSize), { skipMappings: true, packed: true });
+        }
+      },
+    });
   }
 
   /**
@@ -238,7 +266,20 @@ export class WorldEngine {
       terrain.dispose();
       return;
     }
-    this.install(baked.header.map, terrain, query, models, options);
+    // Mini-game zones were baked as voxels; they are kept here so games can change them.
+    const zoneWorld = MinigameHost.playableZones(baked.header.map).length > 0 ? buildZoneWorld(baked) : null;
+    const zones = baked.header.voxelZones;
+    this.install(baked.header.map, terrain, query, models, options, zoneWorld ? {
+      world: zoneWorld,
+      query,
+      remesh: (zoneId) => {
+        const zone = zones.find((candidate) => candidate.zoneId === zoneId);
+        if (zone) terrain.setMesh(`zone-${zoneId}`, meshVoxelZone(zoneWorld, zone));
+      },
+      rehearse: () => {
+        for (const zone of zones) meshVoxelZone(zoneWorld, zone);
+      },
+    } : null);
     options.onProgress?.(1);
   }
 
@@ -249,8 +290,19 @@ export class WorldEngine {
     return models;
   }
 
-  private install(definition: RuntimeMap, terrain: TerrainSource, query: WorldQuery, models: ModelLibrary, options: LoadMapOptions) {
+  private install(
+    definition: RuntimeMap,
+    terrain: TerrainSource,
+    query: WorldQuery,
+    models: ModelLibrary,
+    options: LoadMapOptions,
+    minigameVoxels: Omit<MinigameHostOptions, "map"> | null,
+  ) {
     this.terrain = terrain;
+    if (minigameVoxels && MinigameHost.playableZones(definition).length > 0) {
+      this.minigames = new MinigameHost({ map: definition, ...minigameVoxels });
+      this.scene.add(this.minigames.group);
+    }
     this.entities = buildEntityLayer(definition.entities, models);
     this.interaction = new InteractionLayer({
       map: definition,
@@ -454,8 +506,10 @@ export class WorldEngine {
     const interactionGroup = this.interaction?.group;
     if (interactionGroup) interactionGroup.visible = true;
     this.beacon.forceVisible();
+    this.minigames?.showForWarmUp(true);
     const restore = () => {
       if (interactionGroup) interactionGroup.visible = false;
+      this.minigames?.showForWarmUp(false);
       if (this.bridge.store.getState().phase === "ready") this.beacon.show();
       else this.beacon.hide();
       if (this.terrain?.uniforms) this.terrain.uniforms.uExpansionProgress.value = 0;
@@ -481,6 +535,14 @@ export class WorldEngine {
     await this.renderer.compileAsync(this.scene, camera);
     if (aborted()) return null;
     options.onProgress?.(0.2);
+    // A mini-game's first dig would otherwise be the first run of the mesher on this thread.
+    if (this.minigames) {
+      for (let pass = 0; pass < 4; pass += 1) {
+        await nextFrame();
+        if (aborted()) return null;
+        this.minigames.rehearseDig();
+      }
+    }
     // Every program exists now: the loader can start showing without a compile on the main thread.
     this.loaderReady = true;
     this.startLanding();
@@ -491,6 +553,7 @@ export class WorldEngine {
       ...(this.terrain?.meshes() ?? []),
       ...(this.entities?.group.children ?? []),
       ...(this.interaction?.group.children ?? []),
+      ...(this.minigames?.group.children ?? []),
     ];
     const culling = objects.map((object) => object.frustumCulled);
     objects.forEach((object) => {
@@ -596,6 +659,7 @@ export class WorldEngine {
 
   dispose() {
     this.disposed = true;
+    if (this.bridge.diagnostics.engine?.frames === this.frames) this.bridge.diagnostics.engine = null;
     cancelAnimationFrame(this.frameHandle);
     cancelAnimationFrame(this.pickHandle);
     window.clearTimeout(this.leaveTimer);
@@ -624,6 +688,13 @@ export class WorldEngine {
       this.interaction.dispose();
       this.interaction = null;
     }
+    if (this.minigames) {
+      this.scene.remove(this.minigames.group);
+      this.minigames.dispose();
+      this.minigames = null;
+    }
+    this.viewBeforeMinigame = null;
+    this.bridge.set({ minigame: null });
     if (this.entities) {
       this.scene.remove(this.entities.group);
       this.entities.dispose();
@@ -648,6 +719,9 @@ export class WorldEngine {
       case "focus-content":
         this.focusContent(command.content, command.inset);
         this.invalidate();
+        break;
+      case "leave-minigame":
+        this.leaveMinigame();
         break;
       case "clear-focus":
         this.interaction?.setFocused(null);
@@ -698,6 +772,7 @@ export class WorldEngine {
     this.entering = false;
     this.entry = null;
     this.wave = null;
+    if (this.minigames?.playing) this.leaveMinigame(false);
     this.rig.setEnabled(false);
     this.interaction?.setHovered(null);
     this.interaction?.setFocused(null);
@@ -744,19 +819,75 @@ export class WorldEngine {
   private updateHover() {
     if (!this.interaction) return;
     const canHover = this.isInteractive() && this.pointer !== null && !this.rig.isPointerDown();
+    if (this.minigames?.playing) {
+      // In a game the pointer aims at blocks, not at content.
+      const changed = canHover ? this.minigames.hover(this.rayAt(this.pointer!.x, this.pointer!.y)) : this.minigames.hover(new THREE.Ray(new THREE.Vector3(0, -1e6, 0)));
+      this.canvas.style.cursor = "crosshair";
+      if (changed) this.invalidate();
+      return;
+    }
     const item = canHover ? this.pickAt(this.pointer!.x, this.pointer!.y) : null;
     if (!this.interaction.setHovered(item?.id ?? null)) return;
     this.canvas.style.cursor = item ? "pointer" : "";
-    this.bridge.set({ hovered: item ? { id: item.id, label: item.label, content: item.content } : null });
+    this.bridge.set({ hovered: item ? { id: item.id, label: item.label, content: item.content, action: item.minigame ? "play" : "open" } : null });
     this.invalidate();
   }
 
   private handleTap(clientX: number, clientY: number) {
     if (!this.isInteractive()) return;
+    if (this.minigames?.playing) {
+      const hud = this.minigames.tap(this.rayAt(clientX, clientY));
+      if (hud) this.bridge.set({ minigame: hud });
+      this.invalidate();
+      return;
+    }
     const item = this.pickAt(clientX, clientY);
-    if (item) {
+    if (item?.minigame && item.zoneNumericId !== null) {
+      this.startMinigame(item);
+    } else if (item?.content) {
       this.bridge.events.emit({ type: "content-activated", content: item.content, interactableId: item.id });
     }
+  }
+
+  /** A ray from the camera through a point of the canvas. */
+  private rayAt(clientX: number, clientY: number) {
+    const rect = this.canvas.getBoundingClientRect();
+    const camera = this.rig.camera;
+    camera.updateMatrixWorld();
+    this.ray.origin.setFromMatrixPosition(camera.matrixWorld);
+    this.ray.direction.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1, 0.5).unproject(camera).sub(this.ray.origin).normalize();
+    return this.ray;
+  }
+
+  /** Starts a zone's game: the camera comes closer, the HUD appears, clicks act on blocks. */
+  private startMinigame(item: Interactable) {
+    const hud = this.minigames?.start(item.zoneNumericId!);
+    if (!hud) return;
+    this.viewBeforeMinigame = this.rig.getGoal();
+    this.interaction?.setHovered(null);
+    this.interaction?.setFocused(item.id);
+    this.rig.setOrientation(undefined, MINIGAME_PITCH);
+    this.rig.focusOn(item.focus.x, item.focus.z, MINIGAME_DISTANCE);
+    this.bridge.set({ minigame: hud, hovered: null });
+    this.schedulePick();
+    this.invalidate();
+  }
+
+  /** Back to exploring; the holes stay for this visit. */
+  private leaveMinigame(restoreView = true) {
+    if (!this.minigames?.playing) return;
+    this.minigames.stop();
+    this.interaction?.setFocused(null);
+    if (restoreView && this.viewBeforeMinigame) {
+      const { x, z, distance, yawDegrees, pitchDegrees } = this.viewBeforeMinigame;
+      this.rig.setOrientation(yawDegrees, pitchDegrees);
+      this.rig.lookAt(x, z, distance);
+    }
+    this.viewBeforeMinigame = null;
+    this.canvas.style.cursor = "";
+    this.bridge.set({ minigame: null });
+    this.schedulePick();
+    this.invalidate();
   }
 
   private readonly frame = (now: number) => {
@@ -770,7 +901,8 @@ export class WorldEngine {
     const cameraMoving = this.entry ? this.advanceEntry(delta) : this.rig.update(delta);
     const waving = this.advanceWave(delta);
     // Animated models need a frame every frame for as long as the world is shown.
-    const animating = (this.entities?.update(delta) ?? false) || waving;
+    const bursting = this.minigames?.update(delta) ?? false;
+    const animating = (this.entities?.update(delta) ?? false) || waving || bursting;
     this.environment.update(this.elapsedSeconds);
     if (this.terrain?.uniforms) this.terrain.uniforms.uTime.value = this.elapsedSeconds;
     // While the camera leaves the loader, the page is still fading out underneath: no sky yet,
@@ -794,6 +926,7 @@ export class WorldEngine {
     this.stats.geometries = info.memory.geometries;
     this.stats.textures = info.memory.textures;
     this.stats.programs = info.programs?.length ?? 0;
+    this.frames.record(now, this.stats.frameIntervalMs, this.stats.frameCpuMs);
     this.lastFrameAt = cameraMoving || animating ? now : 0;
 
     if (this.entering && !this.entry) {
@@ -867,4 +1000,26 @@ export class WorldEngine {
     this.loaderCamera.updateProjectionMatrix();
     this.invalidate();
   }
+}
+
+/** Chunks that show a set of cells: each cell's own, and the neighbour across any chunk edge it touches. */
+function chunksAround(world: VoxelWorld, cells: GridCoordinate[]) {
+  const ids = new Set<string>();
+  const { chunkSize, width, depth } = world.config;
+  for (const cell of cells) {
+    for (const [dx, dz] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      const x = cell.x + dx;
+      const z = cell.z + dz;
+      if (x < 0 || z < 0 || x >= width || z >= depth) continue;
+      ids.add(world.getChunkId(Math.floor(x / chunkSize), Math.floor(z / chunkSize)));
+    }
+  }
+  return ids;
+}
+
+/** Any column of a zone, or null. */
+function firstColumn(world: VoxelWorld, zoneId: number) {
+  const { width } = world.config;
+  const index = world.zones.indexOf(zoneId);
+  return index < 0 ? null : { x: index % width, z: Math.floor(index / width) };
 }

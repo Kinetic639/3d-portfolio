@@ -257,3 +257,29 @@ test("touch: a tap opens content and a one-finger drag pans", async ({ browser }
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Project Placeholder One" })).toBeVisible();
   await context.close();
 });
+
+test("the perf badge reads idle at rest, counts frames while panning and opens into the details", async ({ page }) => {
+  await openWorld(page);
+  const hud = page.getByRole("complementary", { name: "Rendering performance" });
+  const badge = hud.getByRole("button", { name: /FPS/ });
+  await expect(badge).toContainText("idle");
+  // The badge refreshes itself without drawing anything.
+  const before = await frames(page);
+  await page.waitForTimeout(1200);
+  expect(await frames(page)).toBe(before);
+
+  await page.mouse.move(640, 360);
+  await page.mouse.down();
+  for (let step = 0; step < 60; step += 1) {
+    await page.mouse.move(640 + step * 4, 360 + (step % 2) * 4);
+    await page.waitForTimeout(16);
+  }
+  await expect(badge).toContainText(/FPS\s*\d+\s*[\d.]+ ms/);
+  await page.mouse.up();
+
+  await badge.click();
+  await expect(badge).toHaveAttribute("aria-expanded", "true");
+  await expect(hud.getByText("Draw calls")).toBeVisible();
+  await expect(hud.locator("dd").nth(3)).toHaveText(/^\d+$/);
+  await expect(hud.getByText("UI (5 s)")).toBeVisible();
+});

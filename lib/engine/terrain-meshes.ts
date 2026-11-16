@@ -27,6 +27,8 @@ export type TerrainSource = {
   meshes: () => THREE.Mesh[];
   /** Rebuilds the listed chunks ("chunk-x-z") in place. Cost is proportional to the list, not the world. */
   rebuildChunks: (chunkIds: Iterable<string>) => void;
+  /** Puts in, replaces or (with null) removes one mesh by id. Mini-games use it for a baked world's zone meshes. */
+  setMesh: (id: string, buffers: TerrainChunkBuffers | null) => void;
   triangleCount: () => number;
   /** Reveal and loader uniforms of voxel terrain; absent on sources that have no reveal. */
   uniforms?: TerrainUniforms;
@@ -93,6 +95,7 @@ function createTerrainSource(world: VoxelWorld | null, editorView = false) {
     group,
     uniforms,
     editorUniforms,
+    setMesh: setChunk,
     meshes: () => [...meshes.values()],
     rebuildChunks(chunkIds) {
       if (!world) return;

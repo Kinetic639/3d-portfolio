@@ -217,5 +217,5 @@ export function parseContentKey(key: string): MapContentReference | null {
   return item ? { contentType: item.kind, contentId: item.id } : null;
 }
 
-/** Mini-games a zone can host. The dig game arrives with the mini-game stage; the id is reserved here. */
-export const MINIGAME_OPTIONS = [{ id: "dig", label: "Dig (terrain destruction)" }];
+/** Mini-games a zone can host: every game in lib/minigames/registry.ts. */
+export { MINIGAME_OPTIONS } from "@/lib/minigames/registry";

@@ -57,6 +57,16 @@ Consequences: the close button, Escape and browser Back are the same operation; 
 - **Occlusion.** Objects whose bounds lie between the camera and the hovered or focused interactable are drawn with an ordered-dither fade (a per-instance attribute in `entity-meshes.ts`), which needs no transparency sorting. Terrain is not faded; the fixed camera angle and the always-visible icons cover that case.
 - **Keyboard and screen readers.** A canvas cannot expose its objects to assistive technology, so the HUD menu lists every content item as a real link; activating one is the same as clicking the object.
 
+## Mini-games
+
+A zone of kind `minigame` names a game in `minigame.gameId`. The zones are drawn in the editor (Zones tab, Kind "Mini-game: …"); outside them a visitor changes nothing.
+
+- **Split of work.** A game (`lib/minigames/<id>.ts`) is a `MinigameDefinition`: a title, a hint, and `start(context)` returning a session with `target(cell)` (what a click would act on), `act(cell)` and `counters()`. The engine's `MinigameHost` (`lib/engine/minigame-host.ts`) does everything games share: picking, the outline on the target cell, the burst when a block breaks, remeshing, the camera, entering and leaving, and the HUD data. `lib/minigames/registry.ts` lists the games; the editor's zone panel and the interactables read that list, so a new game needs no change anywhere else.
+- **Entering and leaving.** Each playable zone gets a play icon ("Click to play"). A click tilts the camera to look down into the zone (52°, distance 26) and shows the HUD at the top centre: the game's title, its counters (a live region), the hint and a Leave button; Escape does the same. Leaving restores the view the visitor had.
+- **Changing the terrain.** A removed cell is written to the voxels and only what shows it is remeshed, once, right after the click: the chunk (and a neighbour when the cell is on its edge) for a voxel world; for a baked world, the zone's own mesh, built from the voxels the bake keeps for mini-game zones. Nothing is saved; a reload restores the map.
+- **No first-dig stall.** Warm-up compiles the outline and burst materials and runs the dig remesh four times without keeping the result, so the first real dig runs warm code.
+- **Measured** (dev build, 12 digs, RTX 2060): no long tasks and a worst frame of 16.8 ms at full speed, voxels and baked. With the CPU slowed 4× (a mid-range phone): baked 6–17 ms per dig, worst frame 33 ms, no long tasks; voxels 12–25 ms per dig, one 65 ms long task.
+
 ## How the world is built
 
 A map file (`maps/<id>/map.json`, schema v5) stores:
@@ -288,6 +298,23 @@ Measured in Chromium with a real GPU (RTX 2060), 1440×900. "Before" is commit `
 | Unit test suite | 57 s, 1–3 flaky timeouts | 6 s, 124 tests, stable |
 | `pnpm lint` | 5 errors, 41 warnings | 0 errors, 0 warnings |
 
+### Built-in measurement: the perf badge
+
+The world shows the original's FPS badge at the bottom left (`components/world/PerfHud.tsx`); a click opens the details. It is there in production too, as in the original.
+
+| Field | What it is | Source |
+|---|---|---|
+| FPS | Frames the engine drew in the last second. Rendering is on demand, so a still world reads **idle**, not 60 | `FrameRecorder` (`lib/perf/frame-recorder.ts`), filled by the engine every frame |
+| Median / p95 / worst frame | Intervals between consecutive frames in the last second: what the visitor sees | same |
+| Engine CPU | Mean / worst time of the engine's update + render inside a frame | same |
+| Draw calls, triangles | Of the last frame drawn | `renderer.info` |
+| UI (5 s), UI worst | Updates of the world's React UI in the last 5 s, their total time from render to committed DOM, and the slowest | `useUiWork()` (`lib/perf/ui-work.ts`) in every component that reads the bridge |
+
+- **Cost.** Recording a frame is three typed-array writes. The badge reads twice a second on a timer (0.015 ms per read) and writes text into the DOM without React; it never asks the engine for a frame (tested: 0 frames drawn while it refreshes over an idle world).
+- **Bridge rule 3 holds.** Per-frame data never enters the bridge's state; the engine puts its recorder in `bridge.diagnostics`, a plain slot that readers poll.
+- **UI time** is measured from the start of a component's render to its layout effect, which works in production builds (React's Profiler does not). The browser's own style and layout work afterwards is not included.
+- The Next.js development indicator moved to the bottom right to make room.
+
 ### Landing page and entry (stage 3, production build)
 
 | Measure | Result |
@@ -406,3 +433,15 @@ The first bake smoothed the terrain (density, blur, Surface Nets, simplification
 - The mesher no longer draws the underside of the world's lowest layer: 42 % fewer vertices on the default map, for voxels and bakes alike.
 - Removed: the smoothing mesher, the simplifier step and the flat-shaded baked material.
 - Visitors still get voxels until the bake is approved (`SERVE_BAKED_WORLDS=1`); `?world=baked` shows it in development.
+
+### Restoration, step 6a: the dig mini-game
+
+- Mini-game framework: `MinigameDefinition` + registry (`lib/minigames/`), engine host (`lib/engine/minigame-host.ts`), HUD in `WorldLayer.tsx`, `leave-minigame` command.
+- One game, Dig ("Mine", zone 11 on the default map): click a block to break it; stone sometimes hides ore. Works on voxels and on the bake (the zone stays voxels there).
+- Tests: unit tests for the game and registry; e2e for entering from the icon, digging, Escape and the Leave button, on voxels and on the bake.
+
+### Restoration, step 6b: the perf badge
+
+- The original's bottom-left FPS badge, now with details: frame time median / p95 / worst, engine CPU per frame, draw calls, triangles, and the cost of the world's React UI.
+- Engine `FrameRecorder` (ring buffer) and `useUiWork()` meter (`lib/perf/`); readers poll `bridge.diagnostics`.
+- Tests: unit tests for the recorder and the meter; e2e for idle, panning and the details.
