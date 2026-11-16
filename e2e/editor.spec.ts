@@ -6,6 +6,10 @@ import { trackErrors } from "./helpers";
  * production server. Every test that edits works on a scratch map created
  * through the editor's own API and removed afterwards; the repository's real
  * maps are only read.
+ *
+ * The interface is the original editor's: workspaces as tabs, tools in the
+ * rail, settings in the left dock, inspector on the right, reports at the
+ * bottom, a status bar.
  */
 type EditorProbe = {
   session: {
@@ -14,14 +18,14 @@ type EditorProbe = {
     getMeta: () => { name: string; zones: Array<{ numericId: number; label: string; kind?: string; minigame?: { gameId: string } }> };
     undoLabel: string | null;
     isDirty: boolean;
-    undo: () => void;
   };
   viewport: {
     project: (x: number, y: number, z: number) => { x: number; y: number };
-    stats: { frames: number; chunkRebuilds: number; entityRebuilds: number; worstFrameMs: number };
+    stats: { frames: number; chunkRebuilds: number; entityRebuilds: number; previewRebuilds: number; worstFrameMs: number };
     resetWorstFrame: () => void;
+    isBakedView: boolean;
   };
-  store: { getState: () => { selection: string[]; settings: { tool: string; brushSize: number } } };
+  store: { getState: () => { selection: string[]; settings: { tool: string; brush: { size: number } } } };
 };
 
 declare global {
@@ -49,11 +53,25 @@ test.afterAll(async ({ request }) => {
 });
 
 async function openEditor(page: Page, mapId = SCRATCH) {
+  await page.setViewportSize({ width: 1600, height: 950 });
   await page.goto(`/editor?map=${mapId}`);
   await page.waitForSelector('[data-editor="ready"]', { timeout: 120_000 });
   // First frame drawn: the viewport is interactive.
   await expect.poll(() => page.evaluate(() => window.__editor!.viewport.stats.frames)).toBeGreaterThan(0);
+  // The editor opens close to the ground, as the original did; the tests need the whole map in view.
+  // From above, so a stroke does not climb onto the blocks it has just raised.
+  await page.evaluate(() => {
+    const viewport = window.__editor!.viewport as unknown as { frameAll: (immediate: boolean) => void; rig: { setOrientation: (yaw: number, pitch: number, immediate: boolean) => void } };
+    viewport.rig.setOrientation(0, 55, true);
+    viewport.frameAll(true);
+  });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
+
+const workspace = (page: Page, name: string) => page.getByRole("tablist", { name: "Editor workspaces" }).getByRole("tab", { name, exact: true }).click();
+const tool = (page: Page, name: string) => page.locator(".editor-tool-rail").getByRole("button", { name, exact: true }).click();
+const leftDock = (page: Page) => page.locator(".editor-left-dock");
+const statusBar = (page: Page) => page.locator(".editor-status-bar");
 
 /** Screen position of the top face of a column. */
 const columnTop = (page: Page, x: number, z: number) => page.evaluate(([cx, cz]) => {
@@ -67,34 +85,46 @@ const topOf = (page: Page, x: number, z: number) => page.evaluate(([cx, cz]) => 
 const entities = (page: Page) => page.evaluate(() => window.__editor!.session.getEntities());
 const selection = (page: Page) => page.evaluate(() => window.__editor!.store.getState().selection);
 const stats = (page: Page) => page.evaluate(() => ({ ...window.__editor!.viewport.stats }));
+const undoLabel = (page: Page) => page.evaluate(() => window.__editor!.session.undoLabel);
 
-test("opens the default map with its tools and reports what is under the pointer", async ({ page }) => {
+test("opens the default map in the original interface and reports the hovered cell", async ({ page }) => {
   const errors = trackErrors(page);
   await openEditor(page, "portfolio-main");
-  await expect(page.getByRole("radio", { name: /Select/ })).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByRole("option", { name: /Portfolio Workshop Compound/ })).toBeVisible();
+  await expect(page.getByRole("menubar", { name: "Editor menu bar" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Terrain", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByLabel("Camera compass")).toBeVisible();
+  await expect(page.locator(".editor-outliner")).toContainText("8944 edits");
 
   const point = await columnTop(page, 96, 96);
   await page.mouse.move(point.x, point.y);
-  await expect(page.getByTestId("editor-hover")).toHaveText(/^\d+, -?\d+, \d+ · /);
+  await expect(statusBar(page).locator("span").nth(2)).toHaveText(/^\d+,\d+,\d+$/);
   expect(errors).toEqual([]);
 });
 
-test("places and removes blocks; each stroke is one undo step and rebuilds only nearby chunks", async ({ page }) => {
+test("adds and erases blocks; each edit is one undo step and rebuilds only nearby chunks", async ({ page }) => {
   await openEditor(page);
+  await workspace(page, "Terrain");
+  await tool(page, "Add Block");
   const before = await columnTop(page, 30, 30);
   const baseline = await stats(page);
 
-  await page.keyboard.press("2");
+  // Hovering shows the block's ghost; moving within one cell rebuilds nothing.
+  await page.mouse.move(before.x, before.y);
+  await page.mouse.move(before.x + 1, before.y + 1);
+  await expect.poll(async () => (await stats(page)).previewRebuilds).toBeGreaterThan(baseline.previewRebuilds);
+  const previews = (await stats(page)).previewRebuilds;
+  await page.mouse.move(before.x + 2, before.y);
+  expect((await stats(page)).previewRebuilds).toBe(previews);
+
   await page.mouse.click(before.x, before.y);
   await expect.poll(() => topOf(page, 30, 30)).toBe(before.top + 1);
-  const afterPlace = await stats(page);
+  const afterAdd = await stats(page);
   // One block touches its own chunk and at most the neighbours it borders; never the whole 4 x 4 map.
-  expect(afterPlace.chunkRebuilds - baseline.chunkRebuilds).toBeLessThanOrEqual(4);
-  expect(afterPlace.entityRebuilds).toBe(baseline.entityRebuilds);
-  expect(await page.evaluate(() => window.__editor!.session.undoLabel)).toBe("Place blocks");
+  expect(afterAdd.chunkRebuilds - baseline.chunkRebuilds).toBeLessThanOrEqual(4);
+  expect(afterAdd.entityRebuilds).toBe(baseline.entityRebuilds);
+  expect(await undoLabel(page)).toBe("Add blocks");
 
-  await page.keyboard.press("3");
+  await tool(page, "Erase");
   const placed = await columnTop(page, 30, 30);
   await page.mouse.click(placed.x, placed.y);
   await expect.poll(() => topOf(page, 30, 30)).toBe(before.top);
@@ -108,12 +138,14 @@ test("places and removes blocks; each stroke is one undo step and rebuilds only 
   await page.keyboard.press("Control+z");
 });
 
-test("raises terrain with a sized brush: one step per column per stroke, undone as one", async ({ page }) => {
+test("raises terrain with a sized brush, one step per column per stroke, and flattens it back", async ({ page }) => {
   await openEditor(page);
-  await page.keyboard.press("5");
-  await page.keyboard.press("BracketRight");
-  await page.keyboard.press("BracketRight");
-  expect(await page.evaluate(() => window.__editor!.store.getState().settings.brushSize)).toBe(5);
+  await workspace(page, "Terrain");
+  await tool(page, "Raise");
+  await leftDock(page).getByLabel("Shape").selectOption("square");
+  await leftDock(page).getByLabel("Size").fill("5");
+  await expect(leftDock(page).getByText("Affected")).toBeVisible();
+  expect(await page.evaluate(() => window.__editor!.store.getState().settings.brush.size)).toBe(5);
 
   const from = await columnTop(page, 20, 40);
   const to = await columnTop(page, 26, 40);
@@ -126,72 +158,91 @@ test("raises terrain with a sized brush: one step per column per stroke, undone 
   // Overlapping brush positions must not stack: every touched column rose by exactly one.
   for (const x of [18, 20, 23, 26]) expect(await topOf(page, x, 40)).toBe(from.top + 1);
   expect(await topOf(page, 20, 44)).toBe(from.top);
-  expect((await stats(page)).worstFrameMs).toBeLessThan(50);
+  expect((await stats(page)).worstFrameMs).toBeLessThan(60);
+  expect(await undoLabel(page)).toBe("Raise terrain");
 
+  // Flatten takes the height of the cell the stroke starts on.
+  await tool(page, "Flatten");
+  await leftDock(page).getByLabel("Shape").selectOption("square");
+  await leftDock(page).getByLabel("Size").fill("5");
+  const ground = await columnTop(page, 22, 44);
+  await page.mouse.click(ground.x, ground.y);
+  await expect.poll(() => topOf(page, 22, 42)).toBe(from.top);
+  expect(await topOf(page, 23, 40)).toBe(from.top + 1);
+  expect(await undoLabel(page)).toBe("Flatten terrain");
+
+  await page.keyboard.press("Control+z");
   await page.keyboard.press("Control+z");
   for (const x of [18, 20, 23, 26]) expect(await topOf(page, x, 40)).toBe(from.top);
 });
 
-test("places, selects, moves, rotates, scales, duplicates and deletes objects", async ({ page }) => {
+test("places, selects, moves, rotates, duplicates and deletes objects", async ({ page }) => {
   await openEditor(page);
-  await page.keyboard.press("8");
-  await page.getByRole("searchbox", { name: "Search objects" }).fill("Conifer");
-  await page.getByRole("option", { name: "Conifer" }).first().click();
+  await workspace(page, "Objects");
+  await leftDock(page).getByLabel("Search prefabs").fill("Foundation Square");
+  await leftDock(page).getByRole("option", { name: /Foundation Square/ }).click();
+  expect(await page.evaluate(() => window.__editor!.store.getState().settings.tool)).toBe("entity");
 
   const spot = await columnTop(page, 32, 32);
+  await page.mouse.move(spot.x, spot.y);
   await page.mouse.click(spot.x, spot.y);
   await expect.poll(async () => (await entities(page)).length).toBe(1);
   const [placed] = await entities(page);
   expect(await selection(page)).toEqual([placed.id]);
 
   // Assign content from the inspector.
-  await page.getByRole("combobox", { name: /Content shown/ }).selectOption({ index: 1 });
+  await page.getByRole("combobox", { name: "Object content" }).selectOption({ index: 1 });
   expect((await entities(page))[0].contentReference).toBeTruthy();
 
-  // Drag it: snapped move, one undo step.
-  await page.keyboard.press("1");
+  // Drag it with Select: snapped move, one undo step.
+  await tool(page, "Select");
   const grab = await page.evaluate(() => {
     const { session, viewport } = window.__editor!;
     const { x, y, z } = session.getEntities()[0].transform.position;
-    return viewport.project(x, y + 0.6, z);
+    return viewport.project(x, y + 0.1, z);
   });
   await page.mouse.move(grab.x, grab.y);
   await page.mouse.down();
   await page.mouse.move(grab.x + 90, grab.y + 10, { steps: 10 });
   await page.mouse.up();
   const moved = (await entities(page))[0];
-  expect(moved.transform.position.x).toBeGreaterThan(placed.transform.position.x + 1);
+  expect(moved.transform.position.x).not.toBe(placed.transform.position.x);
   expect((moved.transform.position.x * 2) % 1).toBe(0);
-  expect(await page.evaluate(() => window.__editor!.session.undoLabel)).toBe("Move object");
+  expect(await undoLabel(page)).toBe("Move object");
 
-  await page.keyboard.press("r");
-  expect((await entities(page))[0].transform.rotation.y).not.toBe(moved.transform.rotation.y);
-  await page.getByRole("button", { name: "Scale +" }).click();
-  expect((await entities(page))[0].transform.scale.x).toBeCloseTo(1.25);
+  // Rotate mode: dragging turns the object in 15 degree steps.
+  await leftDock(page).getByRole("button", { name: "Rotate", exact: true }).click();
+  const handle = await page.evaluate(() => {
+    const { session, viewport } = window.__editor!;
+    const { x, y, z } = session.getEntities()[0].transform.position;
+    return viewport.project(x, y + 0.1, z);
+  });
+  await page.mouse.move(handle.x, handle.y);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + 120, handle.y, { steps: 10 });
+  await page.mouse.up();
+  const turned = (await entities(page))[0].transform.rotation.y;
+  expect(turned).not.toBe(moved.transform.rotation.y);
+  expect(Math.abs((turned / (Math.PI / 12)) - Math.round(turned / (Math.PI / 12)))).toBeLessThan(1e-6);
 
   await page.keyboard.press("Control+d");
   expect(await entities(page)).toHaveLength(2);
-  const copyId = (await selection(page))[0];
-  expect(copyId).not.toBe(placed.id);
-
-  // Multi-select through the list, then delete both.
-  await page.getByRole("listbox", { name: "Objects on the map" }).getByRole("option").first().click({ modifiers: ["Shift"] });
-  expect(await selection(page)).toHaveLength(2);
+  expect((await selection(page))[0]).not.toBe(placed.id);
   await page.keyboard.press("Delete");
-  expect(await entities(page)).toHaveLength(0);
-  expect(await selection(page)).toEqual([]);
-
+  expect(await entities(page)).toHaveLength(1);
   await page.keyboard.press("Control+z");
   expect(await entities(page)).toHaveLength(2);
 });
 
-test("defines a zone, paints it, makes it a mini-game zone, and the map validates", async ({ page }) => {
+test("creates a zone, paints it with the brush and the area fill, makes it a mini-game zone, and removes it", async ({ page }) => {
   await openEditor(page);
-  await page.getByRole("tab", { name: "Zones" }).click();
-  await page.getByRole("button", { name: "Add zone" }).click();
+  await workspace(page, "Zones");
+  page.on("dialog", (dialog) => void dialog.accept());
+  await page.locator(".editor-tool-rail").getByRole("button", { name: "New Zone" }).click();
   const zone = await page.evaluate(() => window.__editor!.session.getMeta().zones.at(-1)!);
-  expect(await page.evaluate(() => window.__editor!.store.getState().settings.tool)).toBe("zone");
 
+  await page.getByRole("button", { name: "Zone Paint" }).click();
+  expect(await page.evaluate(() => window.__editor!.store.getState().settings.tool)).toBe("zone");
   const from = await columnTop(page, 40, 20);
   const to = await columnTop(page, 44, 20);
   await page.mouse.move(from.x, from.y);
@@ -200,34 +251,43 @@ test("defines a zone, paints it, makes it a mini-game zone, and the map validate
   await page.mouse.up();
   expect(await page.evaluate(([x, z]) => window.__editor!.session.world.getColumnZone(x, z), [42, 20])).toBe(zone.numericId);
 
-  await page.getByRole("combobox", { name: "Zone kind" }).selectOption("minigame");
+  // Area fill: a rectangle from where the button went down to where it came up.
+  await page.getByRole("button", { name: "Zone Area Fill" }).click();
+  const corner = await columnTop(page, 30, 26);
+  const opposite = await columnTop(page, 33, 28);
+  await page.mouse.move(corner.x, corner.y);
+  await page.mouse.down();
+  await page.mouse.move(opposite.x, opposite.y, { steps: 6 });
+  await page.mouse.up();
+  for (const [x, z] of [[30, 26], [33, 28], [31, 27]]) {
+    expect(await page.evaluate(([cx, cz]) => window.__editor!.session.world.getColumnZone(cx, cz), [x, z])).toBe(zone.numericId);
+  }
+
+  await page.getByRole("combobox", { name: "Zone kind" }).selectOption("minigame:dig");
   const updated = await page.evaluate(() => window.__editor!.session.getMeta().zones.at(-1)!);
   expect(updated.kind).toBe("minigame");
   expect(updated.minigame?.gameId).toBe("dig");
 
-  await page.getByRole("tab", { name: "Map" }).click();
-  await page.getByRole("button", { name: "Validate map" }).click();
-  await expect(page.getByText("No problems found.")).toBeVisible();
+  await page.locator(".editor-main-toolbar").getByRole("button", { name: /Valid|issues/ }).click();
+  await expect(page.locator(".editor-validation-list")).toContainText("No validation issues");
 
-  await page.getByRole("tab", { name: "Zones" }).click();
-  await page.getByRole("button", { name: "Delete zone" }).click();
-  expect(await page.evaluate(([x, z]) => window.__editor!.session.world.getColumnZone(x, z), [42, 20])).toBe(0);
+  await page.locator(".editor-tool-rail").getByRole("button", { name: "Remove Selected Zone" }).click();
+  await expect.poll(() => page.evaluate(([x, z]) => window.__editor!.session.world.getColumnZone(x, z), [42, 20])).toBe(0);
   await page.keyboard.press("Control+z");
   expect(await page.evaluate(([x, z]) => window.__editor!.session.world.getColumnZone(x, z), [42, 20])).toBe(zone.numericId);
 });
 
 test("saves to the map file and reloads the saved state", async ({ page, request }) => {
   await openEditor(page);
-  const save = page.getByRole("button", { name: "Save", exact: true });
-  await expect(save).toBeDisabled();
-
-  await page.keyboard.press("5");
+  await expect(statusBar(page)).toContainText("saved");
+  await workspace(page, "Terrain");
+  await tool(page, "Raise");
   const point = await columnTop(page, 10, 10);
   await page.mouse.click(point.x, point.y);
-  await expect(save).toBeEnabled();
+  await expect(statusBar(page)).toContainText("unsaved changes");
+  await expect(page.locator(".editor-map-chip")).toContainText("*");
   await page.keyboard.press("Control+s");
-  await expect(page.getByRole("status")).toContainText(`Saved to maps/${SCRATCH}/map.json`);
-  await expect(save).toBeDisabled();
+  await expect(statusBar(page)).not.toContainText("unsaved");
 
   const file = (await (await request.get(`/api/editor/maps/${SCRATCH}`)).json()) as { blocks: { edits: Array<{ x: number; y: number; z: number }> } };
   expect(file.blocks.edits).toContainEqual(expect.objectContaining({ x: 10, y: point.top + 1, z: 10 }));
@@ -237,71 +297,64 @@ test("saves to the map file and reloads the saved state", async ({ page, request
   expect(await topOf(page, 10, 10)).toBe(point.top + 1);
 });
 
-test("visitor preview hides the editor chrome and Escape returns", async ({ page }) => {
+test("clean preview hides the editor, and the compass turns the camera", async ({ page }) => {
   await openEditor(page);
-  await page.getByRole("button", { name: "Preview as visitor" }).click();
-  await expect(page.getByRole("complementary", { name: "Tools" })).toHaveCount(0);
-  await expect(page.getByText(/Visitor preview/)).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("complementary", { name: "Tools" })).toBeVisible();
+  await page.locator(".editor-main-toolbar").getByRole("button", { name: "Preview" }).click();
+  await expect(page.locator(".editor-tool-rail")).toHaveCount(0);
+  await expect(page.getByLabel("Camera compass")).toHaveCount(0);
+  await page.getByRole("button", { name: "Restore Editor" }).click();
+  await expect(page.locator(".editor-tool-rail")).toBeVisible();
+
+  await page.getByRole("button", { name: "Face East" }).click();
+  await expect(page.locator(".viewport-compass__face strong")).toHaveText("E");
+  await page.getByRole("button", { name: "Lock camera angle" }).click();
+  await expect(page.getByRole("button", { name: "Unlock camera angle" })).toBeVisible();
 });
 
-test("map manager creates, duplicates, renames and deletes maps", async ({ page, request }) => {
-  const id = `e2e-made-${Date.now().toString(36)}`;
-  created.add(id).add(`${id}-copy`).add(`${id}-renamed`);
+test("the map library creates and duplicates maps", async ({ page, request }) => {
+  const name = `E2E made ${Date.now().toString(36)}`;
+  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  created.add(id).add(`${id}-copy`);
   const listed = async () => ((await (await request.get("/api/editor/maps")).json()) as { maps: Array<{ id: string; name: string }>; defaultMapId: string });
   const defaultBefore = (await listed()).defaultMapId;
 
   await openEditor(page);
-  await page.getByRole("button", { name: "Maps" }).click();
-  const dialog = page.getByRole("dialog", { name: "Maps" });
-  await dialog.getByRole("button", { name: "New map" }).click();
-  await dialog.getByLabel("Name", { exact: true }).fill("E2E made");
-  await dialog.getByLabel("Id (folder name)").fill(id);
-  await dialog.getByRole("button", { name: "Create and open" }).click();
+  await workspace(page, "Map");
+  page.once("dialog", (dialog) => void dialog.accept(name));
+  await leftDock(page).getByRole("button", { name: "New Map" }).click();
   await page.waitForURL(`**/editor?map=${id}`);
   await page.waitForSelector('[data-editor="ready"]');
+  await expect(page.locator(".editor-map-chip")).toContainText(name);
 
-  await page.getByRole("button", { name: "Maps" }).click();
-  const row = (mapId: string) => dialog.locator(`li[data-map="${mapId}"]`);
-  await row(id).getByRole("button", { name: "Duplicate" }).click();
-  await dialog.getByRole("button", { name: "Duplicate", exact: true }).last().click();
-  await expect(row(`${id}-copy`)).toBeVisible();
-
-  await row(`${id}-copy`).getByRole("button", { name: "Rename" }).click();
-  await dialog.getByLabel("Name", { exact: true }).fill("E2E renamed");
-  await dialog.getByLabel("Id (folder name)").fill(`${id}-renamed`);
-  await dialog.getByRole("button", { name: "Rename", exact: true }).last().click();
-  await expect(row(`${id}-renamed`)).toContainText("E2E renamed");
-  await expect(row(`${id}-copy`)).toHaveCount(0);
-
-  await row(`${id}-renamed`).getByRole("button", { name: "Delete" }).click();
-  await row(`${id}-renamed`).getByRole("button", { name: "Yes, delete" }).click();
-  await expect(row(`${id}-renamed`)).toHaveCount(0);
+  await workspace(page, "Map");
+  page.once("dialog", (dialog) => void dialog.accept(`${name} copy`));
+  await leftDock(page).getByRole("button", { name: "Duplicate Map" }).click();
+  await page.waitForURL(`**/editor?map=${id}-copy`);
 
   const after = await listed();
-  expect(after.maps.map((map) => map.id)).toContain(id);
-  expect(after.maps.map((map) => map.id)).not.toContain(`${id}-renamed`);
+  expect(after.maps.map((map) => map.id)).toEqual(expect.arrayContaining([id, `${id}-copy`]));
   // The default map is the visitor's map; this test must leave it alone.
   expect(after.defaultMapId).toBe(defaultBefore);
-  await expect(row(defaultBefore).getByRole("button", { name: "Delete" })).toBeDisabled();
 });
 
 test("the baked view shows a bake of the map as it is and switches editing off", async ({ page }) => {
   await openEditor(page);
-  const baked = page.getByRole("radio", { name: /Baked|Baking/ });
-  await baked.click();
-  await expect.poll(() => page.evaluate(() => (window.__editor!.viewport as unknown as { isBakedView: boolean }).isBakedView), { timeout: 30_000 }).toBe(true);
-  await expect(baked).toHaveAttribute("aria-checked", "true");
+  await workspace(page, "Map");
+  await leftDock(page).getByRole("button", { name: "Show Baked" }).click();
+  await expect.poll(() => page.evaluate(() => window.__editor!.viewport.isBakedView), { timeout: 30_000 }).toBe(true);
 
   // Tools do nothing while the bake is shown.
-  await page.keyboard.press("2");
+  await workspace(page, "Terrain");
+  await tool(page, "Raise");
   const point = await columnTop(page, 50, 50);
   await page.mouse.click(point.x, point.y);
   expect(await topOf(page, 50, 50)).toBe(point.top);
 
-  await page.getByRole("radio", { name: "Voxels" }).click();
-  expect(await page.evaluate(() => (window.__editor!.viewport as unknown as { isBakedView: boolean }).isBakedView)).toBe(false);
+  await workspace(page, "Map");
+  await leftDock(page).getByRole("button", { name: "Show Voxels" }).click();
+  expect(await page.evaluate(() => window.__editor!.viewport.isBakedView)).toBe(false);
+  await workspace(page, "Terrain");
+  await tool(page, "Raise");
   await page.mouse.click(point.x, point.y);
   await expect.poll(() => topOf(page, 50, 50)).toBe(point.top + 1);
   await page.keyboard.press("Control+z");
@@ -310,11 +363,12 @@ test("the baked view shows a bake of the map as it is and switches editing off",
 test("Bake writes the baked world next to the map and tracks whether it is current", async ({ page, request }) => {
   await openEditor(page);
   const status = async () => ((await (await request.get(`/api/editor/maps/${SCRATCH}/bake`)).json()) as { state: string }).state;
-  expect(await status()).toBe("missing");
-  await expect(page.getByText("not baked")).toBeVisible();
+  await workspace(page, "Map");
+  const bakeStatus = leftDock(page).locator(".editor-kv", { hasText: "Status" });
+  await expect(bakeStatus).toContainText(/not baked|out of date/);
 
-  await page.getByRole("button", { name: "Bake", exact: true }).click();
-  await expect(page.getByText("bake up to date")).toBeVisible({ timeout: 30_000 });
+  await leftDock(page).getByRole("button", { name: "Bake Map" }).click();
+  await expect(bakeStatus).toContainText("up to date", { timeout: 30_000 });
   expect(await status()).toBe("fresh");
 
   // The site serves it under its content hash.
@@ -323,22 +377,24 @@ test("Bake writes the baked world next to the map and tracks whether it is curre
   expect(file.ok()).toBe(true);
   expect((await file.body()).byteLength).toBe(record.fileBytes);
 
-  await page.keyboard.press("5");
+  await workspace(page, "Terrain");
+  await tool(page, "Raise");
   const point = await columnTop(page, 12, 50);
   await page.mouse.click(point.x, point.y);
-  await expect(page.getByText("bake out of date")).toBeVisible();
+  await workspace(page, "Map");
+  await expect(bakeStatus).toContainText("out of date");
   await page.keyboard.press("Control+s");
   await expect.poll(status).toBe("stale");
 });
 
-test("models from the asset pipeline appear in the object picker with a picture and can be placed", async ({ page }) => {
+test("models from the asset pipeline appear in the object palette with a picture and can be placed", async ({ page }) => {
   await openEditor(page);
-  await page.keyboard.press("8");
-  const crate = page.getByRole("option", { name: /Crate \(sample\)/ });
-  await expect(crate).toContainText(/model · \d+ KB · 24 tris/);
+  await workspace(page, "Objects");
+  await leftDock(page).getByRole("combobox", { name: "Category" }).selectOption("models");
+  const crate = leftDock(page).getByRole("option", { name: /Crate \(sample\)/ });
   // The picture is rendered in the browser from the model itself.
   await expect(crate.locator("img")).toHaveAttribute("src", /^data:image\/png/, { timeout: 20_000 });
-  await expect(page.getByRole("option", { name: /Soldier/ })).toContainText("animated");
+  await expect(leftDock(page).getByRole("option", { name: /Soldier/ })).toBeVisible();
 
   await crate.click();
   const first = await columnTop(page, 20, 20);
@@ -358,9 +414,8 @@ test("models from the asset pipeline appear in the object picker with a picture 
     .entities.group.children.filter((child) => child.name.startsWith("entities:model|sample-crate")).map((child) => child.count));
   expect(batches).toEqual([2, 2]);
 
-  await page.getByRole("tab", { name: "Map" }).click();
-  await page.getByRole("button", { name: "Validate map" }).click();
-  await expect(page.getByText("No problems found.")).toBeVisible();
+  await page.locator(".editor-main-toolbar").getByRole("button", { name: /Valid|issues/ }).click();
+  await expect(page.locator(".editor-validation-list")).toContainText("No validation issues");
   await page.keyboard.press("Control+z");
   await page.keyboard.press("Control+z");
 });

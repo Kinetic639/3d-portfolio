@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import EditorApp from "@/components/editor/EditorApp";
+// The editor's look, from the original project. Global on purpose: the class names are the original's.
+import "@/components/editor/editor-shell.css";
 import { mapExists, readMapIndex } from "@/lib/maps/map-store";
 
 export const metadata: Metadata = { title: "Map editor", robots: { index: false } };

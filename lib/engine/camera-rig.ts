@@ -18,6 +18,8 @@ export type CameraRigOptions = {
   targetHeight?: number;
   /** Ground moved per pixel dragged, relative to the size of a pixel at the target. */
   panSpeed?: number;
+  /** Multiplies how far a drag turns the camera. */
+  rotateSpeed?: number;
   /** Whether the visitor may turn and tilt the camera. */
   rotate?: boolean;
   /** Whether Q and E turn the camera. */
@@ -107,6 +109,7 @@ export class CameraRig {
       maxPitchDegrees: options.maxPitchDegrees ?? 89,
       targetHeight: options.targetHeight ?? 0,
       panSpeed: options.panSpeed ?? 1,
+      rotateSpeed: options.rotateSpeed ?? 1,
       rotate: options.rotate ?? true,
       rotateKeys: options.rotateKeys ?? true,
       fov: options.fov ?? 32,
@@ -136,7 +139,7 @@ export class CameraRig {
   }
 
   /** Changes how the camera is controlled and how far it may go. Does not move it unless a limit requires. */
-  configure(settings: Partial<Pick<CameraRigOptions, "panButtons" | "minDistance" | "maxDistance" | "minPitchDegrees" | "maxPitchDegrees" | "targetHeight" | "panSpeed" | "rotateKeys">>) {
+  configure(settings: Partial<Pick<CameraRigOptions, "panButtons" | "minDistance" | "maxDistance" | "minPitchDegrees" | "maxPitchDegrees" | "targetHeight" | "panSpeed" | "rotateSpeed" | "rotateKeys">>) {
     Object.assign(this.options, Object.fromEntries(Object.entries(settings).filter(([, value]) => value !== undefined)));
     this.target.y = this.goalTarget.y = this.options.targetHeight;
     this.clampGoal();
@@ -321,7 +324,7 @@ export class CameraRig {
 
   private rotateByPixels(dx: number, dy: number) {
     if (!this.options.rotate) return;
-    const perPixel = (2 * Math.PI * ROTATE_SPEED) / (this.element.clientHeight || 1);
+    const perPixel = (2 * Math.PI * ROTATE_SPEED * this.options.rotateSpeed) / (this.element.clientHeight || 1);
     this.goalYaw -= dx * perPixel;
     this.goalPitch += dy * perPixel;
     this.clampGoal();

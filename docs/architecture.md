@@ -262,31 +262,34 @@ The editor is at `/editor` (`/editor?map=<id>`) and exists only in development.
 | Part | File | Role |
 |---|---|---|
 | Document and history | `lib/editor/editor-session.ts` | Owns the voxel world, entities and map fields. Every edit is a command that stores only what it changed; one undo stack for everything; strokes and drags are grouped into one step. Emits which chunks and entities changed. |
-| Viewport | `lib/editor/editor-viewport.ts` | three.js, no React. Picks, previews the brush, applies tools to the session, and rebuilds only what the session reported, once per frame. Renders on demand. |
-| UI | `components/editor/` | React panels over a small zustand store that mirrors history state and two revision counters. Terrain edits change none of those values, so painting does not re-render React. Hover text and frame times are written to the DOM directly. |
+| Tools | `lib/editor/editor-tools.ts` | The original editor's tools as pure functions: what each targets, which cells a brush changes, the flatten preview, the surface plates. Unit-tested. |
+| Viewport | `lib/editor/editor-viewport.ts` | three.js, no React. Picks, shows the original's previews, applies tools to the session, rebuilds only what the session reported, once per frame. Renders on demand. |
+| UI | `components/editor/MapEditorToolbar.tsx`, `editor-shell.css` | The original editor's interface and styles, carried over: menu bar, workspaces, tool rail, palettes with shape and prefab previews, outliner, inspector, bottom dock, status bar, command search, shortcuts, resizable docks. Presentational: `EditorApp.tsx` hands it state and actions. |
 
-**Saving.** `PUT /api/editor/maps/<id>` validates and writes `maps/<id>/map.json` through `lib/maps/map-store.ts`. The editor validates first (including content references) and refuses to save an invalid map. The map manager creates, duplicates, renames and deletes maps and sets the default map in `maps/index.json`; those actions write to disk at once and are not part of the undo history.
+**Previews, as in the original.** Add shows the block's ghost in its real shape, rotation and material colour. Brush tools outline the top faces of the cells they act on, following slopes and slabs (one translucent mesh and one line mesh for the whole brush, coloured per tool). Flatten colours each column by what will happen to it. Erase and Clear show whole-cell boxes. Place shows a translucent copy of the object. Area fill shows its rectangle while the button is held. Grid lines and the neutral terrain colour are a define in the terrain shader, compiled only for the editor, instead of the original's extra line geometry per chunk.
 
-**Baking from the editor.** **Bake** saves if needed and writes `maps/<id>/baked` through `POST /api/editor/maps/<id>/bake` (the same code as `pnpm bake`). The label next to it says whether the bake matches the map. The **Voxels / Baked** switch bakes the map as it is in the editor, unsaved edits included, in a worker, and shows the result in the viewport without writing anything; tools are off in that view, and any edit returns to the voxels.
+**What does not touch React.** Pointer moves never do: the viewport recomputes the preview only when the hovered cell changes, and reports that cell to a small store read only by the status bar and two readouts. A brush stroke re-renders nothing after its first step: the selected cell is reported when the stroke ends, history state only when it changes. The compass is written to the DOM from the viewport.
 
-**Visitor preview.** "Preview as visitor" switches the same viewport to the visitor's camera limits, fog and no overlays. It does not show interaction icons or panels; "Open saved map in site" opens the last saved version in the real runtime at `/map/<id>`.
+**Saving.** `PUT /api/editor/maps/<id>` validates and writes `maps/<id>/map.json` through `lib/maps/map-store.ts`. The editor validates first (including content references) and refuses to save an invalid map. New Map and Duplicate Map write to disk at once and open the new map; they are not part of the undo history.
 
-**Cost of an edit** (development build, the 192×192 default map, RTX 2060):
+**Baking from the editor.** **Bake Map** saves if needed and writes `maps/<id>/baked` through `POST /api/editor/maps/<id>/bake` (the same code as `pnpm bake`); the status next to it says whether the bake matches the map. **Show Baked** bakes the map as it is in the editor, unsaved edits included, in a worker, and shows the result without writing anything; tools are off in that view, and any edit returns to the voxels.
+
+**Cost of an edit** (development build, the 192×192 default map, RTX 2060, camera from above; brushes up to 9 as in the original):
 
 | Operation | Result |
 |---|---|
-| Open the map | 1.4 s with a warm dev server |
-| Raise stroke across 32 columns, brush 1 | 39 chunk rebuilds, median frame 1.3 ms, slowest 32 ms, 0 long tasks |
-| Same, brush 9 | 77 chunk rebuilds, median 1.7 ms, slowest 32 ms, 0 long tasks |
-| Same, brush 31 (961 columns per step) | 118 chunk rebuilds, median 1.2 ms, slowest 89 ms, 2 long tasks |
-| Zone paint stroke, brush 31 | no terrain rebuilds, slowest 25 ms |
-| Place-blocks stroke, brush 31 | 107 chunk rebuilds, slowest 25 ms, 0 long tasks |
-| Undo of any of the above | 0.3–4.2 ms |
-| Building the file contents on save | 150–250 ms |
+| Hover across 24 columns (120 pointer moves) | 24 preview rebuilds, 28 small React commits (status bar), 0 long tasks |
+| Raise stroke across 24 columns, brush 1 / 5 / 9 | median frame 1.2–2.2 ms, slowest 14–31 ms (one 79 ms first-stroke frame in one run), 0 long tasks |
+| Paint stroke, brush 9 | median 2.2 ms, slowest 29 ms |
+| Flatten stroke, brush 9 | median 2.6 ms, slowest 33 ms |
+| Zone paint stroke, brush 9 | no terrain rebuilds, median 1.8 ms, slowest 39 ms |
+| Undo of any of the above | 0.2–1.3 ms |
+
+Before the stroke fixes in this step, every brush step re-rendered the whole interface (56–73 commits per stroke, up to 13 long tasks).
 
 Rebuilding one terrain chunk costs 2–4 ms. It was 13–25 ms when the editor was first measured: the mesher rebuilt each shape's face list for every cell and neighbour, looked shape ids up with a linear search, and filled twelve vertex attributes nobody reads. It now caches faces per (shape, rotation, state), reads the world's arrays directly and has a `renderOnly` mode. The same change shortens the visitor's world build.
 
-Known limits: entities are re-instanced as a whole when any entity changes (fine for hundreds, not for tens of thousands); a brush of 31 can produce a frame of about 90 ms on its first step; there is no box selection and no on-canvas rotate or scale handle (rotation and scale are set from the inspector and shortcuts).
+Known limits: entities are re-instanced as a whole when any entity changes (fine for hundreds, not for tens of thousands); there is no on-canvas transform gizmo (the original's TransformControls): objects move and turn by dragging with Select, in the mode chosen in the left dock.
 
 ## Performance: findings and results
 
@@ -417,3 +420,11 @@ Remaining known costs:
 - A click plays the original entry: focus on the platform, terrain growing out of it in a wave while the camera swings out and settles, objects popping up. Same paths, timings and curves as the original.
 - My button and zoom-in approach are gone.
 - Kept from the new engine: no geometry built or swapped during the entry (uniforms only), everything compiled and rehearsed in warm-up, on-demand rendering once the camera has arrived, one draw call per object batch.
+
+### Restoration, step 4: the original editor on the new core
+
+- The original editor's interface is back, carried over with its styles: menu bar, workspaces, tool rail, palettes with shape and prefab previews, outliner, inspector, reports, status bar, command search, shortcuts, resizable and collapsible docks, clean preview, compass with angle lock and view reset.
+- The original's tools (Paint, Add Block, Erase, Raise, Lower, Flatten, Clear, zone Paint / Replace / Erase / Area Fill, Place, Marker, navigation nodes) and previews (block ghost, surface plates, flatten colours, translucent objects, grid lines).
+- Removed with water: the Liquid workspace. Removed as obsolete: the renderer switch. Replaced: local drafts by map files.
+- Kept from the new core: one diff-based undo history, saving to map files, rebuilds in proportion to the edit, previews rebuilt per hovered cell rather than per pointer move, no React work during a stroke, the editor absent from production, models from the asset pipeline (now in the object palette), content and mini-game settings for objects and zones (now in the original's inspector and zone panel), bake controls (now in the Map workspace).
+- My editor interface (`ToolPanel`, `InspectorPanel`, `MapsDialog`) is gone.

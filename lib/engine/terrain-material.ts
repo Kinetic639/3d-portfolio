@@ -23,6 +23,27 @@ export type TerrainUniforms = {
   uLoaderMotion: { value: number };
 };
 
+/**
+ * Editor-only view options: the cell grid drawn on every face, and "hide
+ * terrain material" (one flat colour instead of textures). Compiled in only
+ * for the editor's terrain, so the visitor's shader is untouched.
+ */
+export type EditorTerrainUniforms = {
+  uGridLines: { value: number };
+  uGridColor: { value: THREE.Color };
+  uNeutral: { value: number };
+  uNeutralColor: { value: THREE.Color };
+};
+
+export function createEditorTerrainUniforms(): EditorTerrainUniforms {
+  return {
+    uGridLines: { value: 1 },
+    uGridColor: { value: new THREE.Color("#9a9f98") },
+    uNeutral: { value: 0 },
+    uNeutralColor: { value: new THREE.Color("#f7f7f2") },
+  };
+}
+
 /** A progress value past every cell's delay: the whole world is shown. */
 export const REVEAL_COMPLETE = 1000;
 
@@ -181,8 +202,20 @@ const FRAGMENT_SHADER = /* glsl */ `
     return result;
   }
 
+  #ifdef EDITOR_VIEW
+  uniform float uGridLines;
+  uniform vec3 uGridColor;
+  uniform float uNeutral;
+  uniform vec3 uNeutralColor;
+  #endif
+
   void main() {
     vec3 base = vBlockColor;
+    #ifdef EDITOR_VIEW
+    if (uNeutral > 0.5) {
+      base = uNeutralColor;
+    } else
+    #endif
     if (vTextureKind > 0.5) {
       int kind = int(floor(vTextureKind + 0.5)) - 1;
       float layer = uKindLayer[kind] + floor(vTextureVariant + 0.5);
@@ -194,13 +227,23 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec3 color = base * (0.48 + light * 0.52);
     color += vec3(0.035, 0.028, 0.018);
 
+    #ifdef EDITOR_VIEW
+    if (uGridLines > 0.5) {
+      // A thin line along each face's edges: every face spans one cell, so its UVs run 0-1 across it.
+      vec2 edge = min(vUv, 1.0 - vUv) / max(fwidth(vUv), vec2(1e-4));
+      float line = 1.0 - clamp(min(edge.x, edge.y) - 0.25, 0.0, 1.0);
+      color = mix(color, uGridColor, line * 0.42);
+    }
+    #endif
+
     gl_FragColor = vec4(color, 1.0);
   }
 `;
 
-export function createTerrainMaterial(uniforms: TerrainUniforms, atlas: THREE.Texture = getTerrainAtlas().texture) {
+export function createTerrainMaterial(uniforms: TerrainUniforms, atlas: THREE.Texture = getTerrainAtlas().texture, editor?: EditorTerrainUniforms) {
   return new THREE.ShaderMaterial({
-    uniforms: { ...uniforms, uAtlas: { value: atlas }, uKindLayer: { value: KIND_FIRST_LAYER } },
+    uniforms: { ...uniforms, ...editor, uAtlas: { value: atlas }, uKindLayer: { value: KIND_FIRST_LAYER } },
+    defines: editor ? { EDITOR_VIEW: 1 } : {},
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,
     side: THREE.FrontSide,

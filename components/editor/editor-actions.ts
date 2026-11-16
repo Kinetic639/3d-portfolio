@@ -29,17 +29,19 @@ export async function saveMap(editor: EditorContextValue) {
   const { session, store, mapId } = editor;
   const errors = validateSession(editor);
   if (errors.length > 0) {
-    store.setState({ notice: { kind: "error", text: `Not saved: ${errors.length} validation ${errors.length === 1 ? "error" : "errors"} (see Map panel).` } });
+    store.setState({ message: { type: "error", text: `Not saved: ${errors.length} validation ${errors.length === 1 ? "error" : "errors"} (see Map panel).` } });
     return false;
   }
   try {
-    await api(`/api/editor/maps/${mapId}`, { method: "PUT", body: JSON.stringify(session.toDefinition()) });
+    const definition = session.toDefinition();
+    await api(`/api/editor/maps/${mapId}`, { method: "PUT", body: JSON.stringify(definition) });
     session.markSaved();
-    store.setState({ notice: { kind: "info", text: `Saved to maps/${mapId}/map.json at ${new Date().toLocaleTimeString()}.` } });
+    store.setState({ blockEdits: definition.blocks.edits.length });
+    store.setState({ message: { type: "info", text: `Saved to maps/${mapId}/map.json at ${new Date().toLocaleTimeString()}.` } });
     void refreshBakeStatus(editor);
     return true;
   } catch (error) {
-    store.setState({ notice: { kind: "error", text: `Not saved: ${error instanceof Error ? error.message : String(error)}` } });
+    store.setState({ message: { type: "error", text: `Not saved: ${error instanceof Error ? error.message : String(error)}` } });
     return false;
   }
 }
@@ -59,17 +61,17 @@ export async function refreshBakeStatus(editor: EditorContextValue) {
 export async function bakeSavedMap(editor: EditorContextValue) {
   const { store, session, mapId } = editor;
   if (session.isDirty && !(await saveMap(editor))) return false;
-  store.setState({ notice: { kind: "info", text: "Baking…" } });
+  store.setState({ message: { type: "info", text: "Baking…" } });
   try {
     const { record } = await api<Required<BakeStatusResponse>>(`/api/editor/maps/${mapId}/bake`, { method: "POST" });
     const { stats } = record;
     store.setState({
       bake: "fresh",
-      notice: { kind: "info", text: `Baked to maps/${mapId}/baked: ${(stats.playableTriangles + stats.backdropTriangles).toLocaleString("en")} triangles, ${Math.round(record.fileBytes / 1024)} KB, ${stats.bakeMs} ms.` },
+      message: { type: "info", text: `Baked to maps/${mapId}/baked: ${(stats.playableTriangles + stats.backdropTriangles).toLocaleString("en")} triangles, ${Math.round(record.fileBytes / 1024)} KB, ${stats.bakeMs} ms.` },
     });
     return true;
   } catch (error) {
-    store.setState({ notice: { kind: "error", text: `Bake failed: ${error instanceof Error ? error.message : String(error)}` } });
+    store.setState({ message: { type: "error", text: `Bake failed: ${error instanceof Error ? error.message : String(error)}` } });
     return false;
   }
 }
@@ -96,7 +98,7 @@ export function setTerrainView(editor: EditorContextValue, view: "voxels" | "bak
       viewport.setBakedView(file);
       store.setState({ terrainView: "baked" });
     } else {
-      store.setState({ terrainView: "voxels", notice: { kind: "error", text: `Bake preview failed: ${error ?? "unknown error"}` } });
+      store.setState({ terrainView: "voxels", message: { type: "error", text: `Bake preview failed: ${error ?? "unknown error"}` } });
     }
   };
   worker.onmessage = (event: MessageEvent<{ file?: ArrayBuffer; error?: string }>) => finish(event.data.file ?? null, event.data.error);

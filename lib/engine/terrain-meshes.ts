@@ -4,7 +4,7 @@ import { buildSurfaceChunkMesh } from "@/lib/terrain/surface-mesher";
 import { VoxelWorld } from "@/lib/world/voxel-world";
 import { getChunkCounts } from "@/lib/world/world-config";
 import { packTerrainChunk, type TerrainChunkBuffers } from "./terrain-chunk";
-import { createTerrainGeometry, createTerrainMaterial, createTerrainUniforms, type TerrainUniforms } from "./terrain-material";
+import { createEditorTerrainUniforms, createTerrainGeometry, createTerrainMaterial, createTerrainUniforms, type EditorTerrainUniforms, type TerrainUniforms } from "./terrain-material";
 import type { WorldBuildMessage, WorldBuildRequest } from "./world-builder.worker";
 
 /**
@@ -24,6 +24,8 @@ export type TerrainSource = {
   triangleCount: () => number;
   /** Reveal and loader uniforms of voxel terrain; absent on sources that have no reveal. */
   uniforms?: TerrainUniforms;
+  /** Grid and neutral-colour switches; only on terrain built for the editor. */
+  editorUniforms?: EditorTerrainUniforms;
   dispose: () => void;
 };
 
@@ -33,6 +35,8 @@ export type TerrainBuildOptions = {
   signal?: AbortSignal;
   /** Longest stretch of main-thread work before yielding, in ms. */
   sliceBudgetMs?: number;
+  /** Build with the editor's view options (grid lines, neutral colour). */
+  editorView?: boolean;
 };
 
 type ChunkBuffers = TerrainChunkBuffers;
@@ -49,11 +53,12 @@ function meshChunk(world: VoxelWorld, chunkX: number, chunkZ: number): ChunkBuff
   return packTerrainChunk(buildSurfaceChunkMesh(world, chunkX, chunkZ, { skipMappings: true, packed: true }));
 }
 
-function createTerrainSource(world: VoxelWorld) {
+function createTerrainSource(world: VoxelWorld, editorView = false) {
   const group = new THREE.Group();
   group.name = "terrain";
   const uniforms = createTerrainUniforms();
-  const material = createTerrainMaterial(uniforms);
+  const editorUniforms = editorView ? createEditorTerrainUniforms() : undefined;
+  const material = createTerrainMaterial(uniforms, undefined, editorUniforms);
   const meshes = new Map<string, THREE.Mesh>();
 
   const setChunk = (id: string, buffers: ChunkBuffers | null) => {
@@ -80,6 +85,7 @@ function createTerrainSource(world: VoxelWorld) {
   const source: TerrainSource = {
     group,
     uniforms,
+    editorUniforms,
     meshes: () => [...meshes.values()],
     rebuildChunks(chunkIds) {
       for (const id of chunkIds) {
@@ -106,7 +112,7 @@ function createTerrainSource(world: VoxelWorld) {
 
 /** Main-thread build, in time slices. Used when workers are unavailable and by tools. */
 export async function buildVoxelTerrain(world: VoxelWorld, options: TerrainBuildOptions = {}): Promise<TerrainSource> {
-  const { source, setChunk } = createTerrainSource(world);
+  const { source, setChunk } = createTerrainSource(world, options.editorView);
   const counts = getChunkCounts(world.config);
   const total = counts.x * counts.z;
   const budget = options.sliceBudgetMs ?? 8;
@@ -171,7 +177,7 @@ export function buildWorldForMap(definition: MapDefinition, options: TerrainBuil
       switch (message.type) {
         case "world": {
           const world = new VoxelWorld(message.config, message.blocks, message.zones, message.shapes, message.rotations, message.states);
-          built = { world, ...createTerrainSource(world) };
+          built = { world, ...createTerrainSource(world, options.editorView) };
           break;
         }
         case "chunk":
