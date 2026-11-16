@@ -1779,3 +1779,10 @@
   min-height: 1.6rem;
   padding: 0.1rem;
 }
+
+.editor-seed-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 0.45rem;
+}

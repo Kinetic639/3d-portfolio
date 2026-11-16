@@ -85,6 +85,8 @@ import { getShapeDefinition, getShapePitch, getShapeStateValue, setShapePitch, T
 import { SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import type { MapEnvironment, MapLighting, MapShadows, MapSurfaceStyle, MapWind, ModelStyleSettings, ModelWindSettings } from "@/lib/maps/map-definition";
 import { EdgesSection, LightingSection, ModelStyleSection, SurfaceSection } from "./StylePanels";
+import { ScatterSection } from "./ScatterSection";
+import type { ScatterSettings } from "@/lib/editor/scatter";
 import type { WindDebugView } from "@/lib/editor/wind-debug";
 import { ModelSection, WindSection, type SelectedModelInfo } from "./WindPanels";
 
@@ -148,6 +150,10 @@ export type EditorInspectorState = {
   onLightingChange: (patch: Partial<MapLighting>) => void;
   onShadowsChange: (patch: Partial<MapShadows>) => void;
   onSurfaceStyleChange: (patch: Partial<MapSurfaceStyle>) => void;
+  scatter: ScatterSettings;
+  onScatterChange: (patch: Partial<ScatterSettings>) => void;
+  /** Removes every placed instance of the chosen object. */
+  onClearChosenObject: () => void;
   zoneId: number;
   zoneEditMode: ZoneEditMode;
   zoneSelectionMode: ZoneSelectionMode;
@@ -905,6 +911,7 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
             </>
           ) : null}
         </Section>
+        <ScatterSection scatter={props.scatter} objectName={activeModel?.name ?? activePrefab?.name ?? null} onChange={props.onScatterChange} onClear={props.onClearChosenObject} />
         <Section title="Primitive Fallback">
           <div className="editor-thumb-grid">
             {PRIMITIVES.map((primitive) => <button key={primitive} type="button" className={props.primitiveType === primitive && !props.activePrefabId ? "active" : ""} onClick={() => selectPrimitive(primitive)}>{primitive}</button>)}

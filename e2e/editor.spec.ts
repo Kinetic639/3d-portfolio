@@ -513,3 +513,35 @@ test("style: lighting, surface, edges and shadows in the Map workspace, a model'
   await page.waitForTimeout(300);
   expect(errors).toEqual([]);
 });
+
+test("scatter: one click places many of the chosen object on the ground, as one undo step", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openEditor(page);
+  await workspace(page, "Objects");
+  await leftDock(page).getByRole("combobox", { name: "Category" }).selectOption("nature");
+  await leftDock(page).getByRole("option", { name: /Pine Tree \(fluffy\)/ }).click();
+  const scatter = page.locator("details[aria-label='Scatter']");
+  await scatter.getByRole("checkbox", { name: "Scatter on click" }).check();
+  await scatter.getByRole("slider", { name: "Count" }).fill("15");
+  await scatter.getByRole("slider", { name: "Radius" }).fill("10");
+  await scatter.getByRole("slider", { name: "Spacing" }).fill("2");
+  const pines = async () => (await entities(page)).filter((entity) => (entity as { assetReference?: string }).assetReference === "pine-tree-fluffy") as unknown as Array<{ transform: { position: { x: number; y: number; z: number }; scale: { x: number } } }>;
+  const centre = await columnTop(page, 32, 32);
+  await page.mouse.click(centre.x, centre.y);
+  const placed = await pines();
+  expect(placed.length).toBeGreaterThan(8);
+  expect(placed.length).toBeLessThanOrEqual(15);
+  // Apart and on the ground.
+  for (const [index, pine] of placed.entries()) {
+    for (const other of placed.slice(index + 1)) expect(Math.hypot(pine.transform.position.x - other.transform.position.x, pine.transform.position.z - other.transform.position.z)).toBeGreaterThanOrEqual(1.99);
+  }
+  expect(new Set(placed.map((pine) => pine.transform.scale.x)).size).toBeGreaterThan(1);
+  expect(await undoLabel(page)).toMatch(/Scatter \d+ Pine Tree/);
+  await page.keyboard.press("Control+z");
+  expect(await pines()).toHaveLength(0);
+  await page.keyboard.press("Control+y");
+  expect((await pines()).length).toBe(placed.length);
+  await scatter.getByRole("button", { name: /Clear all Pine Tree/ }).click();
+  expect(await pines()).toHaveLength(0);
+  expect(errors).toEqual([]);
+});

@@ -519,3 +519,7 @@ The first bake smoothed the terrain (density, blur, Surface Nets, simplification
 
 - Toon shading with hatching, pipeline-computed outlines (pixels or world units, scale per model), contact patches, sun and sky light with the lab preset, view-following shadow maps received by the terrain. Every lab control in the editor, plus shadow on/off, strength and map size.
 - The perf test holds the wind still for its on-demand checks and measures wind separately.
+
+### Style-lab port, point 4: scatter
+
+- The Scene Lab's "Multiple" placement as a mode of the Place tool (`lib/editor/scatter.ts`): count, radius, minimum spacing, seed (same seed, same scatter), random rotation and scale range, ground only, one undo step; a ring previews the area; Clear all removes every instance of the chosen object. The lab's individual-versus-instanced choice does not apply: the engine always instances models.

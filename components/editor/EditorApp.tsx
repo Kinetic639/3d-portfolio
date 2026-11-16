@@ -644,6 +644,12 @@ function ConnectedToolbar({ onLayoutChange }: { onLayoutChange: (layout: EditorV
     selectedModel,
     modelDebugView: debugView,
     onModelDebugViewChange: (view) => setDebug(selectedModel ? { modelId: selectedModel.id, view } : null),
+    scatter: settings.scatter,
+    onScatterChange: (patch) => update({ scatter: { ...settings.scatter, ...patch } }),
+    onClearChosenObject: () => {
+      const removed = viewport.clearChosenObject();
+      message(removed > 0 ? `${removed} objects removed (undo with Ctrl+Z).` : "None of the chosen object is placed.");
+    },
     onModelWindChange: (patch) => changeModelSettings("wind", patch),
     onModelStyleChange: (patch) => changeModelSettings("style", patch),
     onLightingChange: (patch) => session.updateMeta("Change lighting", { environment: { ...meta.environment, lighting: { ...meta.environment.lighting, ...patch } } }),

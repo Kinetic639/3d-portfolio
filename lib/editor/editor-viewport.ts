@@ -8,6 +8,8 @@ import { Environment } from "@/lib/engine/environment";
 import { ModelWindRegistry } from "@/lib/engine/model-wind";
 import { ModelStyleRegistry } from "@/lib/engine/model-style";
 import { createWindDebugMaterial, type WindDebugView } from "./wind-debug";
+import { scatterPlacements, type ScatterSettings } from "./scatter";
+import { getTerrainSurfaceAtWorldPosition } from "@/lib/world/surface-query";
 import type { ModelLibrary } from "@/lib/engine/model-library";
 import type { TerrainSource } from "@/lib/engine/terrain-meshes";
 import type { MapMarkerDefinition } from "@/lib/maps/map-definition";
@@ -86,6 +88,8 @@ export type ToolSettings = {
   entityColor: string;
   entityName: string;
   collisionMode: CollisionMode;
+  /** Place puts down a scatter of the chosen object instead of one (the style lab's Scene Lab). */
+  scatter: ScatterSettings;
 };
 
 export type ViewSettings = {
@@ -1011,6 +1015,18 @@ export class EditorViewport {
     if (this.placement) this.placement.layer.group.visible = false;
     if (tool === "entity") {
       if (!this.view.hidden.has("entities") && !this.view.locked.has("entities")) this.showPlacement(cell);
+      // A scatter shows its area: the columns on the edge of its circle.
+      if (helpers && this.settings.scatter.enabled) {
+        const radius = this.settings.scatter.radius / world.config.blockSize;
+        const reach = Math.ceil(radius) + 1;
+        const ring = new THREE.Color(TOOL_COLORS.entity);
+        for (let dz = -reach; dz <= reach; dz += 1) {
+          for (let dx = -reach; dx <= reach; dx += 1) {
+            const distance = Math.hypot(dx, dz);
+            if (distance > radius - 0.75 && distance <= radius + 0.25) addPlate(cell.x + dx, cell.z + dz, ring);
+          }
+        }
+      }
     } else if (tool === "add") {
       if (helpers) this.showGhost(cell);
     } else if (helpers) {
@@ -1142,9 +1158,8 @@ export class EditorViewport {
   }
 
   /** The entity Place would create, standing at `position` (its base). Null when nothing is chosen. */
-  private draftEntity(position: { x: number; y: number; z: number }): PlacedMapEntity | null {
+  private draftEntity(position: { x: number; y: number; z: number }, taken = new Set(this.session.getEntities().map((entity) => entity.id))): PlacedMapEntity | null {
     const s = this.settings;
-    const taken = new Set(this.session.getEntities().map((entity) => entity.id));
     const transform = { position: { ...position }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
     if (s.modelId) {
       const entry = this.models.entry(s.modelId);
@@ -1265,6 +1280,57 @@ export class EditorViewport {
     if (changes.length > 0) this.session.applyZoneChanges(s.zoneEditMode === "erase" ? "Erase zone" : "Paint zone", changes);
   }
 
+  /** A scatter of the chosen object around a cell: one undo step. */
+  private scatterEntities(cell: GridCoordinate) {
+    const world = this.session.world;
+    const centre = world.gridToWorld(cell.x, 0, cell.z);
+    const surfaceAt = (x: number, z: number) => {
+      const surface = getTerrainSurfaceAtWorldPosition(world, { x, z });
+      return surface.valid ? surface.worldPosition.y : null;
+    };
+    const placements = scatterPlacements({ x: centre.x, z: centre.z }, this.settings.scatter, (x, z) => surfaceAt(x, z) !== null);
+    const taken = new Set(this.session.getEntities().map((entity) => entity.id));
+    const entities: PlacedMapEntity[] = [];
+    for (const placement of placements) {
+      const draft = this.draftEntity({ x: placement.x, y: surfaceAt(placement.x, placement.z)!, z: placement.z }, taken);
+      if (!draft) {
+        this.callbacks.onMessage({ type: "error", text: "Choose an object to scatter." });
+        return;
+      }
+      draft.transform.rotation.y = placement.rotationY;
+      draft.transform.scale = { x: draft.transform.scale.x * placement.scale, y: draft.transform.scale.y * placement.scale, z: draft.transform.scale.z * placement.scale };
+      // Scattered objects stand where they fall, not snapped to the grid.
+      draft.placement = { ...draft.placement, snapToGrid: false };
+      const entity = groundIfAttached(this.session, draft);
+      taken.add(entity.id);
+      entities.push(entity);
+    }
+    if (entities.length === 0) {
+      this.callbacks.onMessage({ type: "error", text: "No ground to scatter on here." });
+      return;
+    }
+    this.session.addEntities(`Scatter ${entities.length} ${entities[0].name}`, entities);
+    this.selection = entities.map((entity) => entity.id);
+    this.selectionDirty = true;
+    this.callbacks.onSelectionChange(this.selection);
+    this.callbacks.onMessage({ type: "info", text: `${entities.length} × ${entities[0].name} scattered.` });
+    const model = entities[0].entityType === "model" ? entities[0].assetReference : undefined;
+    if (model && !this.models.get(model)) void this.models.ensureLoaded([model]).then(() => this.refreshEntities());
+  }
+
+  /** Removes every placed instance of the chosen object (the lab's "clear asset"). Returns how many. */
+  clearChosenObject() {
+    const s = this.settings;
+    const ids = this.session.getEntities()
+      .filter((entity) => (s.modelId ? entity.entityType === "model" && entity.assetReference === s.modelId : s.prefabId ? entity.prefabId === s.prefabId : false))
+      .map((entity) => entity.id);
+    if (ids.length > 0) this.session.removeEntities(`Clear ${ids.length} objects`, ids);
+    this.selection = this.selection.filter((id) => !ids.includes(id));
+    this.selectionDirty = true;
+    this.callbacks.onSelectionChange(this.selection);
+    return ids.length;
+  }
+
   private placeEntity(cell: GridCoordinate) {
     const surface = getTerrainSurfaceAt(this.session.world, cell.x, cell.z);
     if (!surface.valid) {
@@ -1328,7 +1394,10 @@ export class EditorViewport {
       return;
     }
     if (!cell || this.locked(tool)) return;
-    if (tool === "entity") this.placeEntity(cell);
+    if (tool === "entity") {
+      if (this.settings.scatter.enabled) this.scatterEntities(cell);
+      else this.placeEntity(cell);
+    }
     else if (tool === "marker") this.placeMarker(cell);
     else if (tool === "navigation") {
       this.selectedCell = cell;
