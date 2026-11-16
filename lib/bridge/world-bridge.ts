@@ -42,6 +42,8 @@ export type HoveredInteractable = {
   id: string;
   label: string;
   content: MapContentReference | null;
+  /** What a click does: open content, or start a mini-game. */
+  action: "open" | "play";
 };
 
 export type MinigameHud = {

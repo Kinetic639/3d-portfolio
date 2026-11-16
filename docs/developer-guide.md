@@ -123,6 +123,18 @@ View options (grid lines and their colour, hiding terrain materials, hiding obje
 4. Add the tool to `WORKSPACE_TOOLS` and `TOOL_LABELS` in `components/editor/MapEditorToolbar.tsx`, and its settings to the palette there.
 5. Add a test to `lib/editor/EditorTools.test.ts` and `e2e/editor.spec.ts`.
 
+## Add a mini-game
+
+1. Create `lib/minigames/<id>.ts` exporting a `MinigameDefinition` (types and comments in `lib/minigames/minigame-types.ts`; `dig.ts` is the example):
+   - `id`, `title` (icon and HUD), `hint` (one line in the HUD), `description` (the editor's list).
+   - `start(context)` returns a session: `target(cell)` returns the cell a click would act on, or null (the engine outlines it); `act(cell)` does the click, changing terrain only through `context.terrain.removeBlock`; `counters()` returns the HUD's numbers by label.
+   - Keep the session's state inside `start`: every visit starts fresh and nothing is saved.
+2. Add it to `MINIGAMES` in `lib/minigames/registry.ts`.
+3. In the editor's **Zones** tab, paint a zone and set **Kind** to "Mini-game: <description>". Save, and re-bake the map (`pnpm bake`) so the bake keeps the zone as voxels.
+4. Test the game's rules with a fake `MinigameContext` (see `lib/minigames/Minigames.test.ts`), and copy one case of `e2e/minigame.spec.ts` for entering and leaving.
+
+The engine handles picking, the outline, remeshing, the burst, the camera, the HUD and Escape; a game needs none of it. A game that must add cells, not only remove them, needs a matching `placeBlock` in `MinigameTerrain` and `MinigameHost`.
+
 ## Add an engine system (wind, weather, time of day)
 
 1. Put shared values in `Environment.uniforms` (`lib/engine/environment.ts`) and update them in `Environment.update` or a setter.
@@ -135,4 +147,3 @@ View options (grid lines and their colour, hiding terrain materials, hiding obje
 | Recipe | Stage |
 |---|---|
 | Replace or add a material, shader or post-processing effect | 6 |
-| Add a mini-game | 8 |

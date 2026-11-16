@@ -9,9 +9,9 @@ describe("world bridge", () => {
 
     bridge.set({ phase: "loading", progress: 0 });
     bridge.set({ phase: "loading", progress: 0 });
-    bridge.set({ hovered: { id: "a", label: "A", content: null } });
+    bridge.set({ hovered: { id: "a", label: "A", content: null, action: "open" as const } });
     // A structurally equal hover object from the next engine tick must not re-render the UI.
-    bridge.set({ hovered: { id: "a", label: "A", content: null } });
+    bridge.set({ hovered: { id: "a", label: "A", content: null, action: "open" as const } });
     bridge.set({ hovered: null });
 
     expect(listener).toHaveBeenCalledTimes(3);

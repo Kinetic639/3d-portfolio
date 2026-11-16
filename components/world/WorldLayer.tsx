@@ -215,6 +215,7 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
         </div>
 
         <HoverLabel />
+        <MinigameHud />
 
         {openItem ? (
           <aside ref={panelRef} className={styles.panel} role="dialog" aria-modal="false" aria-labelledby={headingId}>
@@ -236,8 +237,41 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
 /** Names what the pointer is over. Re-renders only when the hovered interactable changes. */
 function HoverLabel() {
   const label = useWorldBridge((state) => state.hovered?.label ?? null);
+  const action = useWorldBridge((state) => state.hovered?.action ?? null);
   if (!label) return null;
-  return <p className={styles.hover} aria-hidden="true">{label} <span>Click to open</span></p>;
+  return <p className={styles.hover} aria-hidden="true">{label} <span>{action === "play" ? "Click to play" : "Click to open"}</span></p>;
+}
+
+/**
+ * The HUD of a running mini-game: what it is, its counters, what to do, and
+ * the way out (the button or Escape). Re-renders only when a counter changes.
+ */
+function MinigameHud() {
+  const hud = useWorldBridge((state) => state.minigame);
+  const playing = hud !== null;
+  useEffect(() => {
+    if (!playing) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") worldBridge.commands.emit({ type: "leave-minigame" });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [playing]);
+  if (!hud) return null;
+  return (
+    <section className={styles.minigame} aria-label={`${hud.title} mini-game`}>
+      <header>
+        <strong>{hud.title}</strong>
+        <button type="button" onClick={() => worldBridge.commands.emit({ type: "leave-minigame" })}>Leave <kbd>Esc</kbd></button>
+      </header>
+      <dl role="status" aria-live="polite">
+        {Object.entries(hud.counters).map(([label, value]) => (
+          <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+        ))}
+      </dl>
+      {hud.hint ? <p>{hud.hint}</p> : null}
+    </section>
+  );
 }
 
 /**

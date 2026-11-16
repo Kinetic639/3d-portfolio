@@ -1,12 +1,13 @@
 import * as THREE from "three";
 import type { RuntimeMap } from "@/lib/bake/baked-format";
 import { isInsidePlayableBounds, type MapContentReference } from "@/lib/maps/map-definition";
+import { getMinigame } from "@/lib/minigames/registry";
 import type { EntityLayer } from "./entity-meshes";
 import type { WorldQuery } from "./world-query";
 
 /**
  * Everything a visitor can click: objects, markers and zones that reference
- * portfolio content. Built once per map.
+ * portfolio content, and zones that run a mini-game. Built once per map.
  *
  * Each interactable shows a small icon floating above it. Icons ignore depth,
  * so they stay visible and clickable even when something stands in front of
@@ -17,7 +18,10 @@ export type Interactable = {
   id: string;
   kind: "entity" | "marker" | "zone";
   label: string;
-  content: MapContentReference;
+  /** What it opens; null for a mini-game zone. */
+  content: MapContentReference | null;
+  /** The game a mini-game zone runs; null otherwise. */
+  minigame: { gameId: string } | null;
   /** Where the icon floats. */
   anchor: THREE.Vector3;
   /** Point on the ground the camera centres on when focusing. */
@@ -41,7 +45,7 @@ const ICON_RADIUS = 0.85;
 const ICON_COLOR = "#f2a93b";
 const ICON_HOVER_COLOR = "#ffffff";
 
-function createIconTexture() {
+function createIconTexture(glyph: "info" | "play") {
   const size = 128;
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = size;
@@ -55,10 +59,20 @@ function createIconTexture() {
   context.strokeStyle = "#1b2420";
   context.stroke();
   context.fillStyle = "#1b2420";
-  context.font = `700 ${size * 0.56}px Arial, sans-serif`;
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.fillText("i", size / 2, size / 2 + size * 0.03);
+  if (glyph === "play") {
+    // A triangle, drawn rather than typed, so it does not depend on a font having the glyph.
+    context.beginPath();
+    context.moveTo(size * 0.4, size * 0.3);
+    context.lineTo(size * 0.72, size * 0.5);
+    context.lineTo(size * 0.4, size * 0.7);
+    context.closePath();
+    context.fill();
+  } else {
+    context.font = `700 ${size * 0.56}px Arial, sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("i", size / 2, size / 2 + size * 0.03);
+  }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
@@ -72,7 +86,8 @@ export class InteractionLayer {
   private readonly entities: EntityLayer;
   private readonly sprites = new Map<string, THREE.Sprite>();
   private readonly zoneItems = new Map<number, Interactable>();
-  private readonly texture = createIconTexture();
+  private readonly texture = createIconTexture("info");
+  private readonly playTexture = createIconTexture("play");
   private readonly ray = new THREE.Ray();
   private readonly scratch = new THREE.Vector3();
   private readonly sphere = new THREE.Sphere(new THREE.Vector3(), ICON_RADIUS);
@@ -93,7 +108,7 @@ export class InteractionLayer {
   }
 
   findByContent(reference: MapContentReference) {
-    return this.items.find((item) => item.content.contentType === reference.contentType && item.content.contentId === reference.contentId) ?? null;
+    return this.items.find((item) => item.content?.contentType === reference.contentType && item.content.contentId === reference.contentId) ?? null;
   }
 
   get hovered() {
@@ -185,6 +200,7 @@ export class InteractionLayer {
     this.sprites.forEach((sprite) => sprite.material.dispose());
     this.sprites.clear();
     this.texture.dispose();
+    this.playTexture.dispose();
     this.group.clear();
   }
 
@@ -200,6 +216,7 @@ export class InteractionLayer {
         kind: "entity",
         label,
         content: { ...entity.contentReference },
+        minigame: null,
         anchor: new THREE.Vector3(center.x, box.max.y + 1.4, center.z),
         focus: new THREE.Vector3(center.x, 0, center.z),
         box,
@@ -220,6 +237,7 @@ export class InteractionLayer {
         kind: "marker",
         label,
         content: { ...marker.contentReference },
+        minigame: null,
         anchor: new THREE.Vector3(center.x, center.y + radius + 1.2, center.z),
         focus: new THREE.Vector3(center.x, 0, center.z),
         box: new THREE.Box3().setFromCenterAndSize(center, new THREE.Vector3(radius * 2, radius * 2, radius * 2)),
@@ -241,8 +259,8 @@ export class InteractionLayer {
     }
 
     for (const zone of map.zones) {
-      if (!zone.contentReference) continue;
-      const label = describeContent(zone.contentReference);
+      const game = zone.kind === "minigame" ? getMinigame(zone.minigame?.gameId) : null;
+      const label = game ? game.title : zone.contentReference ? describeContent(zone.contentReference) : null;
       if (!label) continue;
       const columns = zoneColumns.get(zone.numericId);
       if (!columns) continue;
@@ -257,7 +275,8 @@ export class InteractionLayer {
         id: `zone:${zone.id}`,
         kind: "zone",
         label,
-        content: { ...zone.contentReference },
+        content: game || !zone.contentReference ? null : { ...zone.contentReference },
+        minigame: game ? { gameId: game.id } : null,
         anchor: new THREE.Vector3(position.x, position.y + 3, position.z),
         focus: new THREE.Vector3(position.x, 0, position.z),
         box: null,
@@ -270,7 +289,7 @@ export class InteractionLayer {
   }
 
   private addIcon(item: Interactable) {
-    const material = new THREE.SpriteMaterial({ map: this.texture, color: ICON_COLOR, depthTest: false, depthWrite: false, fog: false });
+    const material = new THREE.SpriteMaterial({ map: item.minigame ? this.playTexture : this.texture, color: ICON_COLOR, depthTest: false, depthWrite: false, fog: false });
     const sprite = new THREE.Sprite(material);
     sprite.position.copy(item.anchor);
     sprite.scale.setScalar(ICON_RADIUS * 2);
