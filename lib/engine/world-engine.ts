@@ -109,6 +109,9 @@ const WARM_FRAME_BUDGET_MS = 10;
 /** Longest single slice of warm-up work per animation frame. */
 const WARM_SLICE_MS = 6;
 
+/** 30 frames per second for wind alone. */
+const WIND_FRAME_MS = 1000 / 30;
+
 const nextFrame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve));
 
 export class WorldEngine {
@@ -125,7 +128,12 @@ export class WorldEngine {
   private actorMovement: ActorHud["movement"] = "auto";
   private followingActor = false;
   private readonly actorTarget = new THREE.Vector3();
+  /** Where the entry left the camera: Reset view returns there. */
+  private startView: ReturnType<CameraRig["getGoal"]> | null = null;
   private readonly shadowFocus = new THREE.Vector3();
+  /** The last frame was drawn only because of the wind: draw at WIND_FRAME_MS. */
+  private windOnly = false;
+  private lastWindFrameAt = 0;
   warmUpReport: WarmUpReport | null = null;
   private readonly canvas: HTMLCanvasElement;
   private readonly bridge: WorldBridge;
@@ -193,7 +201,11 @@ export class WorldEngine {
     this.sky = this.scene.background;
     this.rig = new CameraRig(canvas, {
       ...VISITOR_CAMERA,
-      onChange: () => this.invalidate(),
+      // Input wants full-rate frames at once, even when only the wind was moving before.
+      onChange: () => {
+        this.windOnly = false;
+        this.invalidate();
+      },
       onTap: (clientX, clientY) => this.handleTap(clientX, clientY),
       onUserPan: () => this.stopFollowing(),
     });
@@ -772,6 +784,12 @@ export class WorldEngine {
       case "release-actor":
         this.chooseActor(null);
         break;
+      case "set-angle-lock":
+        this.setAngleLock(command.locked);
+        break;
+      case "reset-view":
+        this.resetView();
+        break;
       case "follow-actor":
         this.followingActor = this.chosenActor !== null;
         this.publishActor();
@@ -964,6 +982,12 @@ export class WorldEngine {
   private readonly frame = (now: number) => {
     this.frameHandle = 0;
     if (this.disposed || !this.active) return;
+    // When only the wind moves, half the display rate is enough and saves battery.
+    if (this.windOnly && this.lastWindFrameAt > 0 && now - this.lastWindFrameAt < WIND_FRAME_MS - 4) {
+      this.invalidate();
+      return;
+    }
+    this.lastWindFrameAt = now;
     const startedAt = performance.now();
     // Clamp: after an idle gap the first frame must not see a huge time step.
     const delta = this.lastTickAt > 0 ? Math.min((now - this.lastTickAt) / 1000, 0.1) : 1 / 60;
@@ -976,7 +1000,9 @@ export class WorldEngine {
     // Wind needs frames only while it blows and something it moves is in view.
     this.updateFrustum();
     const windy = this.environment.wind.active && (this.entities?.windInView(this.frustum) ?? false);
-    const animating = (this.entities?.update(delta, this.frustum) ?? false) || waving || bursting || windy;
+    const othersAnimating = (this.entities?.update(delta, this.frustum) ?? false) || waving || bursting;
+    const animating = othersAnimating || windy;
+    this.windOnly = windy && !othersAnimating && !cameraMoving && this.entry === null;
     if (this.chosenActor) {
       const status = this.chosenActor.actor.status;
       if (this.followingActor) {
@@ -1053,6 +1079,7 @@ export class WorldEngine {
     this.entry = null;
     // The camera is exactly where the rig rests; hand it back.
     const goal = this.rig.getGoal();
+    this.startView = { ...goal };
     this.rig.lookAt(goal.x, goal.z, goal.distance, true);
     this.entities?.setPopTime(POP_COMPLETE);
     if (this.interaction) this.interaction.group.visible = true;
@@ -1075,6 +1102,27 @@ export class WorldEngine {
     }
     uniforms.uExpansionProgress.value = this.wave;
     return true;
+  }
+
+  /** The original's angle lock: keeps the current tilt; turning and zooming stay free. */
+  private setAngleLock(locked: boolean) {
+    const pitch = this.rig.getGoal().pitchDegrees;
+    this.rig.configure(locked
+      ? { minPitchDegrees: pitch, maxPitchDegrees: pitch }
+      : { minPitchDegrees: VISITOR_CAMERA.minPitchDegrees, maxPitchDegrees: VISITOR_CAMERA.maxPitchDegrees });
+    this.bridge.set({ angleLocked: locked });
+  }
+
+  /** Back to the view the entry ended on (the angle lock is lifted, nothing is followed). */
+  private resetView() {
+    const view = this.startView;
+    if (!view) return;
+    if (this.bridge.store.getState().angleLocked) this.setAngleLock(false);
+    this.followingActor = false;
+    if (this.chosenActor) this.publishActor();
+    this.rig.setOrientation(view.yawDegrees, view.pitchDegrees);
+    this.rig.lookAt(view.x, view.z, view.distance);
+    this.invalidate();
   }
 
   private updateFrustum() {

@@ -1,8 +1,8 @@
 {
   "name": "Crow",
   "category": "creatures",
-  "description": "Rigged crow: idle, walk, run, take-off and fly. The three long baked flight loops of the source (144 s, 95 % of the file) are left out; add them to animations to keep them. Free asset.",
-  "scale": 0.015,
+  "description": "Rigged crow, about one block tall at scale 0.03 (the lab used 0.015, under half a block: hard to see from the visitor's camera): idle, walk, run, take-off and fly. The three long baked flight loops of the source (144 s, 95 % of the file) are left out; add them to animations to keep them. Free asset.",
+  "scale": 0.03,
   "collision": "none",
   "animation": "ANIM_Crow_IdleLookAround",
   "animations": [

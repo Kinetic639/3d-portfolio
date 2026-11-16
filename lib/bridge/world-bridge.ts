@@ -75,6 +75,8 @@ export type WorldBridgeState = {
   hovered: HoveredInteractable | null;
   minigame: MinigameHud | null;
   actor: ActorHud | null;
+  /** The visitor locked the camera's tilt (the original's angle lock). */
+  angleLocked: boolean;
   error: string | null;
 };
 
@@ -86,6 +88,8 @@ export type WorldCommand =
   | { type: "set-quality"; quality: QualityTier }
   | { type: "leave-minigame" }
   | { type: "release-actor" }
+  | { type: "set-angle-lock"; locked: boolean }
+  | { type: "reset-view" }
   | { type: "follow-actor" }
   | { type: "set-actor-movement"; movement: ActorHud["movement"] };
 
@@ -138,6 +142,7 @@ const INITIAL_STATE: WorldBridgeState = {
   hovered: null,
   minigame: null,
   actor: null,
+  angleLocked: false,
   error: null,
 };
 

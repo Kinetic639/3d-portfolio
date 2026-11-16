@@ -283,3 +283,36 @@ test("the perf badge reads idle at rest, counts frames while panning and opens i
   await expect(hud.locator("dd").nth(3)).toHaveText(/^\d+$/);
   await expect(hud.getByText("UI (5 s)")).toBeVisible();
 });
+
+test("the original's view buttons: the angle lock keeps the tilt, Reset view returns to the start", async ({ page }) => {
+  await openWorld(page);
+  const start = await view(page);
+  const drag = async (fromX: number, fromY: number, toX: number, toY: number, rotate: boolean) => {
+    if (rotate) await page.keyboard.down("Control");
+    await page.mouse.move(fromX, fromY);
+    await page.mouse.down({ button: rotate ? "right" : "left" });
+    await page.mouse.move(toX, toY, { steps: 10 });
+    await page.mouse.up({ button: rotate ? "right" : "left" });
+    if (rotate) await page.keyboard.up("Control");
+    await settle(page);
+  };
+
+  await page.getByRole("button", { name: "Lock camera angle" }).click();
+  await expect(page.getByRole("button", { name: "Unlock camera angle" })).toHaveAttribute("aria-pressed", "true");
+  await drag(640, 200, 840, 600, true);
+  const locked = await view(page);
+  expect(locked.pitchDegrees).toBeCloseTo(start.pitchDegrees, 1);
+  expect(Math.abs(locked.yawDegrees - start.yawDegrees)).toBeGreaterThan(10);
+
+  await drag(640, 360, 900, 500, false);
+  expect(Math.hypot((await view(page)).x - start.x, (await view(page)).z - start.z)).toBeGreaterThan(2);
+  await page.getByRole("button", { name: "Reset view" }).click();
+  await settle(page);
+  const reset = await view(page);
+  expect(reset.x).toBeCloseTo(start.x, 1);
+  expect(reset.z).toBeCloseTo(start.z, 1);
+  expect(reset.yawDegrees).toBeCloseTo(start.yawDegrees, 0);
+  expect(reset.distance).toBeCloseTo(start.distance, 0);
+  // Reset lifts the lock.
+  await expect(page.getByRole("button", { name: "Lock camera angle" })).toHaveAttribute("aria-pressed", "false");
+});

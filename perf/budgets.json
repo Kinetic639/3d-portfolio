@@ -1,36 +1,109 @@
 {
-  "reference": "Set 2026-11-16 from production runs on Windows 10, RTX 2060 (ANGLE D3D11), Chromium, 1440x900, DPR 1. Times allow about one dropped frame of headroom over what was measured; counts are exact or near-exact. Re-measure with `pnpm perf --update` on other hardware.",
+  "reference": "Set 2026-11-16 from production runs on Windows 10, RTX 2060 (ANGLE D3D11), Chromium, 1440x900, DPR 1. Times allow about one dropped frame of headroom over what was measured; counts are exact or near-exact. Re-measure with `pnpm perf --update` on other hardware. Draw calls and triangles are recorded without a budget: they follow the default map's content, which keeps growing; the frame-time and CPU budgets catch what that content costs.",
   "metrics": {
-    "load.readyMs": { "max": 2500, "why": "Landing page to a warmed-up world. Measured 1.2-1.6 s." },
-    "load.longTaskMs": { "max": 250, "why": "Main-thread blocking while the world loads behind the landing page. Measured 57-205 ms." },
-    "load.warmUpOk": { "min": 1, "why": "Warm-up rehearsed the entry without creating resources." },
-    "load.warmUpNewResources": { "max": 0, "why": "Nothing is compiled or uploaded after warm-up." },
-
-    "entry.maxFrameMs": { "max": 34, "why": "Worst frame of the entry (median of 3). Measured 16.8 ms; at most one dropped frame." },
-    "entry.p95FrameMs": { "max": 17.5, "why": "The entry runs at the display rate. Measured 16.7-16.8 ms." },
-    "entry.framesOver33Ms": { "max": 1, "why": "Measured 0 (median of 3)." },
-    "entry.longTasks": { "max": 0, "why": "No task over 50 ms during the entry (median of 3). Measured 0." },
-    "entry.programsCompiled": { "max": 0, "why": "Every shader was compiled during warm-up." },
-
-    "pan.p95FrameMs": { "max": 17.5, "why": "Panning runs at the display rate. Measured 16.7-16.8 ms." },
-    "pan.maxFrameMs": { "max": 34, "why": "Measured 16.8 ms." },
-    "pan.longTasks": { "max": 0, "why": "Measured 0." },
-    "pan.engineCpuMeanMs": { "max": 2, "why": "Engine update + render per frame. Measured 0.6-0.7 ms." },
-
-    "render.drawCalls": { "max": 16, "why": "Draw calls at the start view after panning. Measured 14 (baked world)." },
-    "render.triangles": { "max": 52000, "why": "Measured 47,052; +10 %." },
-
-    "idle.framesIn2s": { "max": 0, "why": "A still world draws nothing, the perf badge included." },
-
-    "hover.frames": { "max": 4, "why": "80 pointer moves across one object: a frame only when the hovered thing changes. Measured 2." },
-    "hover.picks": { "max": 81, "why": "At most one pick per pointer move. Measured 80." },
-    "hover.uiUpdates": { "max": 4, "why": "React updates only when the hovered thing changes. Measured 2." },
-    "hover.longTasks": { "max": 0, "why": "Measured 0." },
-
-    "dig4x.blocksDug": { "min": 6, "why": "The scenario really digs (8 clicks). Measured 8." },
-    "dig4x.maxFrameMs": { "max": 67, "why": "Digging with the CPU slowed 4x. Measured 16.8-50 ms." },
-    "dig4x.framesOver50Ms": { "max": 1, "why": "Measured 0." },
-    "dig4x.longTasks": { "max": 2, "why": "Measured 0-1." },
-    "dig4x.programsCompiled": { "max": 0, "why": "The outline and burst were compiled during warm-up." }
+    "load.readyMs": {
+      "max": 2500,
+      "why": "Landing page to a warmed-up world. Measured 1.2-1.6 s."
+    },
+    "load.longTaskMs": {
+      "max": 250,
+      "why": "Main-thread blocking while the world loads behind the landing page. Measured 57-205 ms."
+    },
+    "load.warmUpOk": {
+      "min": 1,
+      "why": "Warm-up rehearsed the entry without creating resources."
+    },
+    "load.warmUpNewResources": {
+      "max": 0,
+      "why": "Nothing is compiled or uploaded after warm-up."
+    },
+    "entry.maxFrameMs": {
+      "max": 34,
+      "why": "Worst frame of the entry (median of 3). Measured 16.8 ms; at most one dropped frame."
+    },
+    "entry.p95FrameMs": {
+      "max": 17.5,
+      "why": "The entry runs at the display rate. Measured 16.7-16.8 ms."
+    },
+    "entry.framesOver33Ms": {
+      "max": 1,
+      "why": "Measured 0 (median of 3)."
+    },
+    "entry.longTasks": {
+      "max": 0,
+      "why": "No task over 50 ms during the entry (median of 3). Measured 0."
+    },
+    "entry.programsCompiled": {
+      "max": 0,
+      "why": "Every shader was compiled during warm-up."
+    },
+    "pan.p95FrameMs": {
+      "max": 17.5,
+      "why": "Panning runs at the display rate. Measured 16.7-16.8 ms."
+    },
+    "pan.maxFrameMs": {
+      "max": 34,
+      "why": "Measured 16.8 ms."
+    },
+    "pan.longTasks": {
+      "max": 0,
+      "why": "Measured 0."
+    },
+    "pan.engineCpuMeanMs": {
+      "max": 2,
+      "why": "Engine update + render per frame. Measured 0.6-0.7 ms."
+    },
+    "idle.framesIn2s": {
+      "max": 0,
+      "why": "A still world draws nothing, the perf badge included."
+    },
+    "hover.frames": {
+      "max": 4,
+      "why": "80 pointer moves across one object: a frame only when the hovered thing changes. Measured 2."
+    },
+    "hover.picks": {
+      "max": 81,
+      "why": "At most one pick per pointer move. Measured 80."
+    },
+    "hover.uiUpdates": {
+      "max": 4,
+      "why": "React updates only when the hovered thing changes. Measured 2."
+    },
+    "hover.longTasks": {
+      "max": 0,
+      "why": "Measured 0."
+    },
+    "panel.openMs": {
+      "max": 150,
+      "why": "Click on an object to its content panel shown, first open of the session. Measured about 30 ms."
+    },
+    "panel.maxFrameMs": {
+      "max": 34,
+      "why": "First open: at most one dropped frame. Measured 16.7-33 ms after warming the panel shell during loading (was 50-133 ms)."
+    },
+    "panel.longTasks": {
+      "max": 0,
+      "why": "Measured 0."
+    },
+    "dig4x.blocksDug": {
+      "min": 6,
+      "why": "The scenario really digs (8 clicks). Measured 8."
+    },
+    "dig4x.maxFrameMs": {
+      "max": 100,
+      "why": "Digging with the CPU slowed 4x, one run, so noisy: measured 16.8-83 ms over many runs, with or without the map's models. A real regression (remeshing far more than the dug cell) shows as 200+ ms."
+    },
+    "dig4x.framesOver50Ms": {
+      "max": 2,
+      "why": "Measured 0-2 over many runs."
+    },
+    "dig4x.longTasks": {
+      "max": 2,
+      "why": "Measured 0-1."
+    },
+    "dig4x.programsCompiled": {
+      "max": 0,
+      "why": "The outline and burst were compiled during warm-up."
+    }
   }
 }

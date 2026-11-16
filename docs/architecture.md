@@ -541,3 +541,11 @@ The first bake smoothed the terrain (density, blur, Surface Nets, simplification
 ### Style-lab port, point 6: the engine stays free of React
 
 - `eslint.config.mjs` forbids React, Next.js, zustand's React entry, `@/components/*` and the two React hooks in `lib/` (the hooks themselves and the design system's fonts excepted). `lib/engine/EngineBoundary.test.ts` checks that the rule is there and bites. The monorepo plan's package-boundary checks are not ported: this repository is one app.
+
+### Style-lab port: follow-ups
+
+- **Crow scale** 0.03 (about one block tall; the lab's 0.015 was under half a block, hard to see from the visitor's camera).
+- **Wind at 30 frames per second** when it is the only thing moving (camera still, nothing else animating); input brings back full rate at once. Measured on the default map with pines in view: 30 frames per second idle in the wind, about 60 while panning.
+- **First content panel**: the panel opened with a 50-133 ms frame the first time in a browser. Two causes, both fixed: an effect re-applied `data-world` and `inert` on every URL change (cleanup, then set again), re-styling the whole document right before the panel heading takes focus; and the first raster of the panel (its large blurred shadow and text). The phase attributes are now written only when they change, and a shell of the panel is drawn at 1 % opacity while the loader waits (as the world's controls are). Measured in fresh browsers: worst frame 16.7-33 ms, GPU raster 18-35 ms (was 47-120), forced layout 7-13 ms (was 21).
+- **View buttons** (the original's, top right): lock the camera's tilt (turning and zooming stay free), and Reset view back to where the entry ended.
+- **Perf test**: draw calls and triangles are recorded without a budget (they follow the default map's growing content; frame times and CPU catch their cost); a first-open content panel scenario (`panel.*`); dig budgets widened after many runs showed 17-83 ms one-run noise at 4x CPU slowdown.

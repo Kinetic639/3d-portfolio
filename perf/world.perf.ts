@@ -243,8 +243,39 @@ async function measureWorld(page: Page) {
   record("hover.uiUpdates", hoverAfter.ui - hoverBefore.ui);
   record("hover.longTasks", (await longTasks(page, hoverFrom, await now(page))).count);
 
+  await measurePanel(page);
   await measureWind(page);
   await measureMine(page);
+}
+
+/**
+ * Opening content: a click on an object's icon until its panel is shown,
+ * and the frames around it. The first open in a session is the one that
+ * can stall (fonts, raster of the panel), so it is the one measured.
+ */
+async function measurePanel(page: Page) {
+  await page.evaluate((id) => {
+    const probe = window.__worldEngine as unknown as Probe;
+    const item = probe.interaction.items.find((candidate) => candidate.id === id)!;
+    probe.rig.lookAt(item.focus.x, item.focus.z, 30, true);
+    probe.invalidate();
+  }, OBJECT);
+  await settle(page);
+  const icon = await screenPoint(page, "anchor", OBJECT);
+  await startFrames(page);
+  const from = await now(page);
+  await page.mouse.click(icon.x, icon.y);
+  await page.getByRole("dialog").waitFor();
+  const shown = await now(page);
+  await page.waitForTimeout(1500);
+  const to = await now(page);
+  const frames = calculateFrameSummary(await stopFrames(page));
+  const tasks = await longTasks(page, from, to);
+  record("panel.openMs", shown - from);
+  record("panel.maxFrameMs", frames.maxFrameMs);
+  record("panel.longTasks", tasks.count);
+  await page.getByRole("button", { name: /close and return to the world/i }).click();
+  await settle(page);
 }
 
 /**

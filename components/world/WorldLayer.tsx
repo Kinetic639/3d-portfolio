@@ -1,5 +1,6 @@
 "use client";
 
+import { LockKeyhole, RotateCcw, UnlockKeyhole } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import ContentArticle from "@/components/content/ContentArticle";
@@ -108,15 +109,20 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
 
   // Let CSS and assistive technology follow the phase: the landing page fades
   // and becomes inert while the world is in front, and scrolling is locked.
+  // Attributes are written only when they change: removing and re-adding
+  // them (as a cleanup on every URL change would) re-styles the whole
+  // document, which the focus move of a newly opened panel then pays for.
   useEffect(() => {
-    document.documentElement.dataset.world = phase;
+    if (document.documentElement.dataset.world !== phase) document.documentElement.dataset.world = phase;
     const landing = document.getElementById("landing");
-    if (landing) landing.inert = phase === "entering" || phase === "world";
-    return () => {
-      delete document.documentElement.dataset.world;
-      if (landing) landing.inert = false;
-    };
+    const inert = phase === "entering" || phase === "world";
+    if (landing && landing.inert !== inert) landing.inert = inert;
   }, [phase, pathname]);
+  useEffect(() => () => {
+    delete document.documentElement.dataset.world;
+    const landing = document.getElementById("landing");
+    if (landing) landing.inert = false;
+  }, []);
 
   // Keyboard focus follows the visitor between page and world.
   const previousPhase = useRef(phase);
@@ -217,11 +223,17 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
           <button type="button" className={styles.exit} onClick={exit}>Back to page</button>
         </div>
 
+        <ViewButtons hidden={openItem !== null} />
         <HoverLabel />
         <MinigameHud />
         <ActorHud />
         <PerfHud active={phase === "world"} />
 
+        {layerView(phase) === "loader" && PORTFOLIO_CONTENT.items[0] ? (
+          <div className={styles.panel} aria-hidden="true">
+            <div className={styles.panelBody}><ContentArticle item={PORTFOLIO_CONTENT.items[0]} headingId={`${headingId}-warm`} /></div>
+          </div>
+        ) : null}
         {openItem ? (
           <aside ref={panelRef} className={styles.panel} role="dialog" aria-modal="false" aria-labelledby={headingId}>
             <button type="button" className={styles.close} onClick={close} aria-label="Close and return to the world">
@@ -246,6 +258,24 @@ function HoverLabel() {
   const action = useWorldBridge((state) => state.hovered?.action ?? null);
   if (!label) return null;
   return <p className={styles.hover} aria-hidden="true">{label} <span>{action === "play" ? "Click to play" : "Click to open"}</span></p>;
+}
+
+/** The original's view controls, top right: lock the camera's tilt, and go back to the start view. */
+function ViewButtons({ hidden }: { hidden: boolean }) {
+  useUiWork();
+  const locked = useWorldBridge((state) => state.angleLocked);
+  if (hidden) return null;
+  return (
+    <div className={styles.viewButtons}>
+      <button type="button" className={styles.iconButton} aria-pressed={locked} aria-label={locked ? "Unlock camera angle" : "Lock camera angle"} title={locked ? "Unlock camera angle" : "Lock camera angle"}
+        onClick={() => worldBridge.commands.emit({ type: "set-angle-lock", locked: !locked })}>
+        {locked ? <UnlockKeyhole aria-hidden="true" size={16} /> : <LockKeyhole aria-hidden="true" size={16} />}
+      </button>
+      <button type="button" className={styles.iconButton} aria-label="Reset view" title="Reset view" onClick={() => worldBridge.commands.emit({ type: "reset-view" })}>
+        <RotateCcw aria-hidden="true" size={16} />
+      </button>
+    </div>
+  );
 }
 
 const ACTOR_STATES: Record<string, string> = {
