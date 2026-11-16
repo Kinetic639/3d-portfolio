@@ -150,8 +150,24 @@ The engine handles picking, the outline, remeshing, the burst, the camera, the H
 3. Drive effects through uniform values and light parameters, not through shader `#define` variants, so changing the weather never compiles a shader during play.
 4. If the effect animates continuously, the engine must keep rendering while it is active; request frames with `engine.invalidate()`.
 
-## Not available yet
+## Change a material or shader, or add a post-processing effect
 
-| Recipe | Stage |
-|---|---|
-| Replace or add a material, shader or post-processing effect | 6 |
+The rule for all three: **every shader program exists before the visitor enters.** Warm-up (`WorldEngine.warmUp`) compiles whatever is in the scene and checks that the rehearsed entry creates nothing new; a program compiled later stalls a frame for 20-100 ms.
+
+**Terrain** (`lib/engine/terrain-material.ts`, one `ShaderMaterial` for all voxel terrain):
+
+1. Edit `VERTEX_SHADER` / `FRAGMENT_SHADER`. Per-vertex data comes from `SurfaceEmitter` (`lib/terrain/surface-faces.ts`), which both the live mesher and the bake decoder use; a new attribute goes there, in `TerrainChunkBuffers` and in `createTerrainGeometry`. Bakes store which faces of which cells are visible, not vertices, so neither a shader nor an emitter change needs a re-bake; a change to which faces are visible (shapes, culling) does (`pnpm bake`).
+2. A new uniform goes in `TerrainUniforms` and `createTerrainUniforms`; the engine sets its value in its frame (as `uTime`). Never switch `defines` at run time: each set of defines is a separate program. Editor-only drawing goes behind `EDITOR_VIEW`, which only the editor's material defines.
+3. Values that change continuously need frames: call `engine.invalidate()` while they change, nothing when they do not.
+
+**Objects** (`lib/engine/entity-meshes.ts`): model and procedural materials are three.js standard materials extended in `addInstanceEffects` through `onBeforeCompile` (pop-up and occlusion fade). Add to those string replacements rather than replacing the material. three.js caches programs by the source text of `onBeforeCompile` (its default `customProgramCacheKey`), so two materials whose hook has the same text but injects different code (through closure values) need their own `customProgramCacheKey`, or one reuses the other's program.
+
+**A new material** (a new kind of object or effect): create it while the map loads, not on first use, and make sure the object using it is in the scene during warm-up. If it is hidden on the landing page, show it for warm-up the way `MinigameHost.showForWarmUp` does and add its objects to the upload list in `warmUpSteps`.
+
+**Post-processing**: there is none today; the world is drawn by `this.renderer.render(this.scene, this.rig.camera)` in `WorldEngine.frame`. To add a pass:
+
+1. Create its render target and full-screen material when the engine is constructed, size the target in `resize()`, and replace that one render call with "render the scene into the target, then draw the pass to the screen". Leave `drawLoader` alone: the landing page's loader is drawn into a scissored box on a transparent canvas.
+2. Draw the pass once in `renderSync` during warm-up so its program is compiled there.
+3. The world renders on demand, so the pass costs nothing while the world is still. It adds at least one draw call per drawn frame and a full-screen fill: budget it.
+
+**Check** a change with `pnpm perf`: `entry.programsCompiled` and `dig4x.programsCompiled` must stay 0, and the frame-time and draw-call budgets show what it costs. For a visible change, compare screenshots before and after (`?world=voxels` and `?world=baked` in development).

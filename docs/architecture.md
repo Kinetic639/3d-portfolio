@@ -318,7 +318,7 @@ The world shows the original's FPS badge at the bottom left (`components/world/P
 
 ### Performance regression test
 
-`pnpm perf` (`scripts/perf.ts`, `perf/world.perf.ts`) builds for production with `NEXT_PUBLIC_WORLD_PROBE=1` (the only difference: the test may read the engine's counters), serves it on port 3218, measures it in Chromium with the real GPU and compares every number with `perf/budgets.json`. One run takes about 1.5 minutes. It skips itself on a software renderer, where frame times mean nothing.
+`pnpm perf` (`scripts/production-tests.ts`, `perf/world.perf.ts`) builds for production with `NEXT_PUBLIC_WORLD_PROBE=1` (the only difference: the test may read the engine's counters), serves it on port 3218, measures it in Chromium with the real GPU and compares every number with `perf/budgets.json`. One run takes about 1.5 minutes. It skips itself on a software renderer, where frame times mean nothing.
 
 | Scenario | What is checked |
 |---|---|

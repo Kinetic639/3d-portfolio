@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * The performance regression test. Run it with `pnpm perf` (scripts/perf.ts),
+ * The performance regression test. Run it with `pnpm perf` (scripts/production-tests.ts),
  * which builds for production with NEXT_PUBLIC_WORLD_PROBE=1 (so the test can
  * read the engine's counters), serves the build, runs this and stops the
  * server. Measured in Chromium with the machine's real GPU.

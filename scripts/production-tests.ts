@@ -3,9 +3,13 @@ import net from "node:net";
 import path from "node:path";
 
 /**
- * pnpm perf            builds for production, serves it, runs the performance regression test
- * pnpm perf --update   the same, but prints the measurements without failing (for new budgets)
- * pnpm perf --no-build reuses the last perf build
+ * Tests that need a production build. Both build with NEXT_PUBLIC_WORLD_PROBE=1
+ * (the tests read the engine's counters) and serve the build on PERF_PORT (3218).
+ *
+ * pnpm perf             the performance regression test (perf/world.perf.ts)
+ * pnpm perf --update    the same, printing the measurements without failing (for new budgets)
+ * pnpm e2e:prod         the end-to-end tests against the production build
+ * --no-build            reuses the last build
  *
  * The server is started and stopped here, not by Playwright: on Windows a
  * server started through a shell and pnpm can outlive the test run and keep
@@ -69,10 +73,13 @@ async function main() {
   let status = 1;
   try {
     await waitForServer(`http://localhost:${PORT}/`, 60_000);
+    const e2e = args[0] === "e2e";
     const testEnv = args.includes("--update") ? "1" : process.env.PERF_UPDATE ?? "";
-    const result = spawnSync(process.execPath, [path.join(root, "node_modules", "@playwright", "test", "cli.js"), "test", "-c", "playwright.perf.config.ts"], {
+    const config = e2e ? "playwright.config.ts" : "playwright.perf.config.ts";
+    const extra = args.filter((arg) => arg !== "e2e" && arg !== "perf" && !arg.startsWith("--"));
+    const result = spawnSync(process.execPath, [path.join(root, "node_modules", "@playwright", "test", "cli.js"), "test", "-c", config, ...extra], {
       cwd: root,
-      env: { ...env, PERF_UPDATE: testEnv },
+      env: { ...env, PERF_UPDATE: testEnv, PLAYWRIGHT_PROD: e2e ? "1" : "", PLAYWRIGHT_PORT: String(PORT) },
       stdio: "inherit",
     });
     status = result.status ?? 1;
