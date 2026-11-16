@@ -29,6 +29,8 @@ export type LoadedModel = {
   normalise: THREE.Matrix4;
   /** The clip named in the model's metadata, if any. */
   clip: THREE.AnimationClip | null;
+  /** Every clip of the model (creatures choose among them). */
+  clips: THREE.AnimationClip[];
   /** Size in world units after normalisation. */
   size: THREE.Vector3;
 };
@@ -155,7 +157,7 @@ export class ModelLibrary {
         parts.push({ geometry: mesh.geometry, material: materials[0], matrix: new THREE.Matrix4().multiplyMatrices(normalise, mesh.matrixWorld) });
       });
     }
-    return { entry, parts, scene, normalise, clip, size: box.getSize(new THREE.Vector3()) };
+    return { entry, parts, scene, normalise, clip, clips: gltf.animations, size: box.getSize(new THREE.Vector3()) };
   }
 }
 

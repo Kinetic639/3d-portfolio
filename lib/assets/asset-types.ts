@@ -1,4 +1,4 @@
-import type { ModelStyleSettings, ModelWindSettings } from "@/lib/maps/map-definition";
+import { validateActorSettings, type ModelActorSettings, type ModelStyleSettings, type ModelWindSettings } from "@/lib/maps/map-definition";
 import type { CollisionMode } from "@/lib/maps/map-entities";
 import type { PrefabCategory } from "@/lib/prefabs/prefab-types";
 
@@ -73,10 +73,12 @@ export type AssetMetadata = {
    * `outline: true` also makes the pipeline compute the model's outline normals.
    */
   style?: ModelStyleSettings;
+  /** Present when the model is a creature that can be sent places (needs walk/run/fly clips): its default motion. */
+  actor?: ModelActorSettings;
 };
 
 export type AssetManifestEntry = Required<Pick<AssetMetadata, "name" | "category" | "scale" | "rotationY" | "anchor" | "collision">> &
-  Pick<AssetMetadata, "description" | "animation" | "wind" | "style"> & {
+  Pick<AssetMetadata, "description" | "animation" | "wind" | "style" | "actor"> & {
     id: string;
     variants: AssetVariant[];
     replacesPrefabs: string[];
@@ -166,6 +168,7 @@ export function validateAssetMetadata(input: unknown): string[] {
       if (style.outlineScale !== undefined && !(typeof style.outlineScale === "number" && style.outlineScale >= 0 && style.outlineScale <= 5)) errors.push("style.outlineScale must be a number from 0 to 5.");
     }
   }
+  if (input.actor !== undefined) errors.push(...validateActorSettings("actor", input.actor));
   if (input.rootMotionNode !== undefined && typeof input.rootMotionNode !== "string") errors.push("rootMotionNode must be a node name.");
   for (const key of ["replacesPrefabs", "tags", "animations"] as const) {
     if (input[key] !== undefined && !(Array.isArray(input[key]) && input[key].every((item) => typeof item === "string"))) errors.push(`${key} must be an array of strings.`);

@@ -32,6 +32,8 @@ export type CameraRigOptions = {
   panButtons?: number[];
   /** Called for a press-and-release that did not move: a click or tap on the world. */
   onTap?: (clientX: number, clientY: number) => void;
+  /** Called when the visitor moves the view by hand (drag or keys), e.g. to stop following something. */
+  onUserPan?: () => void;
   /** Called whenever the rig needs another frame. */
   onChange: () => void;
 };
@@ -80,7 +82,7 @@ const KEY_PAN = new Map<string, [number, number]>([
 export class CameraRig {
   readonly camera: THREE.PerspectiveCamera;
   private readonly element: HTMLElement;
-  private readonly options: Required<Omit<CameraRigOptions, "onTap">> & Pick<CameraRigOptions, "onTap">;
+  private readonly options: Required<Omit<CameraRigOptions, "onTap" | "onUserPan">> & Pick<CameraRigOptions, "onTap" | "onUserPan">;
   private readonly direction = new THREE.Vector3();
   private readonly target = new THREE.Vector3();
   private readonly goalTarget = new THREE.Vector3();
@@ -118,6 +120,7 @@ export class CameraRig {
       initialDistance: options.initialDistance ?? 62,
       panButtons: options.panButtons ?? [0],
       onTap: options.onTap,
+      onUserPan: options.onUserPan,
       onChange: options.onChange,
     };
     this.camera = new THREE.PerspectiveCamera(this.options.fov, 1, 0.5, 600);
@@ -242,6 +245,7 @@ export class CameraRig {
         if (code === "KeyE") turn -= 1;
       }
       const speed = this.goalDistance * 0.9 * deltaSeconds;
+      if (panX !== 0 || panZ !== 0) this.options.onUserPan?.();
       this.moveGoal(panX * speed, panZ * speed);
       this.goalDistance *= 1 + zoom * 1.2 * deltaSeconds;
       this.goalYaw += turn * KEY_TURN_RATE * deltaSeconds;
@@ -316,6 +320,7 @@ export class CameraRig {
 
   private panByPixels(dx: number, dy: number) {
     const units = this.worldUnitsPerPixel() * this.options.panSpeed;
+    this.options.onUserPan?.();
     // Dragging down pushes the view away from the camera, as with any map.
     this.moveGoal(-dx * units, -dy * units);
     this.clampGoal();

@@ -17,6 +17,7 @@ import { buildWorldForMap } from "@/lib/engine/terrain-meshes";
 import { migrateMapDefinition, type MapDefinition, type ModelSettings } from "@/lib/maps/map-definition";
 import { resolveWindResponse, windWeightSources } from "@/lib/engine/wind";
 import { resolveModelStyle } from "@/lib/engine/surface-style";
+import { resolveActor } from "@/lib/engine/actor";
 import { windDebugViews, type WindDebugView } from "@/lib/editor/wind-debug";
 import type { SelectedModelInfo } from "./WindPanels";
 import { BUILT_IN_PREFABS } from "@/lib/prefabs/prefab-library";
@@ -343,12 +344,14 @@ function ConnectedToolbar({ onLayoutChange }: { onLayoutChange: (layout: EditorV
       style: resolveModelStyle(entry.style, meta.modelSettings?.[entry.id]?.style),
       styleOverridden: Object.keys(meta.modelSettings?.[entry.id]?.style ?? {}).length > 0,
       hasOutlineData: attributes.includes("_OUTLINE_NORMAL"),
+      actor: entry.actor ? resolveActor(entry.actor, meta.modelSettings?.[entry.id]?.actor) : null,
+      actorOverridden: Object.keys(meta.modelSettings?.[entry.id]?.actor ?? {}).length > 0,
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- meta is read fresh from the session; metaRevision says when it changed.
   }, [selectedEntity, models, state.metaRevision]);
   const debugView: WindDebugView = debug && selectedModel && debug.modelId === selectedModel.id ? debug.view : "normal";
   /** Patches this map's settings for the selected model; null removes that group (back to the model's defaults). */
-  const changeModelSettings = <K extends "wind" | "style">(key: K, patch: ModelSettings[K] | null) => {
+  const changeModelSettings = <K extends "wind" | "style" | "actor">(key: K, patch: ModelSettings[K] | null) => {
     if (!selectedModel) return;
     const next: Record<string, ModelSettings> = { ...(meta.modelSettings ?? {}) };
     const current: ModelSettings = { ...(next[selectedModel.id] ?? {}) };
@@ -652,6 +655,10 @@ function ConnectedToolbar({ onLayoutChange }: { onLayoutChange: (layout: EditorV
     },
     onModelWindChange: (patch) => changeModelSettings("wind", patch),
     onModelStyleChange: (patch) => changeModelSettings("style", patch),
+    onModelActorChange: (patch) => changeModelSettings("actor", patch),
+    onPreviewClip: (clip) => {
+      if (selectedModel) viewport.previewActorClip(selectedModel.id, clip);
+    },
     onLightingChange: (patch) => session.updateMeta("Change lighting", { environment: { ...meta.environment, lighting: { ...meta.environment.lighting, ...patch } } }),
     onShadowsChange: (patch) => session.updateMeta("Change shadows", { environment: { ...meta.environment, shadows: { ...meta.environment.shadows, ...patch } } }),
     onSurfaceStyleChange: (patch) => session.updateMeta("Change surface style", { environment: { ...meta.environment, style: { ...meta.environment.style, ...patch } } }),

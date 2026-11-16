@@ -25,5 +25,15 @@
     "outlineScale": 0.25,
     "contactShadow": false,
     "castShadow": true
+  },
+  "actor": {
+    "walkSpeed": 0.75,
+    "runSpeed": 1.65,
+    "flightSpeed": 2.8,
+    "flightHeight": 3,
+    "turnSpeed": 7,
+    "crossfade": 0.2,
+    "groundOffset": 0,
+    "forwardYaw": 0
   }
 }

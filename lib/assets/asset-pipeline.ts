@@ -258,6 +258,7 @@ export async function processAssets(options: { root?: string; force?: boolean } 
         animation: metadata.animation,
         wind: metadata.wind,
         style: metadata.style,
+        actor: metadata.actor,
         variants: metadata.variants ?? [],
         replacesPrefabs: metadata.replacesPrefabs ?? [],
         tags: metadata.tags ?? [],

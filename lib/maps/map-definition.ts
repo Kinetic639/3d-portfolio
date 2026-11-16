@@ -245,10 +245,28 @@ export type ModelStyleSettings = {
   castShadow?: boolean;
 };
 
+/** How an animated creature moves when sent somewhere (the style lab's crow controls). Blocks per second, degrees. */
+export type ModelActorSettings = {
+  walkSpeed?: number;
+  runSpeed?: number;
+  flightSpeed?: number;
+  /** Height of the flight arc above the higher end. */
+  flightHeight?: number;
+  /** How fast it turns to face where it goes. */
+  turnSpeed?: number;
+  /** Seconds to blend from one clip to the next. */
+  crossfade?: number;
+  /** Lifts the model above the ground it stands on. */
+  groundOffset?: number;
+  /** Turns the model if its front is not where it walks. */
+  forwardYaw?: number;
+};
+
 /** Per-model settings for this map, by model id. They apply to every placed instance of the model. */
 export type ModelSettings = {
   wind?: ModelWindSettings;
   style?: ModelStyleSettings;
+  actor?: ModelActorSettings;
 };
 
 export type MapDefinition = {
@@ -1075,7 +1093,7 @@ function cloneEnvironment(environment: MapEnvironment): MapEnvironment {
 
 function cloneModelSettings(settings: Record<string, ModelSettings> | undefined): Record<string, ModelSettings> | undefined {
   if (!settings) return undefined;
-  return Object.fromEntries(Object.entries(settings).map(([id, value]) => [id, { ...value, wind: value.wind ? { ...value.wind } : undefined, style: value.style ? { ...value.style } : undefined }]));
+  return Object.fromEntries(Object.entries(settings).map(([id, value]) => [id, { ...value, wind: value.wind ? { ...value.wind } : undefined, style: value.style ? { ...value.style } : undefined, actor: value.actor ? { ...value.actor } : undefined }]));
 }
 
 const WIND_RESPONSE_LIMITS = { sway: 3, branches: 3, leaves: 3, stiffness: 5 } as const;
@@ -1112,6 +1130,19 @@ function validateLook(environment: Record<string, unknown>): string[] {
   return errors;
 }
 
+export const ACTOR_LIMITS: Record<keyof ModelActorSettings, [number, number]> = {
+  walkSpeed: [0, 20], runSpeed: [0, 40], flightSpeed: [0.1, 60], flightHeight: [0, 40], turnSpeed: [0.1, 40], crossfade: [0, 2], groundOffset: [-5, 5], forwardYaw: [-180, 180],
+};
+
+export function validateActorSettings(path: string, actor: unknown): string[] {
+  if (!isRecord(actor)) return [`${path} must be an object.`];
+  const errors: string[] = [];
+  for (const [key, [min, max]] of Object.entries(ACTOR_LIMITS)) {
+    if (actor[key] !== undefined && !isFiniteInRange(actor[key], min, max)) errors.push(`${path}.${key} must be between ${min} and ${max}.`);
+  }
+  return errors;
+}
+
 function validateModelStyle(id: string, style: unknown): string[] {
   if (!isRecord(style)) return [`modelSettings.${id}.style must be an object.`];
   const errors: string[] = [];
@@ -1133,6 +1164,7 @@ function validateModelSettings(settings: unknown): string[] {
       continue;
     }
     if (value.style !== undefined) errors.push(...validateModelStyle(id, value.style));
+    if (value.actor !== undefined) errors.push(...validateActorSettings(`modelSettings.${id}.actor`, value.actor));
     if (value.wind === undefined) continue;
     if (!isRecord(value.wind)) {
       errors.push(`modelSettings.${id}.wind must be an object.`);

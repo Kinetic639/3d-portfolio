@@ -219,6 +219,7 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
 
         <HoverLabel />
         <MinigameHud />
+        <ActorHud />
         <PerfHud active={phase === "world"} />
 
         {openItem ? (
@@ -245,6 +246,46 @@ function HoverLabel() {
   const action = useWorldBridge((state) => state.hovered?.action ?? null);
   if (!label) return null;
   return <p className={styles.hover} aria-hidden="true">{label} <span>{action === "play" ? "Click to play" : "Click to open"}</span></p>;
+}
+
+const ACTOR_STATES: Record<string, string> = {
+  idle: "waiting", walking: "walking", running: "running", "taking-off": "taking off", flying: "flying", landing: "landing", preview: "showing a move",
+};
+const MOVEMENTS = [["auto", "Auto"], ["walk", "Walk"], ["run", "Run"], ["flight", "Fly"]] as const;
+
+/**
+ * The chosen creature: what it is doing, how a click on the ground sends it
+ * (the style lab's movement mode, plus Auto), whether the camera follows it,
+ * and the way to let it go (the button or Escape).
+ */
+function ActorHud() {
+  useUiWork();
+  const actor = useWorldBridge((state) => state.actor);
+  const chosen = actor !== null;
+  useEffect(() => {
+    if (!chosen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") worldBridge.commands.emit({ type: "release-actor" });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [chosen]);
+  if (!actor) return null;
+  return (
+    <section className={styles.minigame} aria-label={`${actor.name}`}>
+      <header>
+        <strong>{actor.name}</strong>
+        <button type="button" onClick={() => worldBridge.commands.emit({ type: "release-actor" })}>Let go <kbd>Esc</kbd></button>
+      </header>
+      <p role="status" aria-live="polite">{ACTOR_STATES[actor.state] ?? actor.state}. Click the ground to send it there.</p>
+      <div className={styles.actorModes} role="group" aria-label="How it moves">
+        {MOVEMENTS.map(([movement, label]) => (
+          <button key={movement} type="button" aria-pressed={actor.movement === movement} onClick={() => worldBridge.commands.emit({ type: "set-actor-movement", movement })}>{label}</button>
+        ))}
+        <button type="button" aria-pressed={actor.following} disabled={actor.following} onClick={() => worldBridge.commands.emit({ type: "follow-actor" })}>{actor.following ? "Following" : "Follow"}</button>
+      </div>
+    </section>
+  );
 }
 
 /**

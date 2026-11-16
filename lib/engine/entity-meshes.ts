@@ -6,6 +6,7 @@ import { POP_COMPLETE, POP_DROP, POP_SECONDS, POP_TILT_X, POP_TILT_Z, popDelay, 
 import type { LoadedModel, ModelLibrary } from "./model-library";
 import { createDepthMaterial, createOutlineMaterial, createToonMaterial, type ModelStyle, type SurfaceStyle } from "./surface-style";
 import { windVertexChunk, type WindResponseUniforms, type WindUniforms } from "./wind";
+import { Actor, type ActorConfig } from "./actor";
 
 /**
  * Everything placed on a map, as renderable objects.
@@ -33,8 +34,14 @@ export type EntityLayer = {
   bounds: ReadonlyMap<string, THREE.Box3>;
   /** Fades exactly the given entities. Returns true when anything changed. */
   setFaded: (entityIds: ReadonlySet<string>) => boolean;
-  /** Advances animations. Returns true when something is animating and frames must keep coming. */
-  update: (deltaSeconds: number) => boolean;
+  /**
+   * Advances animations and creatures. With a frustum, skeletons out of view
+   * are not animated and do not ask for frames. Returns true when frames
+   * must keep coming (something animates in view, or a creature travels).
+   */
+  update: (deltaSeconds: number, frustum?: THREE.Frustum) => boolean;
+  /** Creatures that can be sent places, one per placed instance of a model with `actor` settings. */
+  actors: ReadonlyArray<PlacedActor>;
   /** Seconds since objects started popping up: negative hides them all, POP_COMPLETE shows them at rest. */
   setPopTime: (seconds: number) => void;
   /** Seconds from the first pop to the last object at rest. */
@@ -67,6 +74,22 @@ export type EntityStyleOptions = {
   contactOpacity: { value: number };
 };
 
+export type PlacedActor = {
+  entityId: string;
+  modelId: string;
+  name: string;
+  actor: Actor;
+  /** A sphere around it where it is now, for picking and culling. */
+  bounds: () => THREE.Sphere;
+};
+
+export type EntityActorOptions = {
+  /** The motion of a model's creatures, or null when the model is not one. */
+  forModel: (modelId: string) => ActorConfig | null;
+  /** Height of the ground at a point (the world query). */
+  groundAt: (x: number, z: number) => number;
+};
+
 export type EntityWindOptions = {
   global: WindUniforms;
   /** The binding for a model, or null when it does not react to wind. */
@@ -94,6 +117,7 @@ export type EntityLayerOptions = {
   popRadius?: number;
   wind?: EntityWindOptions;
   style?: EntityStyleOptions;
+  actors?: EntityActorOptions;
 };
 
 /** The original's: half the diagonal of its 64 x 64 map. */
@@ -277,9 +301,12 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
   const batches = new Map<string, Batch>();
   const disposables: Array<{ dispose: () => void }> = [];
   const bounds = new Map<string, THREE.Box3>();
-  const mixers: THREE.AnimationMixer[] = [];
-  /** Animated models are separate objects; their pop is applied to their matrix. */
-  const animated: Array<{ holder: THREE.Group; rest: THREE.Matrix4; pivot: THREE.Vector3; delay: number }> = [];
+  /** Animated models are separate objects; their pop is applied to their matrix. Creatures compute their own rest pose. */
+  const animated: Array<{
+    holder: THREE.Group; rest: THREE.Matrix4; pivot: THREE.Vector3; delay: number;
+    mixer: THREE.AnimationMixer | null; actor: Actor | null; sphere: THREE.Sphere; pose: (() => THREE.Matrix4) | null;
+  }> = [];
+  const actors: PlacedActor[] = [];
   const partBox = new THREE.Box3();
 
   const grow = (entityId: string, box: THREE.Box3) => {
@@ -362,7 +389,7 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
     holder.matrixAutoUpdate = false;
     holder.matrix.multiplyMatrices(composeMatrix(entity.transform, scale), model.normalise);
     const { x, y, z } = entity.transform.position;
-    animated.push({ holder, rest: holder.matrix.clone(), pivot: new THREE.Vector3(x, y, z), delay: delayOf(entity) });
+    animated.push({ holder, rest: holder.matrix.clone(), pivot: new THREE.Vector3(x, y, z), delay: delayOf(entity), mixer: null, actor: null, sphere: new THREE.Sphere(), pose: null });
     instance.traverse((object) => {
       // Skinned meshes move outside their rest bounds; culling them by those bounds makes them vanish.
       object.frustumCulled = false;
@@ -372,12 +399,36 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
     const binding = options.style?.forModel(model.entry.id) ?? null;
     if (binding && options.style) styleAnimatedModel(instance, binding, options.style.surface, disposables);
     if (binding?.style.contactShadow) addContactPatch(entity, model, scale);
-    const mixer = new THREE.AnimationMixer(instance);
-    mixer.clipAction(model.clip!).play();
-    // Pose the first frame now, so the model is not in its bind pose until the first update.
-    mixer.update(0);
-    mixers.push(mixer);
+    const radius = model.size.length() * 0.5 * Math.max(entity.transform.scale.x, entity.transform.scale.y, entity.transform.scale.z) * scale;
+    const sphere = new THREE.Sphere(new THREE.Vector3(x, y + model.size.y * 0.5 * entity.transform.scale.y * scale, z), radius);
+    const actorConfig = options.actors?.forModel(model.entry.id) ?? null;
     group.add(holder);
+    if (actorConfig) {
+      const actor = new Actor(instance, model.clips, actorConfig, { position: new THREE.Vector3(x, y, z), yaw: entity.transform.rotation.y });
+      const s = entity.transform.scale;
+      const poseMatrix = new THREE.Matrix4();
+      const pose = () => poseMatrix.compose(
+        actor.position,
+        scratchQuaternion.setFromEuler(scratchEuler.set(0, actor.yaw, 0)),
+        scratchScale.set(s.x * scale, s.y * scale, s.z * scale),
+      ).multiply(model.normalise);
+      animated[animated.length - 1].actor = actor;
+      animated[animated.length - 1].pose = pose;
+      actors.push({
+        entityId: entity.id,
+        modelId: model.entry.id,
+        name: entity.name,
+        actor,
+        bounds: () => sphere.set(sphere.center.set(actor.position.x, actor.position.y + model.size.y * 0.5 * s.y * scale, actor.position.z), radius),
+      });
+    } else {
+      const mixer = new THREE.AnimationMixer(instance);
+      mixer.clipAction(model.clip!).play();
+      // Pose the first frame now, so the model is not in its bind pose until the first update.
+      mixer.update(0);
+      animated[animated.length - 1].mixer = mixer;
+    }
+    animated[animated.length - 1].sphere = sphere;
 
     const anchorBottom = model.entry.anchor === "bottom";
     partBox.set(
@@ -512,10 +563,29 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
       faded = new Set(next);
       return changed;
     },
-    update(deltaSeconds) {
-      for (const mixer of mixers) mixer.update(deltaSeconds);
-      return mixers.length > 0;
+    update(deltaSeconds, frustum) {
+      let frames = false;
+      const settled = popTime.value >= POP_COMPLETE;
+      for (const item of animated) {
+        if (item.actor) {
+          const placed = actors.find((candidate) => candidate.actor === item.actor)!;
+          const inView = !frustum || frustum.intersectsSphere(placed.bounds());
+          item.actor.update(deltaSeconds, options.actors!.groundAt, inView);
+          // Once everything has popped up, the creature's own position and heading place it.
+          if (settled && item.pose) {
+            item.holder.matrix.copy(item.pose());
+            item.holder.matrixWorldNeedsUpdate = true;
+          }
+          if (inView || item.actor.busy) frames = true;
+        } else if (item.mixer) {
+          if (frustum && !frustum.intersectsSphere(item.sphere)) continue;
+          item.mixer.update(deltaSeconds);
+          frames = true;
+        }
+      }
+      return frames;
     },
+    actors,
     popDuration,
     setPopTime(seconds) {
       popTime.value = seconds;
@@ -532,8 +602,10 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
       }
     },
     dispose() {
-      mixers.forEach((mixer) => mixer.stopAllAction());
-      mixers.length = 0;
+      for (const item of animated) {
+        item.mixer?.stopAllAction();
+        item.actor?.dispose();
+      }
       disposables.forEach((item) => item.dispose());
       group.clear();
     },

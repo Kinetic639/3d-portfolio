@@ -447,3 +447,16 @@
     animation: none;
   }
 }
+
+/* The chosen creature's movement modes, under its HUD title. */
+.actorModes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.actorModes button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}

@@ -4,6 +4,7 @@ import type { MapWind, ModelWindSettings } from "@/lib/maps/map-definition";
 import { matchWindPreset, resolveWind, WIND_PRESET_LABELS, WIND_PRESETS, type WindPreset, type WindResponse } from "@/lib/engine/wind";
 import type { WindDebugView } from "@/lib/editor/wind-debug";
 import type { ModelStyle } from "@/lib/engine/surface-style";
+import type { ActorConfig } from "@/lib/engine/actor";
 
 /**
  * The style lab's environment and tree controls, in the editor:
@@ -35,6 +36,9 @@ export type SelectedModelInfo = {
   style: ModelStyle;
   styleOverridden: boolean;
   hasOutlineData: boolean;
+  /** Motion in this map when the model is a creature, else null. */
+  actor: ActorConfig | null;
+  actorOverridden: boolean;
 };
 
 export type GroupHandler = (label: string | null) => void;

@@ -7,6 +7,8 @@ import { POP_COMPLETE } from "@/lib/engine/entry-sequence";
 import { Environment } from "@/lib/engine/environment";
 import { ModelWindRegistry } from "@/lib/engine/model-wind";
 import { ModelStyleRegistry } from "@/lib/engine/model-style";
+import { resolveActor } from "@/lib/engine/actor";
+import type { EntityLayerOptions } from "@/lib/engine/entity-meshes";
 import { createWindDebugMaterial, type WindDebugView } from "./wind-debug";
 import { scatterPlacements, type ScatterSettings } from "./scatter";
 import { getTerrainSurfaceAtWorldPosition } from "@/lib/world/surface-query";
@@ -277,7 +279,7 @@ export class EditorViewport {
     this.windModels = new ModelWindRegistry(models, this.environment.wind, session.getMeta().modelSettings);
     this.modelStyles = new ModelStyleRegistry(models, session.getMeta().modelSettings, session.getMeta().environment.style);
     this.applyShadowAvailability();
-    this.entities = buildEntityLayer(session.getEntities(), models, { wind: this.windModels.options(), style: this.modelStyles.options() });
+    this.entities = buildEntityLayer(session.getEntities(), models, this.layerOptions());
     this.scene.add(terrain.group, this.entities.group, this.helpers, this.overlays);
 
     // Surface plates: depth test off, so a plate is never hidden by the block it sits on.
@@ -595,7 +597,7 @@ export class EditorViewport {
       this.entitiesDirty = false;
       this.scene.remove(this.entities.group);
       this.entities.dispose();
-      this.entities = buildEntityLayer(this.session.getEntities(), this.models, { wind: this.windModels.options(), style: this.modelStyles.options() });
+      this.entities = buildEntityLayer(this.session.getEntities(), this.models, this.layerOptions());
       this.entities.group.visible = !this.view.hidden.has("entities");
       this.scene.add(this.entities.group);
       this.applyDebugView();
@@ -612,13 +614,12 @@ export class EditorViewport {
     }
 
     const moving = this.rig.update(delta);
-    let animating = this.entities.update(delta);
-    if (this.environment.wind.active && this.entities.group.visible) {
-      this.camera.updateMatrixWorld();
-      this.viewProjection.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
-      this.frustum.setFromProjectionMatrix(this.viewProjection);
-      if (this.entities.windInView(this.frustum)) animating = true;
-    }
+    this.camera.updateMatrixWorld();
+    this.viewProjection.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.viewProjection);
+    // Animated models out of view are not animated and do not ask for frames.
+    let animating = this.entities.update(delta, this.frustum);
+    if (this.environment.wind.active && this.entities.group.visible && this.entities.windInView(this.frustum)) animating = true;
     this.environment.update(this.lastTickAt / 1000, delta);
     if (this.renderer.shadowMap.enabled) {
       const view = this.rig.getView();
@@ -703,6 +704,35 @@ export class EditorViewport {
     };
   }
 
+  /** Options shared by every entity layer the editor builds. */
+  private layerOptions(): EntityLayerOptions {
+    const world = this.session.world;
+    return {
+      wind: this.windModels.options(),
+      style: this.modelStyles.options(),
+      actors: {
+        forModel: (modelId) => {
+          const entry = this.models.entry(modelId);
+          return entry?.actor ? resolveActor(entry.actor, this.session.getMeta().modelSettings?.[modelId]?.actor) : null;
+        },
+        groundAt: (x, z) => {
+          const surface = getTerrainSurfaceAtWorldPosition(world, { x, z });
+          return surface.valid ? surface.worldPosition.y : 0;
+        },
+      },
+    };
+  }
+
+  /** The style lab's clip list: plays a clip on every instance of a creature model; null goes back to idle. */
+  previewActorClip(modelId: string, clip: string | null) {
+    for (const placed of this.entities.actors) {
+      if (placed.modelId !== modelId) continue;
+      if (clip) placed.actor.preview(clip);
+      else placed.actor.rest();
+    }
+    this.invalidate();
+  }
+
   /** Shows every instance of a model in a debug view; "normal" (or no model) restores its material. */
   setModelDebugView(modelId: string | null, view: WindDebugView) {
     this.debugView = modelId && view !== "normal" ? { modelId, view } : null;
@@ -741,6 +771,11 @@ export class EditorViewport {
     // Surface values are uniforms; a model's shading, outline, patch or shadow casting are batches.
     this.modelStyles?.applySurface(meta.environment.style);
     if (this.modelStyles?.update(meta.modelSettings)) this.entitiesDirty = true;
+    // Creature motion is read every frame: new values apply at once.
+    for (const placed of this.entities?.actors ?? []) {
+      const entry = this.models.entry(placed.modelId);
+      if (entry?.actor) placed.actor.setConfig(resolveActor(entry.actor, meta.modelSettings?.[placed.modelId]?.actor));
+    }
     this.applyShadowAvailability();
     this.environment.background.set(this.view?.background ?? "#edf1ed");
     for (const zone of meta.zones) {

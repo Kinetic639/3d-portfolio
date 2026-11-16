@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { trackErrors } from "./helpers";
+import { enterButton, openLanding, trackErrors, waitForPhase } from "./helpers";
 
 /**
  * The editor exists only in development, so these tests are skipped against a
@@ -543,5 +543,60 @@ test("scatter: one click places many of the chosen object on the ground, as one 
   expect((await pines()).length).toBe(placed.length);
   await scatter.getByRole("button", { name: /Clear all Pine Tree/ }).click();
   expect(await pines()).toHaveLength(0);
+  expect(errors).toEqual([]);
+});
+
+test("creatures: the crow's motion and clips in the editor; in the world, choose it and send it", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openEditor(page);
+  await workspace(page, "Objects");
+  await leftDock(page).getByRole("combobox", { name: "Category" }).selectOption("creatures");
+  await leftDock(page).getByRole("option", { name: /Crow/ }).click();
+  const spot = await columnTop(page, 30, 30);
+  await page.mouse.click(spot.x, spot.y);
+  const crow = (await entities(page)).find((entity) => (entity as { assetReference?: string }).assetReference === "crow")!;
+  await page.evaluate((id) => window.__editor!.store.setState({ selection: [id] }), crow.id);
+  const panel = page.locator("details[aria-label='Actor']");
+  await panel.getByRole("combobox", { name: "Preview clip" }).selectOption("ANIM_Crow_Run");
+  const actorState = () => page.evaluate(() => (window.__editor!.viewport as unknown as { entities: { actors: Array<{ actor: { status: { state: string; animation: string } } }> } }).entities.actors[0].actor.status);
+  await expect.poll(actorState).toMatchObject({ state: "preview", animation: "ANIM_Crow_Run" });
+  await panel.getByRole("slider", { name: "Walk speed" }).fill("1.5");
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().modelSettings)).toEqual({ crow: { actor: { walkSpeed: 1.5 } } });
+  await page.keyboard.press("Control+s");
+  await expect(statusBar(page)).not.toContainText("unsaved");
+
+  // Not openWorld: a creature in view animates, so the world never stops drawing (by design).
+  await openLanding(page, `/map/${SCRATCH}`);
+  await enterButton(page).click();
+  await waitForPhase(page, "world");
+  type WorldProbe = { entities: { actors: Array<{ actor: { status: { state: string }; position: { x: number; y: number; z: number; clone: () => { project: (camera: unknown) => { x: number; y: number } } } }; bounds: () => { center: { clone: () => { project: (camera: unknown) => { x: number; y: number } } } } }> }; rig: { camera: unknown; lookAt: (x: number, z: number, d: number, i: boolean) => void; configure: (o: object) => void }; invalidate: () => void };
+  await page.evaluate(() => {
+    const engine = window.__worldEngine as unknown as WorldProbe;
+    const at = engine.entities.actors[0].actor.position;
+    engine.rig.configure({ minDistance: 6 });
+    engine.rig.lookAt(at.x, at.z, 12, true);
+    engine.invalidate();
+  });
+  await page.waitForTimeout(500);
+  const toScreen = (kind: "crow" | "ground") => page.evaluate((which) => {
+    const engine = window.__worldEngine as unknown as WorldProbe;
+    const placed = engine.entities.actors[0];
+    const point = which === "crow" ? placed.bounds().center.clone() : placed.actor.position.clone();
+    const ndc = which === "crow" ? point.project(engine.rig.camera) : (() => { const p = placed.actor.position.clone() as unknown as { x: number; add: (v: object) => { project: (c: unknown) => { x: number; y: number } } }; return p.add({ x: 4, y: 0, z: 0 }).project(engine.rig.camera); })();
+    const rect = document.querySelector("canvas")!.getBoundingClientRect();
+    return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
+  }, kind);
+  const crowAt = await toScreen("crow");
+  await page.mouse.click(crowAt.x, crowAt.y);
+  const hud = page.getByRole("region", { name: "Crow" });
+  await expect(hud).toBeVisible();
+  await hud.getByRole("button", { name: "Walk" }).click();
+  const ground = await toScreen("ground");
+  await page.mouse.click(ground.x, ground.y);
+  const state = () => page.evaluate(() => (window.__worldEngine as unknown as WorldProbe).entities.actors[0].actor.status.state);
+  await expect.poll(state).toBe("walking");
+  await expect.poll(state, { timeout: 10_000 }).toBe("idle");
+  await page.keyboard.press("Escape");
+  await expect(hud).toHaveCount(0);
   expect(errors).toEqual([]);
 });

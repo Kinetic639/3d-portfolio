@@ -261,6 +261,15 @@ Ported from the style-lab branch (`stylized-rock-material.ts` and the lab's Ligh
 - **Measured** (production, 45 pines and 15 rocks in view while panning): frame p95 16.7 ms in both looks; engine CPU 1.4-1.5 ms per frame with toon and outlines, 1.7-2.0 ms with shadows and wind; 64 / 76 draw calls.
 - Perf test: on-demand scenarios run with the wind held still; a wind scenario records `wind.*` when something sways at the arrival view.
 
+### Creatures (the style lab's crow)
+
+`lib/engine/actor.ts` is the lab's crow controller without React or its own materials (toon and outline come from the entity layer): idle, walking, running, taking off, a quadratic flight arc at `flightHeight`, landing (take-off reversed when there is no landing clip) and clip preview, with crossfades and eased turning. Clips are matched by name; long ambient loops are passed over. Root motion is removed by the model pipeline, not at load.
+
+- **Placement**: the entity layer gives every placed instance of a model with `actor` settings an `Actor`, which owns a position and a heading; the layer turns them into the model's matrix after the pop-up.
+- **World**: a click on a creature chooses it (`bridge.actor`, a HUD with its state and the movement modes Auto, Walk, Run, Fly), a click on the ground sends it (the ground height comes from the world query, voxels or bake), Esc or the button lets it go. The camera follows it until the visitor pans (`CameraRig.onUserPan`).
+- **Frames**: skeletons out of view are not animated and do not ask for frames; a travelling creature keeps frames coming. This also fixes every animated model drawing frames while off screen.
+- **Settings**: asset.json `actor` defaults, map `modelSettings[id].actor` overrides, applied live in the editor.
+
 ## Editor
 
 The editor is at `/editor` (`/editor?map=<id>`) and exists only in development.
@@ -523,3 +532,8 @@ The first bake smoothed the terrain (density, blur, Surface Nets, simplification
 ### Style-lab port, point 4: scatter
 
 - The Scene Lab's "Multiple" placement as a mode of the Place tool (`lib/editor/scatter.ts`): count, radius, minimum spacing, seed (same seed, same scatter), random rotation and scale range, ground only, one undo step; a ring previews the area; Clear all removes every instance of the chosen object. The lab's individual-versus-instanced choice does not apply: the engine always instances models.
+
+### Style-lab port, point 5: the crow as a creature
+
+- The lab's crow controller on the engine (`Actor`), chosen and sent in the world with a following camera, its motion and clip preview in the editor. Animated models animate only in view.
+- Editor shortcuts (Ctrl+S, Ctrl+Z) work after using a slider: both copies of the "is the visitor typing" check now leave sliders and checkboxes out.

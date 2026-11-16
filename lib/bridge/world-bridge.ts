@@ -47,6 +47,17 @@ export type HoveredInteractable = {
   action: "open" | "play";
 };
 
+/** The creature the visitor has chosen, if any (see actor.ts). */
+export type ActorHud = {
+  entityId: string;
+  name: string;
+  state: "idle" | "walking" | "running" | "taking-off" | "flying" | "landing" | "preview";
+  /** How a click on the ground sends it: "auto" picks walk, run or flight by distance and height. */
+  movement: "auto" | "walk" | "run" | "flight";
+  /** The camera keeps it in view; moving the view by hand stops that. */
+  following: boolean;
+};
+
 export type MinigameHud = {
   gameId: string;
   zoneId: string;
@@ -63,6 +74,7 @@ export type WorldBridgeState = {
   quality: QualityTier;
   hovered: HoveredInteractable | null;
   minigame: MinigameHud | null;
+  actor: ActorHud | null;
   error: string | null;
 };
 
@@ -72,7 +84,10 @@ export type WorldCommand =
   | { type: "focus-content"; content: MapContentReference; inset?: { right?: number; bottom?: number } }
   | { type: "clear-focus" }
   | { type: "set-quality"; quality: QualityTier }
-  | { type: "leave-minigame" };
+  | { type: "leave-minigame" }
+  | { type: "release-actor" }
+  | { type: "follow-actor" }
+  | { type: "set-actor-movement"; movement: ActorHud["movement"] };
 
 export type WorldEvent =
   | { type: "content-activated"; content: MapContentReference; interactableId: string }
@@ -122,6 +137,7 @@ const INITIAL_STATE: WorldBridgeState = {
   quality: "high",
   hovered: null,
   minigame: null,
+  actor: null,
   error: null,
 };
 

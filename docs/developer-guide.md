@@ -190,6 +190,20 @@ Wind costs almost no CPU (the motion is in the vertex shader), but it needs cont
 
 Shadows are off by default (a map turns them on), follow the view, and are off for visitors on the lowest quality; the contact patch is the cheap stand-in. With 60 trees and rocks in view (RTX 2060), shadows cost about 0.3-0.5 ms of CPU per frame; the frame stays at 16.7 ms.
 
+## Add a creature (a model you can send places)
+
+1. The model needs clips whose names say what they are: `idle`, `walk`, `run`, `takeoff`, `fly` (and optionally `land`; without it, landing plays take-off backwards). Keep only those with `animations`, remove root motion with `rootMotionNode`, and use category `creatures`.
+2. Give it motion in `asset.json` (the crow's, from the style lab):
+
+   ```json
+   "actor": { "walkSpeed": 0.75, "runSpeed": 1.65, "flightSpeed": 2.8, "flightHeight": 3, "turnSpeed": 7, "crossfade": 0.2, "groundOffset": 0, "forwardYaw": 0 }
+   ```
+
+3. In the editor, select an instance: **Actor · all <model>** changes the motion for this map and previews any clip on every instance.
+4. In the world, a visitor clicks it to choose it (the camera follows), clicks the ground to send it, picks **Auto** (walk close, run further, fly far or up a step), **Walk**, **Run** or **Fly**, and lets it go with the button or Esc. Moving the view by hand stops following; **Follow** resumes.
+
+Animated models animate, and ask for frames, only while they are in view (or travelling).
+
 ## Add an engine system (wind, weather, time of day)
 
 1. Put shared values in `Environment.uniforms` (`lib/engine/environment.ts`) and update them in `Environment.update` or a setter.

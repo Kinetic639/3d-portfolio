@@ -83,9 +83,10 @@ import { BLOCK_IDS, RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type Block
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
 import { getShapeDefinition, getShapePitch, getShapeStateValue, setShapePitch, TERRAIN_PALETTE_SHAPE_DEFINITIONS, type ShapeCategory } from "@/lib/voxel-shapes/shape-registry";
 import { SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
-import type { MapEnvironment, MapLighting, MapShadows, MapSurfaceStyle, MapWind, ModelStyleSettings, ModelWindSettings } from "@/lib/maps/map-definition";
+import type { MapEnvironment, MapLighting, MapShadows, MapSurfaceStyle, MapWind, ModelActorSettings, ModelStyleSettings, ModelWindSettings } from "@/lib/maps/map-definition";
 import { EdgesSection, LightingSection, ModelStyleSection, SurfaceSection } from "./StylePanels";
 import { ScatterSection } from "./ScatterSection";
+import { ActorSection } from "./ActorSection";
 import type { ScatterSettings } from "@/lib/editor/scatter";
 import type { WindDebugView } from "@/lib/editor/wind-debug";
 import { ModelSection, WindSection, type SelectedModelInfo } from "./WindPanels";
@@ -147,6 +148,9 @@ export type EditorInspectorState = {
   /** Changes this map's settings for the selected model; null resets them to the model's defaults. */
   onModelWindChange: (patch: ModelWindSettings | null) => void;
   onModelStyleChange: (patch: ModelStyleSettings | null) => void;
+  onModelActorChange: (patch: ModelActorSettings | null) => void;
+  /** Plays a clip on every instance of the selected creature model; null back to idle. */
+  onPreviewClip: (clip: string | null) => void;
   onLightingChange: (patch: Partial<MapLighting>) => void;
   onShadowsChange: (patch: Partial<MapShadows>) => void;
   onSurfaceStyleChange: (patch: Partial<MapSurfaceStyle>) => void;
@@ -1458,6 +1462,9 @@ function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspa
         </Section>
         {props.selectedModel ? (
           <>
+            {props.selectedModel.actor ? (
+              <ActorSection name={props.selectedModel.name} actor={props.selectedModel.actor} overridden={props.selectedModel.actorOverridden} clips={props.selectedModel.animations} onChange={props.onModelActorChange} onPreview={props.onPreviewClip} onGroup={props.onEditGroup} />
+            ) : null}
             <ModelStyleSection name={props.selectedModel.name} style={props.selectedModel.style} overridden={props.selectedModel.styleOverridden} hasOutlineData={props.selectedModel.hasOutlineData} onChange={props.onModelStyleChange} onGroup={props.onEditGroup} />
             <ModelSection model={props.selectedModel} debugView={props.modelDebugView} onWindChange={props.onModelWindChange} onDebugViewChange={props.onModelDebugViewChange} onGroup={props.onEditGroup} />
           </>
@@ -2008,8 +2015,9 @@ function getViewport() {
   return { width: window.innerWidth, height: window.innerHeight };
 }
 
+/** Sliders and checkboxes take no typing, so the editor's shortcuts (Ctrl+S after a drag) still apply to them. */
 function isTypingTarget(target: EventTarget | null) {
-  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+  return target instanceof HTMLElement && Boolean(target.closest("input:not([type='range']):not([type='checkbox']), textarea, select, [contenteditable='true']"));
 }
 
 function formatCoordinate(coordinate: GridCoordinate | null) {

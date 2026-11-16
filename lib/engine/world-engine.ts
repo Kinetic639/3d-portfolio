@@ -22,6 +22,9 @@ import { createVoxelWorldQuery, type WorldQuery } from "./world-query";
 import { FrameRecorder } from "@/lib/perf/frame-recorder";
 import { ModelWindRegistry } from "./model-wind";
 import { ModelStyleRegistry } from "./model-style";
+import { resolveActor, type ActorMovement } from "./actor";
+import type { PlacedActor } from "./entity-meshes";
+import type { ActorHud } from "@/lib/bridge/world-bridge";
 
 /**
  * The 3D runtime. Plain TypeScript on three.js: no React anywhere in this
@@ -115,6 +118,13 @@ export class WorldEngine {
   private readonly frustum = new THREE.Frustum();
   private readonly viewProjection = new THREE.Matrix4();
   private modelStyles: ModelStyleRegistry | null = null;
+  /** The creature the visitor chose: clicks on the ground send it there. */
+  private chosenActor: PlacedActor | null = null;
+  /** Ground of the loaded map, for sending creatures. */
+  private query: WorldQuery | null = null;
+  private actorMovement: ActorHud["movement"] = "auto";
+  private followingActor = false;
+  private readonly actorTarget = new THREE.Vector3();
   private readonly shadowFocus = new THREE.Vector3();
   warmUpReport: WarmUpReport | null = null;
   private readonly canvas: HTMLCanvasElement;
@@ -185,6 +195,7 @@ export class WorldEngine {
       ...VISITOR_CAMERA,
       onChange: () => this.invalidate(),
       onTap: (clientX, clientY) => this.handleTap(clientX, clientY),
+      onUserPan: () => this.stopFollowing(),
     });
     this.rig.setEnabled(false);
     bridge.diagnostics.engine = { frames: this.frames, stats: this.stats };
@@ -314,6 +325,7 @@ export class WorldEngine {
     minigameVoxels: Omit<MinigameHostOptions, "map"> | null,
   ) {
     this.terrain = terrain;
+    this.query = query;
     if (minigameVoxels && MinigameHost.playableZones(definition).length > 0) {
       this.minigames = new MinigameHost({ map: definition, ...minigameVoxels });
       this.scene.add(this.minigames.group);
@@ -324,7 +336,14 @@ export class WorldEngine {
     const wind = new ModelWindRegistry(models, this.environment.wind, definition.modelSettings);
     this.modelStyles = new ModelStyleRegistry(models, definition.modelSettings, definition.environment.style);
     this.syncOutlineScale();
-    this.entities = buildEntityLayer(definition.entities, models, { wind: wind.options(), style: this.modelStyles.options() });
+    const actors = {
+      forModel: (modelId: string) => {
+        const entry = models.entry(modelId);
+        return entry?.actor ? resolveActor(entry.actor, definition.modelSettings?.[modelId]?.actor) : null;
+      },
+      groundAt: (x: number, z: number) => groundHeight(query, x, z),
+    };
+    this.entities = buildEntityLayer(definition.entities, models, { wind: wind.options(), style: this.modelStyles.options(), actors });
     this.interaction = new InteractionLayer({
       map: definition,
       query,
@@ -722,6 +741,10 @@ export class WorldEngine {
     }
     this.modelStyles?.dispose();
     this.modelStyles = null;
+    this.chosenActor = null;
+    this.followingActor = false;
+    this.query = null;
+    this.bridge.set({ actor: null });
     this.viewBeforeFocus = null;
     this.bridge.set({ hovered: null });
   }
@@ -745,6 +768,18 @@ export class WorldEngine {
         break;
       case "leave-minigame":
         this.leaveMinigame();
+        break;
+      case "release-actor":
+        this.chooseActor(null);
+        break;
+      case "follow-actor":
+        this.followingActor = this.chosenActor !== null;
+        this.publishActor();
+        this.invalidate();
+        break;
+      case "set-actor-movement":
+        this.actorMovement = command.movement;
+        this.publishActor();
         break;
       case "clear-focus":
         this.interaction?.setFocused(null);
@@ -864,6 +899,19 @@ export class WorldEngine {
       this.invalidate();
       return;
     }
+    const ray = this.rayAt(clientX, clientY);
+    const actor = this.actorOnRay(ray);
+    if (this.chosenActor) {
+      // The chosen creature: clicking it again lets it go; clicking the ground sends it there.
+      if (actor === this.chosenActor) this.chooseActor(null);
+      else if (actor) this.chooseActor(actor);
+      else this.sendActor(ray);
+      return;
+    }
+    if (actor) {
+      this.chooseActor(actor);
+      return;
+    }
     const item = this.pickAt(clientX, clientY);
     if (item?.minigame && item.zoneNumericId !== null) {
       this.startMinigame(item);
@@ -926,8 +974,20 @@ export class WorldEngine {
     // Animated models need a frame every frame for as long as the world is shown.
     const bursting = this.minigames?.update(delta) ?? false;
     // Wind needs frames only while it blows and something it moves is in view.
-    const windy = this.environment.wind.active && this.windInView();
-    const animating = (this.entities?.update(delta) ?? false) || waving || bursting || windy;
+    this.updateFrustum();
+    const windy = this.environment.wind.active && (this.entities?.windInView(this.frustum) ?? false);
+    const animating = (this.entities?.update(delta, this.frustum) ?? false) || waving || bursting || windy;
+    if (this.chosenActor) {
+      const status = this.chosenActor.actor.status;
+      if (this.followingActor) {
+        const at = this.chosenActor.actor.position;
+        if (this.actorTarget.distanceToSquared(at) > 1e-6) {
+          this.actorTarget.copy(at);
+          this.rig.lookAt(at.x, at.z);
+        }
+      }
+      if (status.state !== this.bridge.store.getState().actor?.state) this.publishActor();
+    }
     this.environment.update(this.elapsedSeconds, delta);
     if (this.renderer.shadowMap.enabled) {
       const view = this.rig.getView();
@@ -1017,13 +1077,80 @@ export class WorldEngine {
     return true;
   }
 
-  private windInView() {
-    if (!this.entities) return false;
+  private updateFrustum() {
     const camera = this.rig.camera;
     camera.updateMatrixWorld();
     this.viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.viewProjection);
+  }
+
+  /** For tests and the perf probe. */
+  windInView() {
+    if (!this.entities) return false;
+    this.updateFrustum();
     return this.entities.windInView(this.frustum);
+  }
+
+  /** The nearest creature whose bounds the ray passes through. */
+  private actorOnRay(ray: THREE.Ray) {
+    let best: PlacedActor | null = null;
+    let bestDistance = Infinity;
+    for (const placed of this.entities?.actors ?? []) {
+      const hit = ray.intersectSphere(placed.bounds(), this.actorTarget);
+      if (!hit) continue;
+      const distance = hit.distanceTo(ray.origin);
+      if (distance < bestDistance) {
+        best = placed;
+        bestDistance = distance;
+      }
+    }
+    if (best) this.actorTarget.copy(best.actor.position);
+    return best;
+  }
+
+  /** Chooses a creature (the camera follows it) or lets it go (null). */
+  private chooseActor(placed: PlacedActor | null) {
+    this.chosenActor = placed;
+    this.followingActor = placed !== null;
+    if (placed) this.actorTarget.set(Number.NaN, 0, 0);
+    this.interaction?.setHovered(null);
+    this.publishActor();
+    this.invalidate();
+  }
+
+  /** Sends the chosen creature to where the ray meets the ground. */
+  private sendActor(ray: THREE.Ray) {
+    const placed = this.chosenActor;
+    const hit = this.query?.raycast(ray.origin, ray.direction);
+    if (!placed || !hit) return;
+    const point = ray.at(hit.distance, new THREE.Vector3());
+    const destination = new THREE.Vector3(point.x, groundHeight(this.query!, point.x, point.z), point.z);
+    placed.actor.goTo(destination, this.movementTo(placed, destination));
+    this.followingActor = true;
+    this.publishActor();
+    this.invalidate();
+  }
+
+  /** "auto": walk close by, run further, fly far or up and down a step. */
+  private movementTo(placed: PlacedActor, destination: THREE.Vector3): ActorMovement {
+    if (this.actorMovement !== "auto") return this.actorMovement;
+    const from = placed.actor.position;
+    const distance = Math.hypot(destination.x - from.x, destination.z - from.z);
+    if (distance > 10 || Math.abs(destination.y - from.y) > 1.5) return "flight";
+    return distance > 4 ? "run" : "walk";
+  }
+
+  private stopFollowing() {
+    if (!this.followingActor) return;
+    this.followingActor = false;
+    this.publishActor();
+  }
+
+  private publishActor() {
+    const placed = this.chosenActor;
+    this.bridge.set({
+      actor: placed ? { entityId: placed.entityId, name: placed.name, state: placed.actor.status.state, movement: this.actorMovement, following: this.followingActor } : null,
+    });
   }
 
   private resize() {
@@ -1085,4 +1212,11 @@ function firstColumn(world: VoxelWorld, zoneId: number) {
   const { width } = world.config;
   const index = world.zones.indexOf(zoneId);
   return index < 0 ? null : { x: index % width, z: Math.floor(index / width) };
+}
+
+/** Ground height at a world position (the query works in grid columns). */
+function groundHeight(query: WorldQuery, x: number, z: number) {
+  const column = Math.min(query.width - 1, Math.max(0, Math.floor(x + query.width / 2)));
+  const row = Math.min(query.depth - 1, Math.max(0, Math.floor(z + query.depth / 2)));
+  return query.surfaceHeight(column, row);
 }
