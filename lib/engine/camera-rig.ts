@@ -96,8 +96,6 @@ export class CameraRig {
   private pinchDistance = 0;
   private readonly heldKeys = new Set<string>();
   private enabled = true;
-  /** A timed approach in progress, or null. While set, it drives the distance instead of the ease. */
-  private approach: { from: number; elapsed: number; duration: number } | null = null;
   private readonly abort = new AbortController();
 
   constructor(element: HTMLElement, options: CameraRigOptions) {
@@ -199,24 +197,6 @@ export class CameraRig {
     this.options.onChange();
   }
 
-  /**
-   * Cinematic approach: starts far away (possibly beyond the zoom limit) and
-   * glides to the current goal over roughly `seconds`. With `seconds` of 0 the
-   * camera is placed at the goal immediately.
-   */
-  playApproach(fromDistance: number, seconds: number) {
-    this.target.copy(this.goalTarget);
-    if (seconds <= 0) {
-      this.approach = null;
-      this.distance = this.goalDistance;
-    } else {
-      this.distance = fromDistance;
-      this.approach = { from: fromDistance, elapsed: 0, duration: seconds };
-    }
-    this.apply();
-    this.options.onChange();
-  }
-
   /** Camera pose for a given goal, without moving the rig. Used to rehearse views during warm-up. */
   poseAt(distance: number, into: THREE.PerspectiveCamera) {
     into.copy(this.camera);
@@ -270,19 +250,9 @@ export class CameraRig {
     this.target.lerp(this.goalTarget, ease);
     this.yaw += (this.goalYaw - this.yaw) * ease;
     this.pitch += (this.goalPitch - this.pitch) * ease;
-    if (this.approach) {
-      // Timed, so the transition lasts exactly as long as it was asked to.
-      this.approach.elapsed += deltaSeconds;
-      const t = Math.min(1, this.approach.elapsed / this.approach.duration);
-      const eased = 1 - Math.pow(1 - t, 3);
-      this.distance = this.approach.from + (this.goalDistance - this.approach.from) * eased;
-      if (t >= 1) this.approach = null;
-    } else {
-      this.distance += (this.goalDistance - this.distance) * ease;
-    }
+    this.distance += (this.goalDistance - this.distance) * ease;
 
     const settled =
-      this.approach === null &&
       this.heldKeys.size === 0 &&
       this.target.distanceToSquared(this.goalTarget) < 1e-6 &&
       Math.abs(this.goalDistance - this.distance) < 1e-3 &&

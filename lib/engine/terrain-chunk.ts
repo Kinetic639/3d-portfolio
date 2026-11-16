@@ -14,7 +14,34 @@ export type TerrainChunkBuffers = {
   tex: Uint8Array;
   reveal: Float32Array;
   indices: Uint16Array | Uint32Array;
+  /** What the entry needs to know about this chunk, worked out while packing so the main thread never scans vertices. */
+  summary: TerrainChunkSummary;
 };
+
+export type TerrainChunkSummary = {
+  /** Largest reveal delay in the chunk. */
+  revealEnd: number;
+  /** Loader platform vertices in the chunk: sums for the centre, highest y for the top. Null when there are none. */
+  platform: { sumX: number; sumZ: number; count: number; top: number } | null;
+};
+
+function summarise(positions: Float32Array, reveal: Float32Array): TerrainChunkSummary {
+  let revealEnd = 0;
+  let platform: TerrainChunkSummary["platform"] = null;
+  for (let vertex = 0; vertex < reveal.length / 4; vertex += 1) {
+    const delay = reveal[vertex * 4 + 3];
+    if (delay >= 0) {
+      if (delay > revealEnd) revealEnd = delay;
+      continue;
+    }
+    platform ??= { sumX: 0, sumZ: 0, count: 0, top: -Infinity };
+    platform.sumX += positions[vertex * 3];
+    platform.sumZ += positions[vertex * 3 + 2];
+    platform.count += 1;
+    platform.top = Math.max(platform.top, positions[vertex * 3 + 1]);
+  }
+  return { revealEnd, platform };
+}
 
 /** Packs a meshed chunk for the terrain material. Null when the chunk has no geometry. */
 export function packTerrainChunk(data: SurfaceChunkMeshData): TerrainChunkBuffers | null {
@@ -52,6 +79,7 @@ export function packTerrainChunk(data: SurfaceChunkMeshData): TerrainChunkBuffer
     tex,
     reveal,
     indices: vertexCount > 65535 ? data.indices : new Uint16Array(data.indices),
+    summary: summarise(data.positions, reveal),
   };
 }
 

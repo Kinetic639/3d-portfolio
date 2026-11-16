@@ -103,11 +103,11 @@ Sequence (`components/world/use-world-boot.ts`):
 5. Warm-up (below), then phase `ready`.
 6. Only now does the entry button exist. Before that there is a 3 px progress line.
 
-Entering and leaving are commands. The engine owns the phases: `entering` while the camera flies in (a timed 1.6 s ease-out from far inside the fog), `world` when it lands, `leaving` for 450 ms while the page fades the canvas out, then `ready` again with the engine still warm. With `prefers-reduced-motion` both are immediate. The page reacts through CSS keyed on `html[data-world]`: the landing page fades, becomes `inert` and stops scrolling; the world layer is `inert` and hidden from assistive technology while the landing page is in front. The click handler pushes the history entry first and starts the transition on the next frame, so the router's reaction to the new entry is over before anything moves.
+Entering and leaving are commands. The engine owns the phases: `entering` while the original entry plays (5.4 s, see Entry below), `world` when the camera arrives, `leaving` for 450 ms while the page fades the canvas out, then `ready` again with the engine still warm. With `prefers-reduced-motion` both are immediate. The page reacts through CSS keyed on `html[data-world]`: the landing page fades, becomes `inert` and stops scrolling; the world layer is `inert` and hidden from assistive technology while the landing page is in front. The click handler pushes the history entry first and starts the transition on the next frame, so the router's reaction to the new entry is over before anything moves.
 
 **History.** Entries created inside the world carry `{ world: true }` in `history.state`. Entering pushes one at the current URL, so Back returns to the page the visitor was reading and Forward re-enters. The state object must be a fresh object every time: the Next.js router adds its own fields to the object it is given and then treats an object that already has them as its own entry, skipping the pathname update.
 
-**Direct links.** An item's URL shows the landing page with that item. Entering from there sends `enter` with the item as focus, so the approach ends on the matching object with its panel open.
+**Direct links.** An item's URL shows the landing page with that item. Entering from there sends `enter` with the item as focus, so the entry ends by moving to the matching object with its panel open.
 
 **Without WebGL** the phase becomes `unavailable`: no button, no warning, the landing page is the site.
 
@@ -117,7 +117,7 @@ Entering and leaving are commands. The engine owns the phases: `entering` while 
 
 1. **Compile** every shader program in the scene (`compileAsync`).
 2. **Upload** every vertex buffer and texture by drawing each object once into a one-pixel scissor on the real canvas. Using the real framebuffer keeps the shader programs identical to those of real frames; the scissor removes the fill cost. Objects are drawn in batches sized so that a batch takes at most 6 ms, one batch per animation frame.
-3. **Rehearse** the entry: render the views the approach passes through (ten along the curve, three at the destination), twice, each followed by `gl.finish()` so the time includes GPU work. The first pass absorbs one-off costs. The second is measured: it passes when the slowest frame is within 10 ms and no program, geometry or texture was created during it. If it is too slow and a lower quality tier exists, the tier drops (fewer pixels) and the rehearsal repeats.
+3. **Rehearse** the entry: render twelve moments of it (camera, terrain wave and object pop as they will be) and the resting view twice, twice, each followed by `gl.finish()` so the time includes GPU work. The first pass absorbs one-off costs. The second is measured: it passes when the slowest frame is within 10 ms and no program, geometry or texture was created during it. If it is too slow and a lower quality tier exists, the tier drops (fewer pixels) and the rehearsal repeats.
 
 The result is kept as `engine.warmUpReport`. Measured on the reference machine: 630 ms in total, 9 upload frames, median rehearsal frame 1.7 ms, slowest 3.9 ms, 0 new resources.
 
@@ -138,9 +138,34 @@ What changed is how the data reaches the GPU:
 | Meshing | on the main thread, in React | in a worker at load; on the main thread only for edited chunks |
 | Chunk rebuild after an edit | 13–25 ms | 3–4 ms (the centre chunk about 10 ms) |
 
-The reveal uniforms (`uExpansionProgress`, `uTime`, `uLoaderMotion`) are on the terrain source; until the loader and its transition return they sit at "fully revealed".
+The reveal uniforms (`uExpansionProgress`, `uTime`, `uLoaderMotion`) are on the terrain source and drive the entry below.
 
 Measured after this change (production, default map): world ready 2.0 s after navigation start (3.9 s with 4× CPU throttling), total blocking time 26–33 ms, entry transition slowest frame 16.8 ms with no long task and no script fetched, JS heap 34 MB.
+
+## Entry: loader, wave and pop
+
+The way into the world is the original's, on the new engine (`lib/engine/entry-sequence.ts` holds the path and timings, `world-engine.ts` plays them).
+
+- **Loader.** On the landing page the engine draws only the loader: the platform at the centre of the map (the cells the mesher marks with a negative reveal delay) and the crystal over it (`loader-beacon.ts`), seen by the original's landing camera, so they sit at the bottom centre of the screen. The canvas is transparent everywhere else and lets clicks through; a round button over the platform is the way in ("Enter the world", for keyboard and screen readers too). While the world warms up the platform ripples; when it is ready the ripple settles and the crystal pops in.
+- **Focus** (1.43 s): the camera glides from the landing view to a high three-quarter view of the platform. The page fades out under a canvas that has no sky yet, so nothing has to animate a clip or a mask.
+- **Wave and settle** (4 s): the terrain grows out of the platform, cell by cell, each cell's real shape rising from its own centre (the original's shader, unchanged), while the camera swings out wide and settles low over the ground on the original's curves. The end of the path is exactly the visitor camera's resting pose, so free movement starts without a jump. When the wave has covered the original 64-cell area, the placed objects pop up, nearest first, with the original's overshoot and tilt. Far backdrop terrain keeps growing for about a second after the camera has arrived.
+- **No swap, no build.** The wave and the pop are uniforms over geometry that is already on the GPU: the terrain shader reads each vertex's cell origin and delay, and the object shader reads each instance's pivot and delay (one draw call per batch, as before). Warm-up compiles and uploads everything and rehearses twelve moments of the entry, so entering creates no GPU resource. A future baked world only has to carry the same per-vertex reveal data to play the same wave.
+- **Cheap where it runs longest.** The loader draws only the loader layer (the four chunks holding the platform, the crystal, the lights), scissored to a 260 × 200 px box: about 0.1 ms of CPU per frame. It starts only after warm-up has compiled the shaders, and while warm-up runs only warm-up draws it. The platform's centre, top and the length of the wave come from per-chunk summaries the world-builder worker computes while packing chunks, so nothing scans vertices on the main thread.
+- **Leaving** fades the world out, puts the terrain and objects back to hidden and the camera back to the spawn, and shows the loader again. Entering again replays the entry. With `prefers-reduced-motion` the entry is a cut.
+
+Measured (production build, default map, 1440 × 900):
+
+| | Step 2 build | This step |
+|---|---|---|
+| Entry: frames, p95, slowest | 95, 16.8 ms, 16.8 ms (1.6 s zoom) | 324, 16.7 ms, 16.8 ms (5.5 s entry); 4× CPU throttling: p95 16.7 ms, slowest 16.8 ms |
+| Long tasks / scripts fetched while entering | 0 / 0 | 0 / 0 |
+| Landing page scrolled while loading: p95 | 16.8 ms | 16.8 ms |
+| Landing page scrolled with the loader live: p95, slowest | n/a | 16.8 ms, 16.8 ms |
+| Total blocking time while loading (3 runs) | 34–36 ms | 21–51 ms |
+| World ready after navigation | 2.16–2.18 s | 2.34–2.75 s (the loader draws during warm-up) |
+| JS heap | 34 MB | 36 MB |
+
+Two things measured along the way and fixed: changing `clip-path` on the canvas layer at the start of the entry cost the browser a 50–150 ms frame (so the canvas is never clipped), and drawing the loader before warm-up had compiled the shaders compiled them synchronously, an 80 ms task.
 
 ## Baking
 
@@ -385,3 +410,10 @@ Remaining known costs:
 - Environment: lights and background are fixed to the original look; time of day only drives a uniform for now.
 - Checked against the original running from `main`: the same textures and shading at the same zoom. Still different: the zone legend, the animated character and water.
 - The visitor's camera is the original's again: low angle, close, free to turn and tilt (see Engine). Heaviest view (lowest angle, farthest): 98 draw calls, 99 000 triangles, no frame over 16.8 ms while turning in the measured run.
+
+### Restoration, step 3: loader, wave and pop
+
+- The loader is back at the bottom of the landing page, live: the platform at the centre of the world and its crystal, drawn by the engine over the page.
+- A click plays the original entry: focus on the platform, terrain growing out of it in a wave while the camera swings out and settles, objects popping up. Same paths, timings and curves as the original.
+- My button and zoom-in approach are gone.
+- Kept from the new engine: no geometry built or swapped during the entry (uniforms only), everything compiled and rehearsed in warm-up, on-demand rendering once the camera has arrived, one draw call per object batch.

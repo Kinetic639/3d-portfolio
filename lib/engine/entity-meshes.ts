@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import type { PlacedMapEntity, PrimitiveType, SerializableTransform } from "@/lib/maps/map-entities";
 import { resolvePrefabInstance } from "@/lib/prefabs/prefab-resolver";
+import { POP_COMPLETE, POP_DROP, POP_SECONDS, POP_TILT_X, POP_TILT_Z, popDelay, samplePop } from "./entry-sequence";
 import type { LoadedModel, ModelLibrary } from "./model-library";
 
 /**
@@ -18,6 +19,11 @@ import type { LoadedModel, ModelLibrary } from "./model-library";
  * The layer also owns what interaction needs from objects: a bounding box
  * per entity and a per-entity "fade" switch used to see through objects that
  * hide something the visitor is looking at.
+ *
+ * Objects pop up when the visitor enters (see entry-sequence.ts). The pop is
+ * one uniform for the whole layer: every instance carries its pivot and start
+ * delay, and the vertex shader scales, drops and tilts it, so the animation
+ * costs no CPU work per object and no extra draw calls.
  */
 export type EntityLayer = {
   group: THREE.Group;
@@ -27,6 +33,10 @@ export type EntityLayer = {
   setFaded: (entityIds: ReadonlySet<string>) => boolean;
   /** Advances animations. Returns true when something is animating and frames must keep coming. */
   update: (deltaSeconds: number) => boolean;
+  /** Seconds since objects started popping up: negative hides them all, POP_COMPLETE shows them at rest. */
+  setPopTime: (seconds: number) => void;
+  /** Seconds from the first pop to the last object at rest. */
+  popDuration: number;
   dispose: () => void;
 };
 
@@ -36,6 +46,15 @@ type Batch = {
   /** Whether this layer created the geometry's buffers (primitives) or borrows them (models). */
   items: Array<{ entityId: string; matrix: THREE.Matrix4 }>;
 };
+
+export type EntityLayerOptions = {
+  /** Where the pop wave starts (the loader platform), and the distance at which it is at its latest. */
+  popOrigin?: { x: number; z: number };
+  popRadius?: number;
+};
+
+/** The original's: half the diagonal of its 64 x 64 map. */
+const DEFAULT_POP_RADIUS = 32 * Math.SQRT2;
 
 const ANCHOR_OFFSET: Record<PrimitiveType, number> = { box: 0.5, cylinder: 0.5, sphere: 0.5, plane: 0.02, platform: 0.11, sign: 0.36 };
 const MISSING_MODEL_COLOR = "#c04fd0";
@@ -66,15 +85,44 @@ function composeMatrix(transform: SerializableTransform, extraScale = 1) {
 }
 
 /**
- * Adds a screen-door fade to a standard material, driven by the per-instance
- * `aFade` attribute. Discarding pixels in a fixed pattern keeps the material
- * opaque (no sorting, no extra pass) while letting the scene behind show through.
+ * Pop-up in the vertex shader: the instance is scaled about its pivot
+ * (`aPop.xyz`), dropped and tilted, starting `aPop.w` seconds after
+ * `uPopTime` 0. Same curve as `samplePop` in entry-sequence.ts.
  */
-function addInstanceFade(material: THREE.Material) {
+const POP_VERTEX = /* glsl */ `
+  vec4 mvPosition = vec4(transformed, 1.0);
+  #ifdef USE_INSTANCING
+    mvPosition = instanceMatrix * mvPosition;
+  #endif
+  {
+    float popProgress = clamp((uPopTime - aPop.w) / ${POP_SECONDS.toFixed(4)}, 0.0, 1.0);
+    float eased = 1.0 - pow(1.0 - popProgress, 3.0);
+    float bounce = sin(3.14159265 * popProgress) * (1.0 - popProgress);
+    float rest = 1.0 - eased;
+    vec3 offset = (mvPosition.xyz - aPop.xyz) * (0.001 + 0.999 * eased + bounce * 0.4);
+    float tiltX = ${POP_TILT_X.toFixed(4)} * rest;
+    float tiltZ = ${POP_TILT_Z.toFixed(4)} * rest;
+    offset = vec3(offset.x, cos(tiltX) * offset.y - sin(tiltX) * offset.z, sin(tiltX) * offset.y + cos(tiltX) * offset.z);
+    offset = vec3(cos(tiltZ) * offset.x - sin(tiltZ) * offset.y, sin(tiltZ) * offset.x + cos(tiltZ) * offset.y, offset.z);
+    mvPosition.xyz = aPop.xyz + offset + vec3(0.0, -${POP_DROP.toFixed(4)} * rest + bounce * 0.18, 0.0);
+  }
+  mvPosition = modelViewMatrix * mvPosition;
+  gl_Position = projectionMatrix * mvPosition;
+`;
+
+/**
+ * Adds the pop-up and a screen-door fade to a standard material, driven by
+ * per-instance attributes. The fade discards pixels in a fixed pattern, which
+ * keeps the material opaque (no sorting, no extra pass) while letting the
+ * scene behind show through.
+ */
+function addInstanceEffects(material: THREE.Material, popTime: { value: number }) {
   material.onBeforeCompile = (shader) => {
+    shader.uniforms.uPopTime = popTime;
     shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nattribute float aFade;\nvarying float vFade;")
-      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFade = aFade;");
+      .replace("#include <common>", "#include <common>\nattribute float aFade;\nattribute vec4 aPop;\nuniform float uPopTime;\nvarying float vFade;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFade = aFade;")
+      .replace("#include <project_vertex>", POP_VERTEX);
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <common>", "#include <common>\nvarying float vFade;")
       .replace(
@@ -100,13 +148,29 @@ function borrowGeometry(source: THREE.BufferGeometry) {
   return geometry;
 }
 
-export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibrary | null): EntityLayer {
+export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibrary | null, options: EntityLayerOptions = {}): EntityLayer {
+  const popOrigin = options.popOrigin ?? { x: 0, z: 0 };
+  const popRadius = options.popRadius ?? DEFAULT_POP_RADIUS;
+  const popTime = { value: POP_COMPLETE };
+  const delays = new Map<string, number>();
+  const delayOf = (entity: PlacedMapEntity) => {
+    let delay = delays.get(entity.id);
+    if (delay === undefined) {
+      const { x, z } = entity.transform.position;
+      delay = popDelay(Math.hypot(x - popOrigin.x, z - popOrigin.z) / popRadius, entity.id);
+      delays.set(entity.id, delay);
+    }
+    return delay;
+  };
+  const pivots = new Map<string, THREE.Vector3>();
   const group = new THREE.Group();
   group.name = "entities";
   const batches = new Map<string, Batch>();
   const disposables: Array<{ dispose: () => void }> = [];
   const bounds = new Map<string, THREE.Box3>();
   const mixers: THREE.AnimationMixer[] = [];
+  /** Animated models are separate objects; their pop is applied to their matrix. */
+  const animated: Array<{ holder: THREE.Group; rest: THREE.Matrix4; pivot: THREE.Vector3; delay: number }> = [];
   const partBox = new THREE.Box3();
 
   const grow = (entityId: string, box: THREE.Box3) => {
@@ -151,6 +215,8 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
     holder.add(instance);
     holder.matrixAutoUpdate = false;
     holder.matrix.multiplyMatrices(composeMatrix(entity.transform, scale), model.normalise);
+    const { x, y, z } = entity.transform.position;
+    animated.push({ holder, rest: holder.matrix.clone(), pivot: new THREE.Vector3(x, y, z), delay: delayOf(entity) });
     instance.traverse((object) => {
       // Skinned meshes move outside their rest bounds; culling them by those bounds makes them vanish.
       object.frustumCulled = false;
@@ -174,6 +240,8 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
 
   for (const entity of entities) {
     if (!entity.appearance.visibleAtRuntime) continue;
+    delayOf(entity);
+    pivots.set(entity.id, new THREE.Vector3(entity.transform.position.x, entity.transform.position.y, entity.transform.position.z));
     const entry = models?.entryFor(entity) ?? null;
     const model = entry ? models!.get(entry.id) : null;
 
@@ -217,7 +285,13 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
     const fade = new THREE.InstancedBufferAttribute(new Float32Array(items.length), 1);
     fade.setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute("aFade", fade);
-    addInstanceFade(material);
+    const pop = new Float32Array(items.length * 4);
+    items.forEach((item, index) => {
+      const pivot = pivots.get(item.entityId)!;
+      pop.set([pivot.x, pivot.y, pivot.z, delays.get(item.entityId) ?? 0], index * 4);
+    });
+    geometry.setAttribute("aPop", new THREE.InstancedBufferAttribute(pop, 4));
+    addInstanceEffects(material, popTime);
     const mesh = new THREE.InstancedMesh(geometry, material, items.length);
     mesh.name = `entities:${key}`;
 
@@ -236,6 +310,9 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
   }
 
   let faded: ReadonlySet<string> = new Set();
+  const popDuration = Math.max(0, ...delays.values()) + POP_SECONDS;
+  const popMatrix = new THREE.Matrix4();
+  const popRotation = new THREE.Euler();
 
   return {
     group,
@@ -259,6 +336,21 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
     update(deltaSeconds) {
       for (const mixer of mixers) mixer.update(deltaSeconds);
       return mixers.length > 0;
+    },
+    popDuration,
+    setPopTime(seconds) {
+      popTime.value = seconds;
+      for (const item of animated) {
+        const pop = samplePop(seconds, item.delay);
+        // Same transform as the shader: about the pivot, then lifted.
+        popMatrix.compose(
+          scratchPosition.set(item.pivot.x, item.pivot.y + pop.lift, item.pivot.z),
+          scratchQuaternion.setFromEuler(popRotation.set(pop.tiltX, 0, pop.tiltZ, "ZYX")),
+          scratchScale.setScalar(pop.scale),
+        );
+        item.holder.matrix.copy(popMatrix).multiply(new THREE.Matrix4().makeTranslation(-item.pivot.x, -item.pivot.y, -item.pivot.z)).multiply(item.rest);
+        item.holder.matrixWorldNeedsUpdate = true;
+      }
     },
     dispose() {
       mixers.forEach((mixer) => mixer.stopAllAction());

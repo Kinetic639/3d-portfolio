@@ -219,5 +219,6 @@ export function createTerrainGeometry(buffers: TerrainChunkBuffers) {
   geometry.setIndex(new THREE.BufferAttribute(buffers.indices, 1));
   geometry.computeBoundingSphere();
   geometry.computeBoundingBox();
+  geometry.userData.summary = buffers.summary;
   return geometry;
 }

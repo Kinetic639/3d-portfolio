@@ -38,9 +38,13 @@ test("the entry element appears only after warm-up has verified the world", asyn
   expect(report!.ok).toBe(true);
   expect(report!.newResourcesDuringTest).toBe(0);
   expect(report!.testFrames).toBeGreaterThan(5);
-  // Nothing is drawn for the visitor before they enter.
+  // Before they enter, the visitor sees only the loader: the world draws no frame of its own,
+  // and the canvas lets every click through to the page.
   expect(await page.evaluate(() => window.__worldEngine!.stats.frames)).toBe(0);
-  await expect(page.locator("canvas")).not.toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window.__worldEngine as unknown as { stats: { loaderFrames: number } }).stats.loaderFrames)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector("canvas")!.parentElement!).pointerEvents)).toBe("none");
+  // The world's own controls stay out of the page.
+  await expect(page.getByText("Back to page")).toBeHidden();
   expect(errors).toEqual([]);
 });
 
@@ -71,9 +75,9 @@ test("entering loads nothing, compiles nothing and runs smoothly", async ({ page
   await enterButton(page).click();
   await waitForPhase(page, "world");
   const elapsed = Date.now() - clickedAt;
-  // The approach is a 1.6 s move; it must neither stall nor be skipped.
-  expect(elapsed).toBeGreaterThan(1200);
-  expect(elapsed).toBeLessThan(4000);
+  // The entry is a 5.4 s move (focus, then wave and settle); it must neither stall nor be skipped.
+  expect(elapsed).toBeGreaterThan(5000);
+  expect(elapsed).toBeLessThan(9000);
 
   // No GPU resource was created by entering: everything was prepared during warm-up.
   expect(await gpuResources(page)).toEqual(before);

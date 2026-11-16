@@ -1,6 +1,8 @@
-/* The world sits above the landing page but stays invisible, and laid out at
-   full size, until the visitor enters: the canvas must have its real
-   dimensions while the engine warms up behind the page. */
+/* The world sits above the landing page, always laid out at full size: the
+   canvas must have its real dimensions while the engine warms up. On the
+   landing page the engine draws only the loader at the bottom centre and
+   keeps the rest of the canvas transparent. (No clip-path: changing it on
+   the canvas layer costs the browser a 50-150 ms frame at the start of the entry.) */
 .layer {
   position: fixed;
   inset: 0;
@@ -13,11 +15,29 @@
   transition: opacity 0.45s ease, visibility 0s linear 0.45s;
 }
 
-.layer[data-shown] {
+.layer[data-view="loader"] {
+  visibility: visible;
+  opacity: 1;
+  transition: opacity 0.5s ease, visibility 0s;
+}
+
+/* Only the canvas (the loader) belongs on the landing page; the world's controls do not. */
+.layer[data-view="loader"] > :not(canvas) {
+  visibility: hidden;
+}
+
+.layer[data-view="world"] {
   visibility: visible;
   opacity: 1;
   pointer-events: auto;
-  transition: opacity 0.7s ease, visibility 0s;
+  /* The world starts without a sky (see the engine's entry), so the page fades out
+     under it; nothing here needs to animate. */
+  transition: visibility 0s;
+}
+
+.layer[data-view="leaving"] {
+  visibility: visible;
+  opacity: 0;
 }
 
 .canvas {
@@ -197,6 +217,55 @@
   transition: transform 0.3s ease;
 }
 
+/* Covers the platform and crystal, not the whole loader box, so the page around them stays clickable.
+   The loader itself is the canvas underneath. */
+.loaderButton {
+  position: fixed;
+  left: 50%;
+  bottom: 8px;
+  z-index: 21;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 140px;
+  height: 130px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  transform: translateX(-50%);
+  cursor: pointer;
+}
+
+.loaderButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -4px;
+}
+
+.loaderHint {
+  margin-top: -8px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  color: var(--foreground);
+  font: 600 13px/1.4 var(--font-sans);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.loaderButton:hover .loaderHint,
+.loaderButton:focus-visible .loaderHint {
+  opacity: 1;
+  transform: none;
+}
+
+:global(html[data-world="entering"]) .loaderButton,
+:global(html[data-world="world"]) .loaderButton {
+  display: none;
+}
+
 .prompt {
   position: fixed;
   left: 50%;
@@ -272,8 +341,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .layer,
-  .layer[data-shown],
-  .progressBar {
+  .layer[data-view],
+  .progressBar,
+  .loaderHint {
     transition: none;
   }
 

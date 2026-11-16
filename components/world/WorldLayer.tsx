@@ -5,7 +5,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import ContentArticle from "@/components/content/ContentArticle";
 import { PORTFOLIO_CONTENT } from "@/content/portfolio";
 import { useWorldBridge } from "@/lib/bridge/use-world-bridge";
-import { worldBridge } from "@/lib/bridge/world-bridge";
+import { worldBridge, type WorldPhase } from "@/lib/bridge/world-bridge";
 import {
   CONTENT_SECTIONS,
   findContentByPath,
@@ -21,6 +21,14 @@ import styles from "./WorldLayer.module.css";
 
 const MOBILE_QUERY = "(max-width: 720px)";
 const MAP_PATH = /^\/map\/([a-z0-9]+(?:-[a-z0-9]+)*)$/;
+
+/** How the canvas layer shows: the loader over the landing page (the engine draws nothing else), or the whole world. */
+function layerView(phase: WorldPhase) {
+  if (phase === "warming" || phase === "ready") return "loader";
+  if (phase === "entering" || phase === "world") return "world";
+  if (phase === "leaving") return "leaving";
+  return undefined;
+}
 
 const prefersReducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -166,7 +174,11 @@ export default function WorldLayer({ defaultMapId, bakes }: { defaultMapId: stri
 
   return (
     <>
-      <div className={styles.layer} data-shown={shown ? "" : undefined} inert={!shown} aria-hidden={!shown}>
+      <div
+        className={styles.layer}
+        data-view={layerView(phase)}
+        inert={!shown}
+        aria-hidden={!shown}      >
         <canvas
           ref={canvasRef}
           className={styles.canvas}
@@ -229,8 +241,10 @@ function HoverLabel() {
 }
 
 /**
- * The invitation at the bottom of the landing page. It exists only once the
- * world is warmed up; before that there is at most a thin progress line.
+ * The way in, at the bottom of the landing page. The world layer draws the
+ * loader there live (the platform at the centre of the world, with its
+ * crystal); this is the button over it, which exists only once the world is
+ * warmed up. Before that there is a thin progress line.
  */
 function EnterPrompt({ buttonRef, onEnter, onLoad }: {
   buttonRef: React.RefObject<HTMLButtonElement | null>;
@@ -271,12 +285,16 @@ function EnterPrompt({ buttonRef, onEnter, onLoad }: {
   if (phase !== "ready") return null;
 
   return (
-    <div className={styles.prompt}>
+    <>
       <p className={styles.srOnly} role="status">The interactive 3D world is ready.</p>
-      <button ref={buttonRef} type="button" className={styles.enter} onClick={onEnter}>
-        Enter the world
-        <span>Explore this portfolio as a place</span>
+      <button
+        ref={buttonRef}
+        type="button"
+        className={styles.loaderButton}
+        onClick={onEnter}
+      >
+        <span className={styles.loaderHint}>Enter the world</span>
       </button>
-    </div>
+    </>
   );
 }

@@ -77,6 +77,12 @@ html[data-world="world"] {
   overflow: hidden;
 }
 
+/* The loader sits over the bottom of the viewport: leave room under the page's last line. */
+html[data-world="warming"] #landing,
+html[data-world="ready"] #landing {
+  padding-bottom: 200px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

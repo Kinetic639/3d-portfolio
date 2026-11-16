@@ -75,7 +75,8 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
       if (!(await probeWebGL2(signal))) return unavailable();
       if (signal.aborted) return;
       // The same attributes the engine would ask for; null means WebGL 2 is not usable here.
-      const context = canvas.getContext("webgl2", { antialias: true, alpha: false, powerPreference: "high-performance" });
+      // Alpha: on the landing page the loader floats over the page with nothing around it.
+      const context = canvas.getContext("webgl2", { antialias: true, alpha: true, premultipliedAlpha: true, powerPreference: "high-performance" });
       if (!context) return unavailable();
       worldBridge.set({ phase: "loading", progress: 0, quality: guessQuality() });
       // A baked world is one binary file. Without a current bake, or if the file
