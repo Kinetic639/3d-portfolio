@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { calculateFrameSummary, combineFrameSummaries, percentile } from "./statistics";
+import { calculateFrameSummary, combineFrameSummaries, percentile } from "./frame-statistics";
 
-describe("benchmark statistics", () => {
+describe("frame statistics", () => {
   it("calculates percentiles and FPS from measured duration", () => {
     const summary = calculateFrameSummary([10, 12, 16, 20, 40], 100);
     expect(percentile([10, 20, 30], 0.5)).toBe(20);

@@ -219,7 +219,7 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
 
         <HoverLabel />
         <MinigameHud />
-        {phase === "world" ? <PerfHud /> : null}
+        <PerfHud active={phase === "world"} />
 
         {openItem ? (
           <aside ref={panelRef} className={styles.panel} role="dialog" aria-modal="false" aria-labelledby={headingId}>

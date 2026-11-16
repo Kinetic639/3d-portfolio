@@ -43,8 +43,12 @@ test("the entry element appears only after warm-up has verified the world", asyn
   expect(await page.evaluate(() => window.__worldEngine!.stats.frames)).toBe(0);
   await expect.poll(() => page.evaluate(() => (window.__worldEngine as unknown as { stats: { loaderFrames: number } }).stats.loaderFrames)).toBeGreaterThan(0);
   expect(await page.evaluate(() => getComputedStyle(document.querySelector("canvas")!.parentElement!).pointerEvents)).toBe("none");
-  // The world's own controls stay out of the page.
-  await expect(page.getByText("Back to page")).toBeHidden();
+  // The world's own controls stay out of the page: not reachable, not clickable, and
+  // drawn at 1 % opacity only so they are rasterized before the visitor enters.
+  await expect(page.getByRole("button", { name: "Back to page" })).toHaveCount(0);
+  const backToPage = page.getByText("Back to page");
+  expect(await backToPage.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe("none");
+  expect(await backToPage.evaluate((element) => Number(getComputedStyle(element.closest("[data-view] > *")!).opacity))).toBeLessThanOrEqual(0.01);
   expect(errors).toEqual([]);
 });
 

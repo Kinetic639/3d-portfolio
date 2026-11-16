@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { PORTFOLIO_CONTENT } from "@/content/portfolio";
 import { worldBridge, type QualityTier } from "@/lib/bridge/world-bridge";
+import { uiWork } from "@/lib/perf/ui-work";
 import { resolveContentReference } from "@/lib/content/content";
 import { migrateMapDefinition, type MapContentReference } from "@/lib/maps/map-definition";
 
@@ -109,8 +110,13 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
 
       const instance = new WorldEngine(canvas, worldBridge, context);
       engine = instance;
-      if (process.env.NODE_ENV !== "production") {
-        (window as unknown as { __worldEngine?: unknown }).__worldEngine = instance;
+      // Tests read the engine. Development always exposes it; a production build only when
+      // built with NEXT_PUBLIC_WORLD_PROBE=1 (the perf regression test). Inlined at build
+      // time, so a normal production build contains neither branch.
+      if (process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_WORLD_PROBE === "1") {
+        const probe = window as unknown as { __worldEngine?: unknown; __worldUiWork?: unknown };
+        probe.__worldEngine = instance;
+        probe.__worldUiWork = uiWork;
       }
 
       const loadOptions = {

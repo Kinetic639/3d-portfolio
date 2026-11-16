@@ -52,3 +52,13 @@ describe("UI work meter", () => {
     uiWork.clear();
   });
 });
+
+describe("perf badge formatting", () => {
+  it("groups thousands without the browser's locale data", async () => {
+    const { thousands } = await import("@/components/world/PerfHud");
+    expect(thousands(0)).toBe("0");
+    expect(thousands(999)).toBe("999");
+    expect(thousands(47052)).toBe("47,052");
+    expect(thousands(1234567.4)).toBe("1,234,567");
+  });
+});
