@@ -1,0 +1,11 @@
+{
+  "name": "Pine Tree (fluffy)",
+  "category": "nature",
+  "description": "Stylised pine, about 3.7 blocks tall at scale 1. COLOR_1 holds the wind weights (R: sway, G: branch phase); COLOR_0 tints the needles. Free asset.",
+  "scale": 0.48,
+  "collision": "blocking",
+  "attributes": ["COLOR_0", "COLOR_1"],
+  "alpha": "cutout",
+  "alphaCutoff": 0.33,
+  "tags": ["nature", "tree", "vegetation", "wind"]
+}

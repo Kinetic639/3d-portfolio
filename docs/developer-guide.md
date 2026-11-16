@@ -72,9 +72,20 @@ Accepts schema v1–v4, writes `maps/my-map/map.json` in v5. `--backdrop N` adds
    }
    ```
 
-   `scale` converts the model's units to blocks. `anchor` is the point that sits at an instance's position: the centre of the base (`bottom`) or the centre of the model. `animation` names a clip to loop. `replacesPrefabs` draws every placed instance of those procedural prefabs with this model.
+   `scale` converts the model's units to blocks. `anchor` is the point that sits at an instance's position: the centre of the base (`bottom`) or the centre of the model. `animation` names a clip to loop. `replacesPrefabs` draws every placed instance of those procedural prefabs with this model. `category` `creatures` is for animals and animated characters (shown as **animals & characters**).
+
+   Optional fields that make the file smaller or the model cheaper to draw:
+
+   | Field | Use |
+   |---|---|
+   | `attributes` | Extra vertex attributes to keep, e.g. `["COLOR_0", "COLOR_1"]` when a shader reads them (the pine's wind weights). Only position, normal, the first UV set, joints and weights are kept otherwise; exported models often carry several unused UV and colour sets. |
+   | `alpha` | `"cutout"` draws transparent materials alpha-tested (opaque, no sorting): right for leaves and feathers. `alphaCutoff` sets the threshold (default 0.5). `"opaque"` ignores alpha. |
+   | `animations` | Clips to keep. Long baked clips are usually most of a rigged model's size (the crow: 5.6 MB with its three 20-70 s flight loops, 311 KB without). |
+   | `rootMotionNode` | Node whose translation is removed from every clip, so the model moves only where the game moves it. |
+
+   Every model's animations are also resampled (redundant keyframes dropped).
 3. Run `pnpm assets` (or restart `pnpm dev`, or press **Rescan models** in the editor). The table it prints shows the size before and after, triangles and textures; errors name the asset and the problem.
-4. In the editor, choose the Object tool: the model is under **Models** with its picture and size. Place it like any object.
+4. In the editor, choose the Object tool: the model is listed first under its category (and under **Models**) with its picture and size. Place it like any object.
 
 To replace a model, overwrite its file and run `pnpm assets`: every placed instance changes. Do not rename the folder once maps use it; the folder name is the id maps store.
 

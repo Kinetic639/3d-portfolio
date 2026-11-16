@@ -816,10 +816,21 @@ function ZoneRailTools({ props }: { props: MapEditorToolbarProps }) {
 
 type PrefabPickerCategory = PrefabCategory | "all" | "models";
 
+/** How a palette category reads; "creatures" holds animals and animated characters. */
+function categoryLabel(category: PrefabPickerCategory) {
+  if (category === "creatures") return "animals & characters";
+  return category.replace(/-/g, " ");
+}
+
 function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapEditorToolbarProps; workspace: EditorWorkspace; fileInputRef: React.RefObject<HTMLInputElement | null>; setBottomTab: (tab: BottomDockTab) => void }) {
   const activePrefab = BUILT_IN_PREFABS.find((prefab) => prefab.id === props.activePrefabId) ?? null;
-  const categories = useMemo(() => listPrefabCategories(), []);
-  const prefabCategories = useMemo<PrefabPickerCategory[]>(() => ["all", ...categories, "models"], [categories]);
+  // Prefab categories, plus those only models use (animals and characters have no prefabs).
+  const modelCategories = props.models.map((model) => model.category as PrefabCategory);
+  const modelCategoryKey = [...new Set(modelCategories)].sort().join("|");
+  const prefabCategories = useMemo<PrefabPickerCategory[]>(
+    () => ["all", ...new Set([...listPrefabCategories(), ...(modelCategoryKey ? (modelCategoryKey.split("|") as PrefabCategory[]) : [])]), "models"],
+    [modelCategoryKey],
+  );
   const [activeCategory, setActiveCategory] = useState<PrefabPickerCategory>(activePrefab?.category ?? "all");
   const [prefabPreviewYaw, setPrefabPreviewYaw] = useState(0);
   const prefabPreviewDrag = useRef<{ x: number; yaw: number } | null>(null);
@@ -836,27 +847,28 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
     const prefabs = query
       ? categoryPrefabs.filter((prefab) => prefab.name.toLowerCase().includes(query) || prefab.tags.some((tag) => tag.includes(query)))
       : categoryPrefabs;
-    const models = activeCategory === "all" || activeCategory === "models"
-      ? props.models.filter((model) => !query || model.name.toLowerCase().includes(query) || model.id.includes(query))
-      : [];
+    const models = props.models
+      .filter((model) => activeCategory === "all" || activeCategory === "models" || model.category === activeCategory)
+      .filter((model) => !query || model.name.toLowerCase().includes(query) || model.id.includes(query));
     const activeModel = props.models.find((model) => model.id === props.activeModelId) ?? null;
 
     return (
       <Panel title="Primitive Palette">
         <Section title="Prefab Library">
-          <label>Category<select value={activeCategory} onChange={(event) => setActiveCategory(event.target.value as PrefabPickerCategory)}>{prefabCategories.map((category) => <option key={category} value={category}>{category === "all" ? "all" : category.replace(/-/g, " ")}</option>)}</select></label>
+          <label>Category<select value={activeCategory} onChange={(event) => setActiveCategory(event.target.value as PrefabPickerCategory)}>{prefabCategories.map((category) => <option key={category} value={category}>{categoryLabel(category)}</option>)}</select></label>
           <input aria-label="Search prefabs" placeholder="Search prefabs" value={props.prefabSearch} onChange={(event) => props.onPrefabSearchChange(event.target.value)} />
           <div className="editor-shape-list" role="listbox" aria-label="Prefab selector">
-            {prefabs.map((prefab) => (
-              <button key={prefab.id} type="button" role="option" aria-selected={props.activePrefabId === prefab.id} className={props.activePrefabId === prefab.id ? "active" : ""} title={prefab.description} onClick={() => props.onActivePrefabChange(prefab.id)}>
-                <PrefabPreview prefab={prefab} variantId={prefab.id === props.activePrefabId ? props.activePrefabVariantId : undefined} viewYaw={prefabPreviewYaw} onViewYawChange={setPrefabPreviewYaw} dragRef={prefabPreviewDrag} compact />
-                <span>{prefab.name}</span>
-              </button>
-            ))}
+            {/* Models first: they are the finished art; prefabs are grey-box stand-ins. */}
             {models.map((model) => (
               <button key={`model-${model.id}`} type="button" role="option" aria-selected={props.activeModelId === model.id} className={props.activeModelId === model.id ? "active" : ""} title={`Model: ${model.name}`} onClick={() => props.onActiveModelChange(model.id)}>
                 <ModelThumbnail model={model} />
                 <span>{model.name}</span>
+              </button>
+            ))}
+            {prefabs.map((prefab) => (
+              <button key={prefab.id} type="button" role="option" aria-selected={props.activePrefabId === prefab.id} className={props.activePrefabId === prefab.id ? "active" : ""} title={prefab.description} onClick={() => props.onActivePrefabChange(prefab.id)}>
+                <PrefabPreview prefab={prefab} variantId={prefab.id === props.activePrefabId ? props.activePrefabVariantId : undefined} viewYaw={prefabPreviewYaw} onViewYawChange={setPrefabPreviewYaw} dragRef={prefabPreviewDrag} compact />
+                <span>{prefab.name}</span>
               </button>
             ))}
             {prefabs.length === 0 && models.length === 0 ? <span className="editor-muted editor-empty-state">No matching objects.</span> : null}
@@ -864,7 +876,7 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
           {activeModel && activeModel.variants.length > 1 ? (
             <label>Variant<select value={props.activePrefabVariantId || activeModel.variants[0].id} onChange={(event) => props.onActivePrefabVariantChange(event.target.value)}>{activeModel.variants.map((variant) => <option key={variant.id} value={variant.id}>{variant.label}</option>)}</select></label>
           ) : null}
-          {activeModel ? <span className="editor-muted">model · {activeModel.category}</span> : null}
+          {activeModel ? <span className="editor-muted">model · {categoryLabel(activeModel.category as PrefabCategory)}</span> : null}
           {activePrefab ? (
             <label>Variant<select value={props.activePrefabVariantId || activePrefab.defaultVariantId} onChange={(event) => props.onActivePrefabVariantChange(event.target.value)}>{activePrefab.variants.map((variant) => <option key={variant.id} value={variant.id}>{variant.label}</option>)}</select></label>
           ) : null}

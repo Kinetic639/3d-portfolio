@@ -387,6 +387,20 @@ test("Bake writes the baked world next to the map and tracks whether it is curre
   await expect.poll(status).toBe("stale");
 });
 
+test("models are listed under their own category, animals and characters included", async ({ page }) => {
+  await openEditor(page);
+  await workspace(page, "Objects");
+  const category = leftDock(page).getByRole("combobox", { name: "Category" });
+  await expect(category.locator("option", { hasText: "animals & characters" })).toHaveCount(1);
+  await category.selectOption("creatures");
+  await expect(leftDock(page).getByRole("option", { name: /Crow/ })).toBeVisible();
+  await expect(leftDock(page).getByRole("option", { name: /Pine Tree/ })).toHaveCount(0);
+  await category.selectOption("nature");
+  await expect(leftDock(page).getByRole("option", { name: /Pine Tree \(fluffy\)/ })).toBeVisible();
+  await expect(leftDock(page).getByRole("option", { name: /Land Rock \(small\)/ })).toBeVisible();
+  await expect(leftDock(page).getByRole("option", { name: /Crow/ })).toHaveCount(0);
+});
+
 test("models from the asset pipeline appear in the object palette with a picture and can be placed", async ({ page }) => {
   await openEditor(page);
   await workspace(page, "Objects");

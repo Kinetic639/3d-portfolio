@@ -87,7 +87,7 @@ describe("object library", () => {
       assets: [{
         id: "oak", name: "Oak", category: "nature", scale: 1, rotationY: 0, anchor: "bottom", collision: "blocking",
         variants: [], replacesPrefabs: ["deciduous-tree"], tags: [], file: "oak-abc.glb", hash: "abc", sourceBytes: 10, bytes: 5,
-        triangles: 100, vertices: 80, meshes: 1, materials: 1, textures: 0, animations: [], skinned: false,
+        triangles: 100, vertices: 80, meshes: 1, materials: 1, textures: 0, animations: [], attributes: ["NORMAL", "POSITION"], skinned: false,
         bounds: { min: [0, 0, 0], max: [1, 2, 1] },
       }],
     };
@@ -96,5 +96,60 @@ describe("object library", () => {
     expect(items.find((item) => item.key === "prefab:deciduous-tree")).toMatchObject({ replacedBy: "oak" });
     expect(items.filter((item) => item.kind === "prefab" && item.replacedBy).length).toBe(1);
     expect(listLibraryItems({ version: 1, assets: [] }).every((item) => item.kind === "prefab")).toBe(true);
+  });
+});
+
+describe("per-model preparation", () => {
+  /** A triangle with extra UV and colour sets, a blended material, a "root" node and two clips. */
+  const build = async () => {
+    const { Document } = await import("@gltf-transform/core");
+    const document = new Document();
+    const buffer = document.createBuffer();
+    const accessor = (type: "VEC2" | "VEC3" | "VEC4" | "SCALAR", values: number[]) => document.createAccessor().setType(type).setArray(new Float32Array(values)).setBuffer(buffer);
+    const primitive = document.createPrimitive()
+      .setAttribute("POSITION", accessor("VEC3", [0, 0, 0, 1, 0, 0, 0, 1, 0]))
+      .setAttribute("TEXCOORD_0", accessor("VEC2", [0, 0, 1, 0, 0, 1]))
+      .setAttribute("TEXCOORD_1", accessor("VEC2", [0, 0, 1, 0, 0, 1]))
+      .setAttribute("COLOR_1", accessor("VEC4", [1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1]))
+      .setMaterial(document.createMaterial("leaf").setAlphaMode("BLEND"));
+    const root = document.createNode("root").setMesh(document.createMesh().addPrimitive(primitive));
+    document.createScene().addChild(root);
+    for (const name of ["Idle", "LongLoop"]) {
+      const sampler = document.createAnimationSampler().setInput(accessor("SCALAR", [0, 1])).setOutput(accessor("VEC3", [0, 0, 0, 0, 0, 5]));
+      const rotation = document.createAnimationSampler().setInput(accessor("SCALAR", [0, 1])).setOutput(accessor("VEC4", [0, 0, 0, 1, 0, 0, 0, 1]));
+      document.createAnimation(name)
+        .addSampler(sampler).addChannel(document.createAnimationChannel().setTargetNode(root).setTargetPath("translation").setSampler(sampler))
+        .addSampler(rotation).addChannel(document.createAnimationChannel().setTargetNode(root).setTargetPath("rotation").setSampler(rotation));
+    }
+    return document;
+  };
+
+  it("keeps only the attributes asked for, the clips asked for, no root motion, and alpha testing", async () => {
+    const { prepareDocument } = await import("./asset-pipeline");
+    const document = await build();
+    expect(prepareDocument(document, { name: "Leafy", category: "nature", attributes: ["COLOR_1"], animations: ["Idle"], rootMotionNode: "root", alpha: "cutout", alphaCutoff: 0.33 })).toBeNull();
+    const root = document.getRoot();
+    expect(root.listMeshes()[0].listPrimitives()[0].listSemantics().sort()).toEqual(["COLOR_1", "POSITION", "TEXCOORD_0"]);
+    expect(root.listAnimations().map((animation) => animation.getName())).toEqual(["Idle"]);
+    expect(root.listAnimations()[0].listChannels().map((channel) => channel.getTargetPath())).toEqual(["rotation"]);
+    expect(root.listMaterials()[0].getAlphaMode()).toBe("MASK");
+    expect(root.listMaterials()[0].getAlphaCutoff()).toBeCloseTo(0.33);
+  });
+
+  it("names what asset.json asks for that the model does not have", async () => {
+    const { prepareDocument } = await import("./asset-pipeline");
+    expect(prepareDocument(await build(), { name: "A", category: "nature", attributes: ["COLOR_3"] })).toContain("attribute COLOR_3 is not in the model");
+    expect(prepareDocument(await build(), { name: "A", category: "nature", animations: ["Dance"] })).toContain('animation "Dance" is not in the model');
+    expect(prepareDocument(await build(), { name: "A", category: "nature", rootMotionNode: "Hips" })).toContain('rootMotionNode "Hips"');
+  });
+
+  it("validates the new asset.json fields", () => {
+    expect(validateAssetMetadata({ name: "Crow", category: "creatures", attributes: ["COLOR_1"], alpha: "cutout", alphaCutoff: 0.33, animations: ["Fly"], rootMotionNode: "root" })).toEqual([]);
+    expect(validateAssetMetadata({ name: "Crow", category: "creatures", attributes: ["color1"], alpha: "blend", alphaCutoff: 2, animations: "Fly" })).toEqual([
+      'attributes must be glTF attribute names, e.g. ["COLOR_1"].',
+      'alpha must be "cutout" or "opaque".',
+      "alphaCutoff must be between 0 and 1.",
+      "animations must be an array of strings.",
+    ]);
   });
 });

@@ -11,8 +11,11 @@ import type { PrefabCategory } from "@/lib/prefabs/prefab-types";
  * id only, so replacing a source file changes every placed instance.
  */
 export const ASSET_CATEGORIES: PrefabCategory[] = [
-  "architecture", "infrastructure", "roads-and-paths", "street-furniture", "nature", "office", "portfolio", "signage", "navigation", "decoration",
+  "architecture", "infrastructure", "roads-and-paths", "street-furniture", "nature", "office", "portfolio", "signage", "navigation", "decoration", "creatures",
 ];
+
+/** Vertex attributes every model keeps; anything else is dropped unless asset.json lists it in `attributes`. */
+export const BASE_VERTEX_ATTRIBUTES = ["POSITION", "NORMAL", "TEXCOORD_0", "JOINTS_0", "WEIGHTS_0"];
 const COLLISION_MODES: CollisionMode[] = ["none", "blocking", "walkable", "trigger"];
 
 export type AssetVariant = {
@@ -42,6 +45,24 @@ export type AssetMetadata = {
   /** Ids of procedural prefabs this model stands in for: every placed instance of them is drawn with the model. */
   replacesPrefabs?: string[];
   tags?: string[];
+  /**
+   * Vertex attributes to keep besides BASE_VERTEX_ATTRIBUTES, e.g. "COLOR_1"
+   * when a shader reads it (tree wind weights). Exported models often carry
+   * many unused UV and colour sets; they are dropped by default.
+   */
+  attributes?: string[];
+  /**
+   * How transparent materials are drawn. "cutout": alpha-tested (opaque, no
+   * sorting, casts correct shadows), right for leaves and feathers.
+   * "opaque": alpha ignored. Omitted: as the model says.
+   */
+  alpha?: "cutout" | "opaque";
+  /** Alpha threshold for "cutout". Default 0.5. */
+  alphaCutoff?: number;
+  /** Clips to keep, by name. Omitted: every clip. Long baked clips are the bulk of a rigged model's size. */
+  animations?: string[];
+  /** Node whose translation is removed from every clip, so the model moves only where the game moves it. */
+  rootMotionNode?: string;
 };
 
 export type AssetManifestEntry = Required<Pick<AssetMetadata, "name" | "category" | "scale" | "rotationY" | "anchor" | "collision">> &
@@ -61,6 +82,8 @@ export type AssetManifestEntry = Required<Pick<AssetMetadata, "name" | "category
     materials: number;
     textures: number;
     animations: string[];
+    /** Vertex attributes in the optimised model (union over its meshes). */
+    attributes: string[];
     skinned: boolean;
     /** Bounds of the source model, in its own units. */
     bounds: { min: [number, number, number]; max: [number, number, number] };
@@ -104,7 +127,13 @@ export function validateAssetMetadata(input: unknown): string[] {
       }
     }
   }
-  for (const key of ["replacesPrefabs", "tags"] as const) {
+  if (input.attributes !== undefined && !(Array.isArray(input.attributes) && input.attributes.every((item) => typeof item === "string" && /^[A-Z_]+[0-9]*$/.test(item)))) {
+    errors.push('attributes must be glTF attribute names, e.g. ["COLOR_1"].');
+  }
+  if (input.alpha !== undefined && input.alpha !== "cutout" && input.alpha !== "opaque") errors.push('alpha must be "cutout" or "opaque".');
+  if (input.alphaCutoff !== undefined && !(typeof input.alphaCutoff === "number" && input.alphaCutoff > 0 && input.alphaCutoff < 1)) errors.push("alphaCutoff must be between 0 and 1.");
+  if (input.rootMotionNode !== undefined && typeof input.rootMotionNode !== "string") errors.push("rootMotionNode must be a node name.");
+  for (const key of ["replacesPrefabs", "tags", "animations"] as const) {
     if (input[key] !== undefined && !(Array.isArray(input[key]) && input[key].every((item) => typeof item === "string"))) errors.push(`${key} must be an array of strings.`);
   }
   return errors;

@@ -3,24 +3,28 @@ import fs from "node:fs";
 import path from "node:path";
 import { Logger, NodeIO, type Document } from "@gltf-transform/core";
 import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
-import { dedup, getBounds, meshopt, prune, weld } from "@gltf-transform/functions";
+import { dedup, getBounds, meshopt, prune, resample, weld } from "@gltf-transform/functions";
 import { MeshoptDecoder, MeshoptEncoder } from "meshoptimizer";
 import { getPrefabDefinition } from "@/lib/prefabs/prefab-library";
-import { isAssetId, validateAssetMetadata, type AssetManifest, type AssetManifestEntry, type AssetMetadata } from "./asset-types";
+import { BASE_VERTEX_ATTRIBUTES, isAssetId, validateAssetMetadata, type AssetManifest, type AssetManifestEntry, type AssetMetadata } from "./asset-types";
 
 /**
  * The model pipeline (Node only): reads every folder in assets/models,
  * checks its metadata, optimises the model and writes the result and a
  * manifest to public/assets/models.
  *
- * Optimisation: duplicate accessors and materials merged, unused data
- * removed, vertices welded, then meshopt compression (smaller files, decoded
- * on the GPU-friendly path by the loader). Textures are copied as they are.
+ * Optimisation: vertex attributes nobody reads dropped (asset.json can keep
+ * more), clips trimmed to the ones asked for and root motion removed,
+ * transparency turned into alpha testing where asked, duplicate accessors and
+ * materials merged, unused data removed, animation keyframes resampled
+ * (redundant keys dropped), vertices welded, then meshopt compression
+ * (smaller files, decoded on the GPU-friendly path by the loader). Textures
+ * are copied as they are.
  *
  * Work is skipped for models whose source and metadata have not changed.
  */
 /** Raise when the optimisation steps change, so every output is rebuilt. */
-const PIPELINE_VERSION = 1;
+const PIPELINE_VERSION = 2;
 
 /** Sizes above these are reported as warnings; they do not fail the run. */
 export const ASSET_BUDGET = { bytes: 1_500_000, triangles: 60_000 };
@@ -65,9 +69,59 @@ function describe(document: Document) {
     materials: root.listMaterials().length,
     textures: root.listTextures().length,
     animations: root.listAnimations().map((animation) => animation.getName()),
+    attributes: [...new Set(root.listMeshes().flatMap((mesh) => mesh.listPrimitives().flatMap((primitive) => primitive.listSemantics())))].sort(),
     skinned: root.listSkins().length > 0,
     bounds: { min: [...bounds.min] as [number, number, number], max: [...bounds.max] as [number, number, number] },
   };
+}
+
+/**
+ * The per-model steps asset.json asks for, applied before the generic ones.
+ * Returns a problem to report, or null.
+ */
+export function prepareDocument(document: Document, metadata: AssetMetadata): string | null {
+  const root = document.getRoot();
+  const keep = new Set([...BASE_VERTEX_ATTRIBUTES, ...(metadata.attributes ?? [])]);
+  const present = new Set<string>();
+  for (const mesh of root.listMeshes()) {
+    for (const primitive of mesh.listPrimitives()) {
+      for (const semantic of primitive.listSemantics()) {
+        present.add(semantic);
+        if (!keep.has(semantic)) primitive.setAttribute(semantic, null);
+      }
+    }
+  }
+  const missingAttribute = (metadata.attributes ?? []).find((name) => !present.has(name));
+  if (missingAttribute) return `attribute ${missingAttribute} is not in the model (it has: ${[...present].sort().join(", ")}).`;
+
+  if (metadata.animations) {
+    const names = root.listAnimations().map((animation) => animation.getName());
+    const missing = metadata.animations.find((name) => !names.includes(name));
+    if (missing) return `animation "${missing}" is not in the model (it has: ${names.join(", ") || "none"}).`;
+    for (const animation of root.listAnimations()) {
+      if (metadata.animations.includes(animation.getName())) continue;
+      animation.listChannels().forEach((channel) => channel.dispose());
+      animation.listSamplers().forEach((sampler) => sampler.dispose());
+      animation.dispose();
+    }
+  }
+  if (metadata.rootMotionNode) {
+    if (!root.listNodes().some((node) => node.getName() === metadata.rootMotionNode)) return `rootMotionNode "${metadata.rootMotionNode}" is not a node of the model.`;
+    for (const animation of root.listAnimations()) {
+      for (const channel of animation.listChannels()) {
+        if (channel.getTargetPath() !== "translation" || channel.getTargetNode()?.getName() !== metadata.rootMotionNode) continue;
+        channel.getSampler()?.dispose();
+        channel.dispose();
+      }
+    }
+  }
+  if (metadata.alpha) {
+    for (const material of root.listMaterials()) {
+      if (metadata.alpha === "opaque") material.setAlphaMode("OPAQUE");
+      else if (material.getAlphaMode() !== "OPAQUE") material.setAlphaMode("MASK").setAlphaCutoff(metadata.alphaCutoff ?? 0.5);
+    }
+  }
+  return null;
 }
 
 export async function processAssets(options: { root?: string; force?: boolean } = {}): Promise<AssetReport> {
@@ -132,7 +186,12 @@ export async function processAssets(options: { root?: string; force?: boolean } 
         document = await io.read(modelFile);
         // The transforms narrate every step at the default level; the report below says what matters.
         document.setLogger(new Logger(Logger.Verbosity.WARN));
-        await document.transform(dedup(), prune(), weld(), meshopt({ encoder: MeshoptEncoder, level: "medium" }));
+        const problem = prepareDocument(document, metadata);
+        if (problem) {
+          fail(problem);
+          continue;
+        }
+        await document.transform(dedup(), prune(), resample(), weld(), meshopt({ encoder: MeshoptEncoder, level: "medium" }));
       } catch (error) {
         fail(`could not be read or optimised (${error instanceof Error ? error.message : String(error)}).`);
         continue;
