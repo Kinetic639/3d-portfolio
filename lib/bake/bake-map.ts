@@ -1,81 +1,78 @@
-import { MeshoptSimplifier } from "meshoptimizer";
 import { createLoadedMapState, type MapDefinition } from "@/lib/maps/map-definition";
+import { buildSurfaceChunkMesh, collectSurfaceCells } from "@/lib/terrain/surface-mesher";
+import type { SurfaceCell } from "@/lib/terrain/surface-faces";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
+import { getChunkCounts } from "@/lib/world/world-config";
 import {
   BAKE_FORMAT_VERSION,
   BakedDataWriter,
   toRuntimeMap,
   type BakedHeader,
-  type BakedMeshInfo,
+  type BakedTile,
   type BakedVoxelZone,
   type BakeStats,
+  type GridRegion,
 } from "./baked-format";
-import { buildDensityVolume, buildSmoothSurface, filterSurface, type GridRegion, type SmoothSurface } from "./smooth-mesher";
 
 /**
  * Bakes a voxel map into the static world a visitor loads.
  *
- * - The whole map is meshed once into a smooth surface.
- * - It is cut into the playable area (plus a ring around it) and the
- *   backdrop. Each part is simplified on its own, with its open borders
- *   locked, so the parts still meet without gaps. The backdrop tolerates a
- *   much larger error: it is never seen up close.
- * - Columns of mini-game zones are left out of the static mesh. Their voxels
- *   are stored instead, and the runtime meshes them with the same mesher, so
- *   they look like the terrain around them and can still change.
+ * Nothing is reshaped or simplified: the bake records which faces of which
+ * cells the live mesher would draw, and the browser writes exactly those
+ * faces (see baked-format.ts). What it saves the browser is building the
+ * voxel world and testing every face against its neighbours.
+ *
+ * - Faces are grouped into tiles of TILE_CHUNKS x TILE_CHUNKS chunks, one
+ *   mesh each, for fewer draw calls.
+ * - Columns of mini-game zones, with a ring around them, stay live voxels:
+ *   their voxels are stored instead of their faces (BakedVoxelZone).
  * - A height and a zone id per column replace the voxel world for picking.
  *
  * The same function runs in Node (`pnpm bake`, the editor's bake endpoint)
  * and in the browser (the editor's baked preview).
  */
-export type BakeOptions = {
-  /** Blur passes before meshing. More is smoother and loses more small detail. */
-  smoothing?: number;
-  /** Largest deviation, in world units, simplification may introduce in the playable area. */
-  playableError?: number;
-  backdropError?: number;
-  /** Cells around the playable area that keep playable-area quality. */
-  playableMargin?: number;
-};
-
-export const DEFAULT_BAKE_OPTIONS: Required<BakeOptions> = {
-  smoothing: 1,
-  playableError: 0.02,
-  backdropError: 0.35,
-  playableMargin: 8,
-};
-
-const PLAYABLE_TILE = 32;
-const BACKDROP_TILE = 64;
-const srgbFromLinear = (value: number) => (value <= 0.0031308 ? value * 12.92 : 1.055 * Math.pow(value, 1 / 2.4) - 0.055);
+export const TILE_CHUNKS = 4;
 
 export type BakeResult = { file: Uint8Array; header: BakedHeader };
 
-export async function bakeMap(definition: MapDefinition, options: BakeOptions = {}): Promise<BakeResult> {
+export async function bakeMap(definition: MapDefinition): Promise<BakeResult> {
   const startedAt = performance.now();
-  const settings = { ...DEFAULT_BAKE_OPTIONS, ...options };
-  await MeshoptSimplifier.ready;
-
   const { world } = createLoadedMapState(definition);
-  const { width, depth } = world.config;
-  const whole: GridRegion = { minX: 0, maxX: width - 1, minZ: 0, maxZ: depth - 1 };
-  const surface = buildSmoothSurface(world, whole, { blur: settings.smoothing });
+  const { width, depth, minY, chunkSize } = world.config;
 
-  const voxelZoneIds = new Set(definition.zones.filter((zone) => zone.kind === "minigame").map((zone) => zone.numericId));
-  const isVoxelColumn = (x: number, z: number) => voxelZoneIds.size > 0 && voxelZoneIds.has(world.zones[x + width * z]);
-  const bounds = definition.playableBounds;
-  const margin = settings.playableMargin;
-  const isPlayable = (x: number, z: number) =>
-    x >= bounds.minX - margin && x <= bounds.maxX + margin && z >= bounds.minZ - margin && z <= bounds.maxZ + margin;
+  const voxelZones = definition.zones
+    .filter((zone) => zone.kind === "minigame")
+    .flatMap((zone) => zoneRegions(world, zone.numericId));
+  const live = (x: number, z: number) => voxelZones.some(({ live: region }) => x >= region.minX && x <= region.maxX && z >= region.minZ && z <= region.maxZ);
 
-  const playable = simplify(filterSurface(surface, (x, z) => !isVoxelColumn(x, z) && isPlayable(x, z)), settings.playableError);
-  const backdrop = simplify(filterSurface(surface, (x, z) => !isVoxelColumn(x, z) && !isPlayable(x, z)), settings.backdropError);
+  // Cells tile by tile, chunk by chunk inside each tile: a tile's cells are contiguous.
+  const counts = getChunkCounts(world.config);
+  const cells: SurfaceCell[] = [];
+  const tiles: BakedTile[] = [];
+  let sourceFaces = 0;
+  for (let tileZ = 0; tileZ < counts.z; tileZ += TILE_CHUNKS) {
+    for (let tileX = 0; tileX < counts.x; tileX += TILE_CHUNKS) {
+      const cellStart = cells.length;
+      for (let chunkZ = tileZ; chunkZ < Math.min(counts.z, tileZ + TILE_CHUNKS); chunkZ += 1) {
+        for (let chunkX = tileX; chunkX < Math.min(counts.x, tileX + TILE_CHUNKS); chunkX += 1) {
+          const region = { minX: chunkX * chunkSize, maxX: chunkX * chunkSize + chunkSize - 1, minZ: chunkZ * chunkSize, maxZ: chunkZ * chunkSize + chunkSize - 1 };
+          cells.push(...collectSurfaceCells(world, region, voxelZones.length > 0 ? (x, z) => !live(x, z) : undefined));
+          sourceFaces += buildSurfaceChunkMesh(world, chunkX, chunkZ, { skipMappings: true, packed: true }).visibleQuads;
+        }
+      }
+      if (cells.length > cellStart) tiles.push({ id: `tile-${tileX / TILE_CHUNKS}-${tileZ / TILE_CHUNKS}`, cellStart, cellCount: cells.length - cellStart });
+    }
+  }
 
   const writer = new BakedDataWriter();
-  const meshes: BakedMeshInfo[] = [
-    ...writeTiles(writer, playable, "playable", PLAYABLE_TILE),
-    ...writeTiles(writer, backdrop, "backdrop", BACKDROP_TILE),
-  ];
+  const column = <T extends Uint8Array | Uint16Array>(array: T, pick: (cell: SurfaceCell) => number) => {
+    cells.forEach((cell, index) => { array[index] = pick(cell); });
+    return writer.add(array);
+  };
+  const faceCount = cells.reduce((sum, cell) => sum + cell.faces.length, 0);
+  const faces = new Uint8Array(faceCount);
+  let at = 0;
+  for (const cell of cells) for (const face of cell.faces) faces[at++] = face;
 
   const heights = new Int8Array(width * depth);
   for (let z = 0; z < depth; z += 1) {
@@ -85,22 +82,28 @@ export async function bakeMap(definition: MapDefinition, options: BakeOptions = 
     }
   }
 
-  const stats: BakeStats = {
-    sourceTriangles: surface.indices.length / 3,
-    playableTriangles: playable.indices.length / 3,
-    backdropTriangles: backdrop.indices.length / 3,
-    vertices: meshes.reduce((sum, mesh) => sum + mesh.vertexCount, 0),
-    meshes: meshes.length,
-    bytes: 0,
-    bakeMs: 0,
-  };
+  const stats: BakeStats = { sourceFaces, faces: faceCount, cells: cells.length, tiles: tiles.length, bytes: 0, bakeMs: 0 };
   const header: BakedHeader = {
     format: BAKE_FORMAT_VERSION,
     map: toRuntimeMap(definition),
-    meshes,
+    config: world.config,
+    cells: {
+      count: cells.length,
+      x: column(new Uint16Array(cells.length), (cell) => cell.x),
+      y: column(new Uint8Array(cells.length), (cell) => cell.y - minY),
+      z: column(new Uint16Array(cells.length), (cell) => cell.z),
+      block: column(new Uint8Array(cells.length), (cell) => cell.blockId),
+      shape: column(new Uint8Array(cells.length), (cell) => cell.shapeId),
+      rotation: column(new Uint8Array(cells.length), (cell) => cell.rotation),
+      state: column(new Uint8Array(cells.length), (cell) => cell.state),
+      flags: column(new Uint8Array(cells.length), (cell) => cell.flags),
+      faceCounts: column(new Uint8Array(cells.length), (cell) => cell.faces.length),
+      faces: writer.add(faces),
+    },
+    tiles,
     heights: writer.add(heights),
     zones: writer.add(world.zones),
-    voxelZones: [...voxelZoneIds].flatMap((zoneId) => writeVoxelZone(writer, world, zoneId)),
+    voxelZones: voxelZones.map((zone) => writeVoxelZone(writer, world, zone)),
     stats,
   };
   // Two passes: the byte count is part of the header it describes.
@@ -110,117 +113,52 @@ export async function bakeMap(definition: MapDefinition, options: BakeOptions = 
   return { file: writer.finish(header), header };
 }
 
-function simplify(surface: SmoothSurface, maxError: number): SmoothSurface {
-  if (surface.indices.length === 0) return surface;
-  const vertexCount = surface.positions.length / 3;
-  // Normals and colours take part in the error, so material edges and creases survive.
-  const attributes = new Float32Array(vertexCount * 6);
-  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-    for (let axis = 0; axis < 3; axis += 1) {
-      attributes[vertex * 6 + axis] = surface.normals[vertex * 3 + axis];
-      attributes[vertex * 6 + 3 + axis] = srgbFromLinear(surface.colors[vertex * 3 + axis]);
-    }
-  }
-  const [indices] = MeshoptSimplifier.simplifyWithAttributes(
-    surface.indices,
-    surface.positions,
-    3,
-    attributes,
-    6,
-    [0.5, 0.5, 0.5, 8, 8, 8],
-    null,
-    0,
-    maxError,
-    ["LockBorder", "ErrorAbsolute"],
-  );
-  return compact({ ...surface, indices, triangleColumnX: new Int16Array(0), triangleColumnZ: new Int16Array(0) });
-}
-
-/** Drops vertices no triangle uses. */
-function compact(surface: SmoothSurface): SmoothSurface {
-  const remap = new Int32Array(surface.positions.length / 3).fill(-1);
-  const order: number[] = [];
-  const indices = new Uint32Array(surface.indices.length);
-  for (let n = 0; n < indices.length; n += 1) {
-    const vertex = surface.indices[n];
-    if (remap[vertex] === -1) {
-      remap[vertex] = order.length;
-      order.push(vertex);
-    }
-    indices[n] = remap[vertex];
-  }
-  const pick = (source: Float32Array) => {
-    const target = new Float32Array(order.length * 3);
-    order.forEach((vertex, index) => target.set(source.subarray(vertex * 3, vertex * 3 + 3), index * 3));
-    return target;
-  };
-  return { ...surface, positions: pick(surface.positions), normals: pick(surface.normals), colors: pick(surface.colors), indices };
-}
-
-/** Cuts a surface into square tiles by triangle centroid, so the renderer can cull what is off screen. */
-function writeTiles(writer: BakedDataWriter, surface: SmoothSurface, region: BakedMeshInfo["region"], tileSize: number): BakedMeshInfo[] {
-  const buckets = new Map<string, number[]>();
-  const p = surface.positions;
-  for (let triangle = 0; triangle < surface.indices.length / 3; triangle += 1) {
-    const [a, b, c] = [0, 1, 2].map((n) => surface.indices[triangle * 3 + n] * 3);
-    const key = `${Math.floor((p[a] + p[b] + p[c]) / 3 / tileSize)},${Math.floor((p[a + 2] + p[b + 2] + p[c + 2]) / 3 / tileSize)}`;
-    const bucket = buckets.get(key);
-    if (bucket) bucket.push(triangle);
-    else buckets.set(key, [triangle]);
-  }
-
-  return [...buckets.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([key, triangles]) => {
-    const tile = compact({
-      ...surface,
-      indices: Uint32Array.from(triangles.flatMap((triangle) => [0, 1, 2].map((n) => surface.indices[triangle * 3 + n]))),
-    });
-    const vertexCount = tile.positions.length / 3;
-    const min: [number, number, number] = [Infinity, Infinity, Infinity];
-    const max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
-    const normals = new Int8Array(vertexCount * 3);
-    const colors = new Uint8Array(vertexCount * 3);
-    for (let n = 0; n < vertexCount * 3; n += 1) {
-      const axis = n % 3;
-      min[axis] = Math.min(min[axis], tile.positions[n]);
-      max[axis] = Math.max(max[axis], tile.positions[n]);
-      normals[n] = Math.round(Math.max(-1, Math.min(1, tile.normals[n])) * 127);
-      colors[n] = Math.round(Math.max(0, Math.min(1, srgbFromLinear(tile.colors[n]))) * 255);
-    }
-    return {
-      id: `${region}:${key}`,
-      region,
-      vertexCount,
-      indexCount: tile.indices.length,
-      positions: writer.add(tile.positions),
-      normals: writer.add(normals),
-      colors: writer.add(colors),
-      indices: writer.add(vertexCount <= 65535 ? Uint16Array.from(tile.indices) : tile.indices),
-      bounds: { min, max },
-    };
-  });
-}
-
-function writeVoxelZone(writer: BakedDataWriter, world: VoxelWorld, zoneId: number): BakedVoxelZone[] {
+/** A zone's live and stored rectangles, clamped to the map. None when the zone has no columns. */
+function zoneRegions(world: VoxelWorld, zoneId: number): Array<{ zoneId: number; live: GridRegion; stored: GridRegion }> {
   const { width, depth } = world.config;
-  const region: GridRegion = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
+  const box = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
   for (let z = 0; z < depth; z += 1) {
     for (let x = 0; x < width; x += 1) {
       if (world.zones[x + width * z] !== zoneId) continue;
-      region.minX = Math.min(region.minX, x);
-      region.maxX = Math.max(region.maxX, x);
-      region.minZ = Math.min(region.minZ, z);
-      region.maxZ = Math.max(region.maxZ, z);
+      box.minX = Math.min(box.minX, x);
+      box.maxX = Math.max(box.maxX, x);
+      box.minZ = Math.min(box.minZ, z);
+      box.maxZ = Math.max(box.maxZ, z);
     }
   }
-  if (region.minX === Infinity) return [];
-  const volume = buildDensityVolume(world, region);
-  const density = new Uint8Array(volume.density.length);
-  for (let index = 0; index < density.length; index += 1) density[index] = Math.round(volume.density[index] * 255);
-  return [{
-    zoneId,
-    region,
-    volume: { nx: volume.nx, ny: volume.ny, nz: volume.nz, cellX: volume.cellX, cellY: volume.cellY, cellZ: volume.cellZ },
-    density: writer.add(density),
-    material: writer.add(volume.material),
-  }];
+  if (box.minX === Infinity) return [];
+  const grow = (region: GridRegion, by: number): GridRegion => ({
+    minX: Math.max(0, region.minX - by),
+    maxX: Math.min(width - 1, region.maxX + by),
+    minZ: Math.max(0, region.minZ - by),
+    maxZ: Math.min(depth - 1, region.maxZ + by),
+  });
+  const live = grow(box, 1);
+  return [{ zoneId, live, stored: grow(live, 1) }];
+}
+
+function writeVoxelZone(writer: BakedDataWriter, world: VoxelWorld, zone: { zoneId: number; live: GridRegion; stored: GridRegion }): BakedVoxelZone {
+  const { width, depth, height } = world.config;
+  const { stored } = zone;
+  const nx = stored.maxX - stored.minX + 1;
+  const nz = stored.maxZ - stored.minZ + 1;
+  const count = nx * nz * height;
+  const blocks = new Uint16Array(count);
+  const shapes = new Uint8Array(count);
+  const rotations = new Uint8Array(count);
+  const states = new Uint8Array(count);
+  let at = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let z = stored.minZ; z <= stored.maxZ; z += 1) {
+      for (let x = stored.minX; x <= stored.maxX; x += 1) {
+        const index = x + width * (z + depth * y);
+        blocks[at] = world.blocks[index];
+        shapes[at] = world.shapes[index];
+        rotations[at] = world.rotations[index];
+        states[at] = world.states[index];
+        at += 1;
+      }
+    }
+  }
+  return { ...zone, blocks: writer.add(blocks), shapes: writer.add(shapes), rotations: writer.add(rotations), states: writer.add(states) };
 }

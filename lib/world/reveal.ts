@@ -64,11 +64,18 @@ export function computeExpansionDelay(world: LoaderPlatformWorld, x: number, y: 
   if (isLoaderPlatformTopCell(world, x, y, z)) {
     return 0;
   }
+  return revealDelayAt(world.config, x, z);
+}
 
-  // Keep the established 64x64 reveal speed. Larger worlds extend the same
-  // wave beyond the former boundary instead of renormalizing its duration.
-  const originalCornerDistance = distanceFromCenterPlatform(0, 0, WORLD_CONFIG);
-  return (distanceFromCenterPlatform(x, z, world.config) / originalCornerDistance) * MAX_WAVE_DELAY;
+const ORIGINAL_CORNER_DISTANCE = distanceFromCenterPlatform(0, 0, WORLD_CONFIG);
+
+/**
+ * When the wave reaches a column, from its distance to the loader platform.
+ * Keeps the established 64x64 reveal speed: larger worlds extend the same
+ * wave beyond the former boundary instead of renormalizing its duration.
+ */
+export function revealDelayAt(dimensions: RevealDimensions, x: number, z: number): number {
+  return (distanceFromCenterPlatform(x, z, dimensions) / ORIGINAL_CORNER_DISTANCE) * MAX_WAVE_DELAY;
 }
 
 export function getExpansionRevealEnd(world: LoaderPlatformWorld): number {

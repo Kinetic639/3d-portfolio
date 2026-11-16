@@ -48,7 +48,7 @@ function panelInset() {
  * This is where bridge state meets the DOM and the router. The engine knows
  * nothing about URLs, history or the landing page.
  */
-export default function WorldLayer({ defaultMapId, bakes }: { defaultMapId: string; bakes: Record<string, string> }) {
+export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaultMapId: string; bakes: Record<string, string>; serveBakes: boolean }) {
   const pathname = usePathname();
   const previewMapId = MAP_PATH.exec(pathname)?.[1];
   // A map preview URL switches the map; other pages keep whichever map is loaded.
@@ -58,7 +58,7 @@ export default function WorldLayer({ defaultMapId, bakes }: { defaultMapId: stri
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const enterButtonRef = useRef<HTMLButtonElement>(null);
-  const startLoading = useWorldBoot(mapId, canvasRef, bakes[mapId]);
+  const startLoading = useWorldBoot(mapId, canvasRef, bakes[mapId], serveBakes);
   const phase = useWorldBridge((state) => state.phase);
   const shown = phase === "entering" || phase === "world" || phase === "leaving";
   const { item, open, close } = useContentRoute(worldPath);

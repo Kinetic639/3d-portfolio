@@ -1,3 +1,4 @@
+import type { SurfaceEmitter } from "@/lib/terrain/surface-faces";
 import type { SurfaceChunkMeshData } from "@/lib/terrain/surface-mesher";
 
 /**
@@ -81,6 +82,20 @@ export function packTerrainChunk(data: SurfaceChunkMeshData): TerrainChunkBuffer
     indices: vertexCount > 65535 ? data.indices : new Uint16Array(data.indices),
     summary: summarise(data.positions, reveal),
   };
+}
+
+/** Packs faces written by a SurfaceEmitter (the baked world's path). Null when nothing was written. */
+export function packEmitted(emitter: SurfaceEmitter): TerrainChunkBuffers | null {
+  if (emitter.indices.length === 0) return null;
+  const positions = new Float32Array(emitter.positions);
+  return packTerrainChunk({
+    positions,
+    normals: new Float32Array(emitter.normals),
+    colors: new Float32Array(emitter.colors),
+    uvs: new Float32Array(emitter.uvs),
+    indices: new Uint32Array(emitter.indices),
+    packed: { tex: new Uint8Array(emitter.tex), reveal: new Float32Array(emitter.reveal) },
+  } as SurfaceChunkMeshData);
 }
 
 export function terrainChunkTransferables(buffers: TerrainChunkBuffers): Transferable[] {

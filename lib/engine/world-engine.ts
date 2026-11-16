@@ -2,7 +2,7 @@ import * as THREE from "three";
 import type { QualityTier, WorldBridge, WorldCommand } from "@/lib/bridge/world-bridge";
 import { decodeBakedWorld, type RuntimeMap } from "@/lib/bake/baked-format";
 import type { MapContentReference, MapDefinition } from "@/lib/maps/map-definition";
-import { createBakedQuery, createBakedTerrain } from "./baked-terrain";
+import { createBakedQuery } from "./baked-terrain";
 import { CameraRig, VISITOR_CAMERA } from "./camera-rig";
 import { buildEntityLayer, type EntityLayer } from "./entity-meshes";
 import { ENTRY_SECONDS, FOCUS_SECONDS, loaderView, POP_COMPLETE, rehearsalTimes, sampleEntry, WAVE_UNITS_PER_SECOND, WAVE_WINDOW, type EntryPlan } from "./entry-sequence";
@@ -12,7 +12,7 @@ import { InteractionLayer, type Interactable } from "./interactables";
 import { getModelLibrary, type ModelLibrary } from "./model-library";
 import type { TerrainChunkSummary } from "./terrain-chunk";
 import { getTerrainAtlas, REVEAL_COMPLETE } from "./terrain-material";
-import { buildWorldForMap, type TerrainSource } from "./terrain-meshes";
+import { buildBakedTerrain, buildWorldForMap, type TerrainSource } from "./terrain-meshes";
 import { createVoxelWorldQuery, type WorldQuery } from "./world-query";
 
 /**
@@ -221,13 +221,24 @@ export class WorldEngine {
     this.install(definition, terrain, createVoxelWorldQuery(world), models, options);
   }
 
-  /** Loads a baked world file: static geometry, no voxel data, nothing to build. */
+  /**
+   * Loads a baked world file: the visible faces it lists are written out in a
+   * worker, with no voxel world to build and no neighbour to test.
+   */
   async loadBaked(file: ArrayBuffer, options: LoadMapOptions = {}) {
     this.unloadMap();
     const baked = decodeBakedWorld(file);
-    const models = await this.loadModels(baked.header.map);
-    if (this.disposed || options.signal?.aborted) return;
-    this.install(baked.header.map, createBakedTerrain(baked), createBakedQuery(baked), models, options);
+    const query = createBakedQuery(baked);
+    const [terrain, models] = await Promise.all([
+      buildBakedTerrain(baked, { signal: options.signal, onProgress: options.onProgress }),
+      this.loadModels(baked.header.map),
+      getTerrainAtlas().ready,
+    ]);
+    if (this.disposed || options.signal?.aborted) {
+      terrain.dispose();
+      return;
+    }
+    this.install(baked.header.map, terrain, query, models, options);
     options.onProgress?.(1);
   }
 

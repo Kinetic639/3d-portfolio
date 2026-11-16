@@ -1,3 +1,5 @@
+import { decodeBakedMeshes } from "@/lib/bake/baked-decode";
+import type { BakedHeader } from "@/lib/bake/baked-format";
 import { createLoadedMapState, type MapDefinition } from "@/lib/maps/map-definition";
 import { buildSurfaceChunkMesh } from "@/lib/terrain/surface-mesher";
 import { getChunkCounts, type WorldConfig } from "@/lib/world/world-config";
@@ -9,8 +11,12 @@ import { packTerrainChunk, terrainChunkTransferables, type TerrainChunkBuffers }
  *
  * Protocol: one `build` request in; then `world` (the voxel arrays, copied),
  * one `chunk` per non-empty chunk (buffers transferred), and `done`; or `error`.
+ * A `decode-baked` request writes out a baked world's faces instead: one
+ * `chunk` per tile (and the loader platform, and mini-game zones), no `world`.
  */
-export type WorldBuildRequest = { type: "build"; definition: MapDefinition };
+export type WorldBuildRequest =
+  | { type: "build"; definition: MapDefinition }
+  | { type: "decode-baked"; header: BakedHeader; data: ArrayBuffer };
 
 export type WorldBuildChunk = TerrainChunkBuffers & {
   type: "chunk";
@@ -32,8 +38,22 @@ const scope = self as unknown as {
 };
 
 scope.onmessage = (event: MessageEvent<WorldBuildRequest>) => {
+  const request = event.data;
+  if (request.type === "decode-baked") {
+    try {
+      const meshes = decodeBakedMeshes({ header: request.header, data: request.data });
+      meshes.forEach((mesh, index) => {
+        const message: WorldBuildChunk = { type: "chunk", id: mesh.id, ...mesh.buffers, done: index + 1, total: meshes.length };
+        scope.postMessage(message, terrainChunkTransferables(mesh.buffers));
+      });
+      scope.postMessage({ type: "done" } satisfies WorldBuildMessage);
+    } catch (error) {
+      scope.postMessage({ type: "error", message: error instanceof Error ? error.message : String(error) } satisfies WorldBuildMessage);
+    }
+    return;
+  }
   try {
-    const { world } = createLoadedMapState(event.data.definition);
+    const { world } = createLoadedMapState(request.definition);
     // Copies, not transfers: the worker still needs the world to mesh it.
     const worldMessage: WorldBuildMessage = {
       type: "world",

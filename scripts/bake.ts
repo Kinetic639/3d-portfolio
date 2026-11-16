@@ -29,9 +29,8 @@ async function main() {
     const record = await bakeMapToDisk(id);
     const { stats } = record;
     console.log(
-      `${id}: ${stats.sourceTriangles.toLocaleString("en")} -> ${(stats.playableTriangles + stats.backdropTriangles).toLocaleString("en")} triangles ` +
-      `(playable ${stats.playableTriangles.toLocaleString("en")}, backdrop ${stats.backdropTriangles.toLocaleString("en")}), ` +
-      `${stats.meshes} meshes, ${(record.fileBytes / 1024).toFixed(0)} KB (${(stats.bytes / 1024).toFixed(0)} KB uncompressed), ${stats.bakeMs} ms -> maps/${id}/baked/`,
+      `${id}: ${stats.faces.toLocaleString("en")} visible faces of ${stats.cells.toLocaleString("en")} cells in ${stats.tiles} tiles, ` +
+      `${(record.fileBytes / 1024).toFixed(0)} KB (${(stats.bytes / 1024).toFixed(0)} KB uncompressed), ${stats.bakeMs} ms -> maps/${id}/baked/`,
     );
   }
   if (failed) process.exit(1);

@@ -88,17 +88,13 @@ pnpm bake --all
 pnpm bake --check    # bakes nothing; exits 1 if a bake is missing or out of date
 ```
 
-Or press **Bake** in the editor. Either way the result is `maps/<id>/baked/` (`world.bin`, `bake.json`); commit it with the map. The site uses a bake only while it matches the map file; after any saved change, bake again. `pnpm test` fails if the default map's bake is out of date.
+Or **Bake Map** in the editor's Map workspace. Either way the result is `maps/<id>/baked/` (`world.bin`, `bake.json`); commit it with the map. A bake is used only while it matches the map file; after any saved change, bake again.
 
-To look at the result before saving anything, use the **Voxels / Baked** switch in the editor.
+The bake changes nothing about how the terrain looks: it is the same faces as the voxels. To compare, **Show Baked** in the editor bakes the current state and shows it, and in development `/?world=baked` loads the committed bake on the site (`/?world=voxels` the voxels).
 
-To change how baked terrain looks:
+Visitors get bakes when the site is built with `SERVE_BAKED_WORLDS=1` (set it in the hosting environment); without it they get the voxels.
 
-- shape: `DEFAULT_BAKE_OPTIONS` in `lib/bake/bake-map.ts` (`smoothing`, allowed simplification error for the playable area and the backdrop, width of the full-quality ring);
-- shading and material: the one material in `lib/engine/baked-terrain.ts`;
-- colours: block colours in `lib/world/block-registry.ts`.
-
-Changing the file layout means raising `BAKE_FORMAT_VERSION` in `lib/bake/baked-format.ts`; older bakes then count as out of date and are re-baked.
+Changing the file layout means raising `BAKE_FORMAT_VERSION` in `lib/bake/baked-format.ts`; older bakes then count as out of date.
 
 ## Use the editor
 

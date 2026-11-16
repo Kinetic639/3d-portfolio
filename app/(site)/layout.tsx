@@ -1,5 +1,14 @@
 import WorldLayer from "@/components/world/WorldLayer";
+import { listFreshBakes } from "@/lib/bake/bake-records";
 import { readMapIndex } from "@/lib/maps/map-store";
+
+/**
+ * Whether visitors get a map's bake (when it is fresh) instead of its voxels:
+ * SERVE_BAKED_WORLDS=1 in the build environment. Off until the bake has been
+ * checked against the voxels and approved; development builds load the bake
+ * with ?world=baked either way.
+ */
+const SERVE_BAKED_WORLDS = process.env.SERVE_BAKED_WORLDS === "1";
 
 /**
  * Layout for every page that belongs to the portfolio proper. The world layer
@@ -13,12 +22,7 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
   return (
     <>
       {children}
-      {/*
-        Visitors get the voxel world. Baked worlds are switched off here until the
-        bake keeps the terrain's shapes and textures; to use them again, pass
-        listFreshBakes() from lib/bake/bake-records.
-      */}
-      <WorldLayer defaultMapId={defaultMapId} bakes={{}} />
+      <WorldLayer defaultMapId={defaultMapId} bakes={listFreshBakes()} serveBakes={SERVE_BAKED_WORLDS} />
     </>
   );
 }

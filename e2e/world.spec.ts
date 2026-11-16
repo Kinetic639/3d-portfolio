@@ -10,6 +10,23 @@ test("the default map renders without errors", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test("the default map's bake loads in place of its voxels and plays the same entry", async ({ page }) => {
+  test.skip(process.env.PLAYWRIGHT_PROD === "1", "?world=baked is a development switch.");
+  const errors = trackErrors(page);
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(request.url()));
+  await openWorld(page, "/?world=baked");
+  const meshes = await page.evaluate(() => (window.__worldEngine as unknown as { terrain: { meshes: () => Array<{ name: string }> } }).terrain.meshes().map((mesh) => mesh.name));
+  // Tiles of 4 x 4 chunks and the loader platform on its own, not 144 chunks.
+  expect(meshes).toContain("loader");
+  expect(meshes.filter((name) => name.startsWith("tile-")).length).toBeGreaterThan(0);
+  expect(meshes.length).toBeLessThan(20);
+  // One baked file, and no voxel map.
+  expect(requests.some((url) => url.includes("/world-data/portfolio-main/"))).toBe(true);
+  expect(requests.some((url) => url.includes("map_json"))).toBe(false);
+  expect(errors).toEqual([]);
+});
+
 test("a map can be opened by URL and unknown maps are 404", async ({ page }) => {
   await openWorld(page, "/map/portfolio-main");
   const response = await page.goto("/map/does-not-exist");

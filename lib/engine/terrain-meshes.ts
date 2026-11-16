@@ -5,6 +5,8 @@ import { VoxelWorld } from "@/lib/world/voxel-world";
 import { getChunkCounts } from "@/lib/world/world-config";
 import { packTerrainChunk, type TerrainChunkBuffers } from "./terrain-chunk";
 import { createEditorTerrainUniforms, createTerrainGeometry, createTerrainMaterial, createTerrainUniforms, type EditorTerrainUniforms, type TerrainUniforms } from "./terrain-material";
+import type { BakedWorld } from "@/lib/bake/baked-format";
+import { decodeBakedMeshes } from "@/lib/bake/baked-decode";
 import type { WorldBuildMessage, WorldBuildRequest } from "./world-builder.worker";
 
 /**
@@ -14,6 +16,10 @@ import type { WorldBuildMessage, WorldBuildRequest } from "./world-builder.worke
  * it, and until a map is baked the visitor runtime uses it too. The baked
  * world (smooth static geometry) replaces it behind the same `TerrainSource`
  * shape, so the engine does not care which one it renders.
+ *
+ * Both draw with the same material from the same kind of vertex data: a
+ * baked world is decoded into exactly the buffers the live mesher would have
+ * produced, so the entry wave and the look are identical.
  */
 export type TerrainSource = {
   group: THREE.Group;
@@ -53,7 +59,8 @@ function meshChunk(world: VoxelWorld, chunkX: number, chunkZ: number): ChunkBuff
   return packTerrainChunk(buildSurfaceChunkMesh(world, chunkX, chunkZ, { skipMappings: true, packed: true }));
 }
 
-function createTerrainSource(world: VoxelWorld, editorView = false) {
+/** A terrain source. With a voxel world, `rebuildChunks` remeshes chunks from it; without one (a baked world) it is static. */
+function createTerrainSource(world: VoxelWorld | null, editorView = false) {
   const group = new THREE.Group();
   group.name = "terrain";
   const uniforms = createTerrainUniforms();
@@ -88,6 +95,7 @@ function createTerrainSource(world: VoxelWorld, editorView = false) {
     editorUniforms,
     meshes: () => [...meshes.values()],
     rebuildChunks(chunkIds) {
+      if (!world) return;
       for (const id of chunkIds) {
         const match = /^chunk-(\d+)-(\d+)$/.exec(id);
         if (match) setChunk(id, meshChunk(world, Number(match[1]), Number(match[2])));
@@ -195,6 +203,65 @@ export function buildWorldForMap(definition: MapDefinition, options: TerrainBuil
     };
     worker.postMessage({ type: "build", definition } satisfies WorldBuildRequest);
   });
+}
+
+/**
+ * Baked terrain: the visible faces in the file are written out as vertex
+ * buffers in the world-builder worker (or here, when workers are missing),
+ * then wrapped in geometries. The file's data is transferred to the worker.
+ */
+export function buildBakedTerrain(baked: BakedWorld, options: TerrainBuildOptions = {}): Promise<TerrainSource> {
+  const { source, setChunk } = createTerrainSource(null, options.editorView);
+  if (typeof Worker === "undefined") {
+    for (const mesh of decodeBakedMeshes(baked)) setChunk(mesh.id, mesh.buffers);
+    options.onProgress?.(1);
+    return Promise.resolve(source);
+  }
+  return new Promise<TerrainSource>((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("./world-builder.worker.ts", import.meta.url), { type: "module" });
+    } catch {
+      for (const mesh of decodeBakedMeshes(baked)) setChunk(mesh.id, mesh.buffers);
+      resolve(source);
+      return;
+    }
+    const finish = (error?: unknown) => {
+      worker.terminate();
+      options.signal?.removeEventListener("abort", onAbort);
+      if (error) {
+        source.dispose();
+        reject(error);
+      } else {
+        resolve(source);
+      }
+    };
+    const onAbort = () => finish(new DOMException("World build aborted.", "AbortError"));
+    options.signal?.addEventListener("abort", onAbort);
+    worker.onerror = (event) => finish(new Error(event.message || "World builder worker failed."));
+    worker.onmessage = (event: MessageEvent<WorldBuildMessage>) => {
+      const message = event.data;
+      if (message.type === "chunk") {
+        setChunk(message.id, message);
+        options.onProgress?.(message.done / message.total);
+      } else if (message.type === "done") {
+        options.onProgress?.(1);
+        finish();
+      } else if (message.type === "error") {
+        finish(new Error(message.message));
+      }
+    };
+    // A copy goes to the worker: the caller keeps reading the file's columns.
+    const data = baked.data.slice(0);
+    worker.postMessage({ type: "decode-baked", header: baked.header, data } satisfies WorldBuildRequest, [data]);
+  });
+}
+
+/** Baked terrain decoded on this thread; for the editor's baked view. */
+export function createBakedTerrainSync(baked: BakedWorld): TerrainSource {
+  const { source, setChunk } = createTerrainSource(null);
+  for (const mesh of decodeBakedMeshes(baked)) setChunk(mesh.id, mesh.buffers);
+  return source;
 }
 
 async function buildWorldOnMainThread(definition: MapDefinition, options: TerrainBuildOptions): Promise<BuiltWorld> {

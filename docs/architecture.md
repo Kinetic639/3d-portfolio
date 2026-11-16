@@ -62,13 +62,15 @@ Consequences: the close button, Escape and browser Back are the same operation; 
 A map file (`maps/<id>/map.json`, schema v5) stores:
 
 - `dimensions`: width and depth in cells (multiples of the 16-cell chunk), fixed vertical range;
-- `playableBounds`: the rectangle a visitor can reach. Cells outside it are **backdrop**: authored in the same editor, never reachable, and (from stage 5) baked at reduced detail;
+- `playableBounds`: the rectangle a visitor can reach. Cells outside it are **backdrop**: authored in the same editor, never reachable;
 - `blocks.edits`: differences from the flat generator baseline, one per line in the file so diffs stay small;
 - zones (per-column ids plus definitions; a zone may reference content or declare a mini-game), entities, markers, spawn points, camera presets, `environment` (time of day, wind).
 
 `createLoadedMapState` turns a definition into a `VoxelWorld`: five typed arrays (block, shape, rotation, state per cell; zone per column). World statistics are counters maintained by the mutators, so `getStats()` is O(1).
 
-The engine (`lib/engine/world-engine.ts`) renders a world through a `TerrainSource`. Today the only implementation is the voxel one (`terrain-meshes.ts`): one mesh per chunk from the surface mesher, vertex-coloured. For visitors the meshing runs in a worker (`world-builder.worker.ts`); a time-sliced main-thread path remains for tools and as a fallback. After an edit only dirty chunks are rebuilt (`rebuildChunks`), so cost follows the size of the change. The baked world (stage 5) will be a second `TerrainSource`.
+The engine (`lib/engine/world-engine.ts`) renders a world through a `TerrainSource`. Today the only implementation is the voxel one (`terrain-meshes.ts`): one mesh per chunk from the surface mesher, vertex-coloured. For visitors the meshing runs in a worker (`world-builder.worker.ts`); a time-sliced main-thread path remains for tools and as a fallback. After an edit only dirty chunks are rebuilt (`rebuildChunks`), so cost follows the size of the change. A bake is the other source: one mesh per tile, written in the same worker from the bake's list of visible faces (see Baking). Both produce the same vertex data for the same material.
+
+The mesher never draws the underside of the world's lowest layer: no camera goes below the ground. On the default map that was 36 864 of 87 656 faces (42 % of the vertices and of the terrain's GPU memory, 16.4 MB down to 9.5 MB); every other face is unchanged (checked face by face against the previous mesher).
 
 Objects are instanced per (shape, colour) in `entity-meshes.ts`; each instance maps back to its entity id for picking.
 
@@ -77,16 +79,6 @@ Rendering is **on demand**: `engine.invalidate()` schedules one frame, and the l
 The camera (`camera-rig.ts`) orbits a point on the ground. For visitors it starts as the original did: looking across the terrain from 14° above the horizon, 23 units away, from the south-east (`VISITOR_CAMERA`), free to turn, tilting between 8° and 70°, zooming between 22 and 98 units. Mouse: drag pans, wheel zooms, Ctrl + right drag turns and tilts. Touch: one finger pans, two fingers zoom and turn. Keys: arrows or WASD pan, + and - zoom, Q and E turn. All input moves a goal that is clamped to the playable bounds and the limits; the camera eases towards it, and frames are drawn only while it moves. The editor uses the same rig with wider limits and exact panning.
 
 `Environment` (`environment.ts`) owns sun, ambient light, fog and shared uniforms (`uTime`, `uWind`, `uDaylight`). Time of day and wind change light parameters and uniform values only, never shader variants, so they cannot trigger a shader compile mid-session.
-
-## Baking (*planned, stage 5*)
-
-`pnpm bake [map]` will convert everything outside mini-game zones into static geometry stored next to the map and committed with it:
-
-- organic terrain: density field from voxels → blur → Surface Nets → simplification → smooth normals, so the result has no visible blocks;
-- hard materials (planks, structures): merged boxes with chamfered edges;
-- materials as per-vertex weights blended by a triplanar shader; ambient occlusion baked per vertex (direct light stays dynamic so time of day keeps working);
-- backdrop outside `playableBounds`: aggressive simplification, no collision, no shadows;
-- mini-game zones are cut out and stay voxel-based at runtime, meshed with the same algorithm and shader so they match the baked surroundings.
 
 ## Landing page, background loading and entry
 
@@ -169,9 +161,7 @@ Two things measured along the way and fixed: changing `clip-path` on the canvas 
 
 ## Baking
 
-> **Status.** Baked worlds are switched off for visitors (`app/(site)/layout.tsx` passes no bakes) and the default map's bake was removed. The bake described below smooths the terrain, which is not what the project wants: the next version keeps the voxel shapes and textures exactly and only optimises. The editor's Bake button and Baked view still run the current version.
-
-A map is authored as voxels and shipped as a **baked world**: smooth static geometry plus the little data the runtime needs. `pnpm bake` (or **Bake** in the editor) writes it next to the map, and it is committed with the map:
+A bake keeps the terrain exactly as authored, every cell, shape, material and texture, and saves the browser work. `pnpm bake` (or **Bake Map** in the editor) writes it next to the map, and it is committed with the map:
 
 ```
 maps/<id>/map.json           the voxel map (source)
@@ -179,44 +169,30 @@ maps/<id>/baked/world.bin    what visitors download (gzip)
 maps/<id>/baked/bake.json    which map content it was baked from, sizes, counts
 ```
 
-**Pipeline** (`lib/bake/`):
+**What it stores.** Meshing a voxel world is two steps: deciding which faces of which cells are visible (that needs the whole world and tests every face against its neighbour), and writing those faces out as vertices. The bake does the first step and stores its result: for every cell with a visible face, its position, block, shape, rotation, state, two flags (loader platform, grass covered by a block above) and the indices of its visible faces in its shape's face list (`lib/bake/bake-map.ts`, format in `baked-format.ts`). The browser does only the second step, with the same code the live mesher uses (`lib/terrain/surface-faces.ts`), so the result is the same vertex data, byte for byte: positions, normals, colours, texture parameters, and each vertex's cell centre and reveal delay. The entry wave therefore plays over baked terrain exactly as over voxels, and nothing is swapped when it ends.
 
-1. **Density.** One sample per cell: 1 solid, 0 air, the filled fraction for partial shapes. Below the world is solid and the edge columns repeat outwards, so the surface has no floor and no walls at the map's edge.
-2. **Blur.** One separable [1, 2, 1] pass. A one-block step becomes a slope; a flat top stays exactly at its height.
-3. **Surface Nets.** One vertex per grid cube the surface crosses, at the mean of the edge crossings. Normals come from the density gradient, colours from the highest solid cell touching the vertex.
-4. **Cut and simplify.** Triangles are split into the playable area (plus an 8-cell ring) and the backdrop. Each part is simplified with meshoptimizer with its open borders locked, so the parts still meet exactly. Allowed error: 0.02 units in the playable area, 0.35 in the backdrop. Normals and colours take part in the error so material edges keep their vertices.
-5. **Tiles.** 32-unit tiles in the playable area, 64-unit in the backdrop, for frustum culling.
-6. **Grids.** A height and a zone id per column replace the voxel world for picking (`createHeightfieldQuery`).
+**What changes for the renderer.** Faces are grouped into tiles of 4 × 4 chunks, one mesh each, instead of one mesh per chunk. The loader platform's cells form a mesh of their own, so the landing page's loader draws a few dozen vertices.
 
-Steps 1–3 depend only on the density around a point, so meshes built from overlapping parts of one world agree exactly where they meet (tested). Two things rest on that: the cut in step 4, and mini-game zones.
+**Mini-game zones stay voxels.** The columns of zones with `kind: "minigame"`, plus one column all round, are left out of the baked faces. Their voxels are stored, with one more ring for neighbours, and meshed in the browser by the live mesher (`baked-decode.ts`), so they can be remeshed when a mini-game changes them. Tested: baked faces plus the zone's live faces equal the whole world's live faces.
 
-**Mini-game zones stay voxels.** Columns of zones with `kind: "minigame"` are left out of the static mesh. The bake stores the mesher's input for each such zone (density and material around its bounding rectangle), and the runtime runs the same mesher on it (`createBakedTerrain`). The zone therefore looks like the terrain around it, meets it without a gap (tested: the re-meshed zone equals the part missing from the static mesh, triangle for triangle), and can be re-meshed when a mini-game changes its voxels.
+**Picking.** A height and a zone id per column replace the voxel world (`createHeightfieldQuery`); the heightfield knows one height per column, so picking ignores overhangs.
 
-**What the visitor loads.** The site layout lists every map whose bake is *fresh* (its `sourceHash` matches the map file, ignoring the save timestamp). For those, the browser fetches `/world-data/<id>/<hash>.bin` (a route handler that reads the file; the hash in the address makes the response immutable, so the CDN and the browser keep it) and never downloads the voxel map. A map without a fresh bake falls back to the voxel path, and so does a visitor whose download of the baked file fails. `pnpm test` fails when the default map's bake is stale, and `pnpm bake --check` reports it.
+**What the visitor loads.** The site layout lists every map whose bake is *fresh* (its `sourceHash` matches the map file, ignoring the save timestamp). Visitors get the bake only when the build has `SERVE_BAKED_WORLDS=1`; until the bake is approved it is off, and development builds load it with `?world=baked` (`?world=voxels` forces the voxels). The bake is fetched from `/world-data/<id>/<hash>.bin` (the hash in the address makes it immutable for the CDN and the browser); the voxel map is not downloaded. A map without a fresh bake falls back to the voxel path, and so does a visitor whose download fails. `pnpm bake --check` reports bakes that no longer match their map.
 
-**One runtime, two terrain sources.** The engine installs a `TerrainSource` (meshes) and a `WorldQuery` (ray against terrain, ground height, zone of a column). Voxel maps provide them from the voxel world, baked maps from the file; interaction code only sees the query.
+Measured on the default map (192 × 192):
 
-**Look.** Baked terrain is drawn with flat shading (facets). With smooth shading the smoothed relief was hard to read. Materials blend across one cell because colour is per vertex; this is the placeholder look, and the place where textures or a splat shader would attach later is the single material in `lib/engine/baked-terrain.ts`.
-
-Measured on the default map (192×192, RTX 2060, production build):
-
-| Measure | Voxel path (stage 3) | Baked |
+| | Voxels | Bake |
 |---|---|---|
-| Triangles in the world | 76 940 (smooth, unsimplified) / ~37 k voxel faces in view | 9 676 |
-| World data downloaded | 344 KB map chunk | 91 KB (248 KB after decompression) |
-| JavaScript fetched for the world | 937 KB | 609 KB |
-| World ready after navigation start | 3.1–3.9 s | 1.1–1.4 s |
-| Same with 4× CPU throttling | 4.9–5.3 s | 2.4–2.8 s |
-| Total blocking time while loading | 16–18 ms | 38–69 ms (one task of 88–108 ms) |
-| Warm-up | 630 ms | 570–640 ms, slowest rehearsal frame 0.9–2.9 ms |
-| Draw calls in view | 32–35 | 39 |
-| Entry transition: frames, slowest | 95, 16.8 ms | 95, 16.8 ms, 0 long tasks, 0 scripts fetched |
-| JS heap after entering | 33 MB | 12 MB |
-| Bake time | – | 0.7–0.9 s |
-
-The blocking time went up slightly: decoding the file and creating 32 geometries now happens on the main thread in one go, where the voxel path received chunks from a worker one at a time. It is one task of about 0.1 s; splitting it across frames is possible if it ever matters.
-
-Known limits: the heightfield query knows one height per column, so picking ignores overhangs; partial shapes (slabs, kerbs, rubble: about 200 cells in the default map) are baked as soft bumps, not as their exact form; the backdrop is flat-shaded with large triangles and shows faint facet edges at a low sun.
+| Downloaded for the terrain | 28 KB map (gzip) | 12 KB (628 KB after decompression) |
+| CPU to build the terrain (Node, this machine) | 311–489 ms: parse, build the voxel world, mesh 144 chunks | 115–122 ms: decompress, write 50 792 faces |
+| Terrain meshes / GPU geometries after warm-up | 144 / 156 | 10 / 22 |
+| Draw calls in the resting view | 51 | 15 |
+| Triangles drawn in the resting view | 30 080 | 47 546 (larger tiles cull less) |
+| World ready after navigation (production, 2 runs) | 1.80–2.04 s | 1.46–1.84 s |
+| Same with 4× CPU throttling | 4.27–4.88 s | 3.11–4.32 s |
+| JS heap after entering | 27–30 MB | 23 MB |
+| Resting view compared with the voxel view | – | 317 of 1 296 000 pixels differ: edges where neighbouring faces overlap by design and draw order decides |
+| Bake time | – | 0.7 s |
 
 ## Models
 
@@ -385,13 +361,7 @@ Remaining known costs:
 
 ### Stage 5: baking
 
-- `lib/bake/`: smooth mesher (density, blur, Surface Nets), bake (cut, simplify, tiles, grids, voxel zones), file format, store. `pnpm bake [id...|--all|--check]`.
-- Engine: `loadBaked`, `TerrainSource` from the baked file, `WorldQuery` in place of direct voxel access; the site loads a fresh bake and falls back to voxels otherwise.
-- Editor: Bake button with freshness label, Voxels / Baked view.
-- The default map is baked and committed; a unit test fails when its bake is stale.
-- Tests: 10 unit tests (mesher, bake, zone re-meshing, heightfield rays against voxel rays, freshness), 2 editor e2e tests; all 19 site e2e tests now run against the baked world.
-- New dev dependency: meshoptimizer (simplification, bake time only; not in the visitor bundle).
-- Not in this stage: digging in mini-game zones (stage 8), textures or other art for the baked terrain.
+The first bake smoothed the terrain (density, blur, Surface Nets, simplification); restoration step 5 replaced it with a bake that keeps the terrain exactly (see below).
 
 ### Stage 6: model pipeline
 
@@ -428,3 +398,11 @@ Remaining known costs:
 - Removed with water: the Liquid workspace. Removed as obsolete: the renderer switch. Replaced: local drafts by map files.
 - Kept from the new core: one diff-based undo history, saving to map files, rebuilds in proportion to the edit, previews rebuilt per hovered cell rather than per pointer move, no React work during a stroke, the editor absent from production, models from the asset pipeline (now in the object palette), content and mini-game settings for objects and zones (now in the original's inspector and zone panel), bake controls (now in the Map workspace).
 - My editor interface (`ToolPanel`, `InspectorPanel`, `MapsDialog`) is gone.
+
+### Restoration, step 5: a bake that keeps the terrain
+
+- The bake stores which faces of which cells are visible; the browser writes exactly those faces with the live mesher's own code. Same shapes, textures and reveal data, byte for byte (tested), so the entry wave plays over baked terrain with no swap.
+- Tiles of 4 × 4 chunks (10 meshes instead of 144), the loader platform as its own small mesh, mini-game zones as live voxels.
+- The mesher no longer draws the underside of the world's lowest layer: 42 % fewer vertices on the default map, for voxels and bakes alike.
+- Removed: the smoothing mesher, the simplifier step and the flat-shaded baked material.
+- Visitors still get voxels until the bake is approved (`SERVE_BAKED_WORLDS=1`); `?world=baked` shows it in development.

@@ -45,6 +45,13 @@ function guessQuality(): QualityTier {
   return "high";
 }
 
+/** Bakes are served when switched on; in development, ?world=baked loads one anyway (and ?world=voxels never does). */
+function wantsBake(serveBakes: boolean) {
+  const requested = new URLSearchParams(window.location.search).get("world");
+  if (process.env.NODE_ENV !== "production" && requested) return requested === "baked";
+  return serveBakes;
+}
+
 function prefersSavingData() {
   return (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true;
 }
@@ -58,7 +65,7 @@ function prefersSavingData() {
  * initial JavaScript. With the Save-Data preference, loading waits for the
  * visitor to ask for it (the returned `start`).
  */
-export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasElement | null>, bakeHash?: string) {
+export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasElement | null>, bakeHash?: string, serveBakes = false) {
   const startRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
@@ -96,7 +103,7 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
           });
       const [{ WorldEngine }, source] = await Promise.all([
         import("@/lib/engine/world-engine"),
-        bakeHash ? bakedWorld(bakeHash) : voxelMap(),
+        bakeHash && wantsBake(serveBakes) ? bakedWorld(bakeHash) : voxelMap(),
       ]);
       if (signal.aborted) return;
 
@@ -153,7 +160,7 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
       engine?.dispose();
       worldBridge.reset();
     };
-  }, [mapId, canvasRef, bakeHash]);
+  }, [mapId, canvasRef, bakeHash, serveBakes]);
 
   /** Starts loading now. Only needed when automatic loading was held back. */
   return useCallback(() => startRef.current(), []);
