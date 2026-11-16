@@ -2,9 +2,9 @@ import { notFound } from "next/navigation";
 import LandingPage from "@/components/site/LandingPage";
 import { listMapIds, mapExists } from "@/lib/maps/map-store";
 
-// Only maps that exist in the repository at build time are reachable.
-export const dynamicParams = false;
-
+// Maps in the repository at build time are prerendered. Any other id is
+// checked on request: a map created in the editor since then opens, an
+// unknown one is a 404.
 export function generateStaticParams() {
   return listMapIds().map((mapId) => ({ mapId }));
 }

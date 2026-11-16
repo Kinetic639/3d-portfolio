@@ -2,7 +2,8 @@ import type { MapContentReference } from "./map-definition";
 
 export type PrimitiveType = "box" | "cylinder" | "sphere" | "plane" | "platform" | "sign";
 export type CollisionMode = "none" | "blocking" | "walkable" | "trigger";
-export type PlacedEntityType = "primitive" | "sign" | "prefab" | "decoration-anchor" | "landmark-placeholder";
+/** "model" entities are drawn with a model from the asset pipeline, named by `assetReference`. */
+export type PlacedEntityType = "primitive" | "sign" | "prefab" | "model" | "decoration-anchor" | "landmark-placeholder";
 
 export type SerializableVector3 = {
   x: number;
@@ -76,7 +77,7 @@ export type EntityGroupDefinition = {
 
 export const ENTITY_PRIMITIVE_TYPES: PrimitiveType[] = ["box", "cylinder", "sphere", "plane", "platform", "sign"];
 export const ENTITY_COLLISION_MODES: CollisionMode[] = ["none", "blocking", "walkable", "trigger"];
-export const ENTITY_TYPES: PlacedEntityType[] = ["primitive", "sign", "prefab", "decoration-anchor", "landmark-placeholder"];
+export const ENTITY_TYPES: PlacedEntityType[] = ["primitive", "sign", "prefab", "model", "decoration-anchor", "landmark-placeholder"];
 
 export function createDefaultTransform(position: SerializableVector3 = { x: 0, y: 0.5, z: 0 }): SerializableTransform {
   return {

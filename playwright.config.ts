@@ -16,7 +16,8 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: `pnpm exec next ${serverMode} -p ${port}`,
+    // Models are generated files: build them before the server starts, as `pnpm dev` does.
+    command: `pnpm assets && pnpm exec next ${serverMode} -p ${port}`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
   },

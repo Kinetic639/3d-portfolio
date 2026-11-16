@@ -330,3 +330,37 @@ test("Bake writes the baked world next to the map and tracks whether it is curre
   await page.keyboard.press("Control+s");
   await expect.poll(status).toBe("stale");
 });
+
+test("models from the asset pipeline appear in the object picker with a picture and can be placed", async ({ page }) => {
+  await openEditor(page);
+  await page.keyboard.press("8");
+  const crate = page.getByRole("option", { name: /Crate \(sample\)/ });
+  await expect(crate).toContainText(/model · \d+ KB · 24 tris/);
+  // The picture is rendered in the browser from the model itself.
+  await expect(crate.locator("img")).toHaveAttribute("src", /^data:image\/png/, { timeout: 20_000 });
+  await expect(page.getByRole("option", { name: /Soldier/ })).toContainText("animated");
+
+  await crate.click();
+  const first = await columnTop(page, 20, 20);
+  await page.mouse.click(first.x, first.y);
+  const second = await columnTop(page, 23, 20);
+  await page.mouse.click(second.x, second.y);
+  const placed = await page.evaluate(() => window.__editor!.session.getEntities()
+    .map((entity) => entity as unknown as { entityType: string; assetReference: string; variantId: string; transform: { position: { y: number } } })
+    .filter((entity) => entity.entityType === "model"));
+  expect(placed).toHaveLength(2);
+  expect(placed[0]).toMatchObject({ assetReference: "sample-crate", variantId: "standard" });
+  // Standing on the ground, not sunk into it or floating.
+  expect(placed[0].transform.position.y).toBe(first.top + 1);
+
+  // Two instances of one model share their draw calls: one instanced mesh per model part.
+  const batches = await page.evaluate(() => (window.__editor!.viewport as unknown as { entities: { group: { children: Array<{ name: string; count?: number }> } } })
+    .entities.group.children.filter((child) => child.name.startsWith("entities:model|sample-crate")).map((child) => child.count));
+  expect(batches).toEqual([2, 2]);
+
+  await page.getByRole("tab", { name: "Map" }).click();
+  await page.getByRole("button", { name: "Validate map" }).click();
+  await expect(page.getByText("No problems found.")).toBeVisible();
+  await page.keyboard.press("Control+z");
+  await page.keyboard.press("Control+z");
+});

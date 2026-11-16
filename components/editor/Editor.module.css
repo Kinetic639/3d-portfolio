@@ -304,6 +304,45 @@
   border-radius: 50%;
 }
 
+.library {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.editor button.libraryItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px 3px 3px;
+  text-align: left;
+}
+
+.libraryItem > span:last-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.libraryItem small {
+  color: var(--dsd-muted);
+  font-size: 11px;
+}
+
+.thumb {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 4px;
+  background: var(--dsd-bg);
+}
+
 .buttons {
   display: flex;
   flex-wrap: wrap;

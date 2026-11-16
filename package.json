@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "pnpm assets && next dev",
+    "build": "pnpm assets && next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -12,7 +12,8 @@
     "test:watch": "vitest --passWithNoTests",
     "e2e": "playwright test",
     "migrate:map": "tsx scripts/migrate-legacy-map.ts",
-    "bake": "tsx scripts/bake.ts"
+    "bake": "tsx scripts/bake.ts",
+    "assets": "tsx scripts/assets.ts"
   },
   "dependencies": {
     "gsap": "^3.15.0",
@@ -24,7 +25,9 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "@gltf-transform/cli": "^4.4.2",
+    "@gltf-transform/core": "4.4.2",
+    "@gltf-transform/extensions": "4.4.2",
+    "@gltf-transform/functions": "4.4.2",
     "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",

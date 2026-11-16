@@ -3,6 +3,8 @@ import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { EditorSession } from "@/lib/editor/editor-session";
 import type { EditorViewport, ToolSettings } from "@/lib/editor/editor-viewport";
+import type { Thumbnailer } from "@/lib/editor/thumbnailer";
+import type { ModelLibrary } from "@/lib/engine/model-library";
 import { DEFAULT_ROTATION, DEFAULT_SHAPE_ID } from "@/lib/voxel-shapes/shape-ids";
 import { BLOCK_IDS } from "@/lib/world/block-registry";
 
@@ -44,6 +46,7 @@ export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
   zoneId: 1,
   zoneMode: "paint",
   prefabId: null,
+  modelId: null,
   variantId: null,
 };
 
@@ -72,6 +75,8 @@ export type EditorContextValue = {
   mapId: string;
   session: EditorSession;
   viewport: EditorViewport;
+  models: ModelLibrary;
+  thumbnails: Thumbnailer;
   store: StoreApi<EditorUiState>;
 };
 

@@ -4,8 +4,9 @@ import { createBakedTerrain } from "@/lib/engine/baked-terrain";
 import { CameraRig } from "@/lib/engine/camera-rig";
 import { buildEntityLayer, type EntityLayer } from "@/lib/engine/entity-meshes";
 import { Environment } from "@/lib/engine/environment";
+import type { ModelLibrary } from "@/lib/engine/model-library";
 import type { TerrainSource } from "@/lib/engine/terrain-meshes";
-import type { PlacedMapEntity } from "@/lib/maps/map-entities";
+import { createPlacedEntity, type PlacedMapEntity } from "@/lib/maps/map-entities";
 import { getPrefabDefinition } from "@/lib/prefabs/prefab-library";
 import { groundEntityOnTerrain } from "@/lib/prefabs/prefab-placement";
 import { buildZoneOverlayChunkMeshes } from "@/lib/terrain/zone-overlay";
@@ -39,7 +40,9 @@ export type ToolSettings = {
   /** Numeric zone id painted by the zone tool. */
   zoneId: number;
   zoneMode: "paint" | "erase";
+  /** The object the object tool places: a procedural prefab or a model, never both. */
   prefabId: string | null;
+  modelId: string | null;
   variantId: string | null;
 };
 
@@ -99,6 +102,7 @@ export class EditorViewport {
   private readonly session: EditorSession;
   private readonly terrain: TerrainSource;
   private readonly callbacks: ViewportCallbacks;
+  private readonly models: ModelLibrary;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly environment: Environment;
@@ -134,12 +138,13 @@ export class EditorViewport {
   private lastTickAt = 0;
   private disposed = false;
 
-  constructor(canvas: HTMLCanvasElement, session: EditorSession, terrain: TerrainSource, settings: ToolSettings, callbacks: ViewportCallbacks) {
+  constructor(canvas: HTMLCanvasElement, session: EditorSession, terrain: TerrainSource, models: ModelLibrary, settings: ToolSettings, callbacks: ViewportCallbacks) {
     this.canvas = canvas;
     this.session = session;
     this.terrain = terrain;
     this.settings = settings;
     this.callbacks = callbacks;
+    this.models = models;
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
@@ -149,7 +154,7 @@ export class EditorViewport {
     this.rig = new CameraRig(canvas, { onChange: () => this.invalidate(), panButtons: [1, 2], ...EDITOR_ZOOM, initialDistance: 90 });
     this.camera = this.rig.camera;
 
-    this.entities = buildEntityLayer(session.getEntities());
+    this.entities = buildEntityLayer(session.getEntities(), models);
     this.scene.add(terrain.group, this.entities.group, this.overlays);
 
     const previewMaterial = new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.4, depthWrite: false });
@@ -326,7 +331,7 @@ export class EditorViewport {
       this.entitiesDirty = false;
       this.scene.remove(this.entities.group);
       this.entities.dispose();
-      this.entities = buildEntityLayer(this.session.getEntities());
+      this.entities = buildEntityLayer(this.session.getEntities(), this.models);
       this.scene.add(this.entities.group);
       this.stats.entityRebuilds += 1;
       this.selectionDirty = true;
@@ -706,7 +711,53 @@ export class EditorViewport {
     }
   }
 
+  /** Rebuilds the objects, e.g. after a model finished loading. */
+  refreshEntities() {
+    this.entitiesDirty = true;
+    this.invalidate();
+  }
+
+  private placeModel(target: GridCoordinate, modelId: string) {
+    const entry = this.models.entry(modelId);
+    if (!entry) return;
+    const world = this.session.world;
+    const top = world.getHighestNonAirY(target.x, target.z) ?? target.y;
+    const centre = world.gridToWorld(target.x, top, target.z);
+    const variant = entry.variants.find((candidate) => candidate.id === this.settings.variantId);
+    const scale = entry.scale * (variant?.scale ?? 1);
+    const size = [0, 1, 2].map((axis) => Math.max(0.1, (entry.bounds.max[axis] - entry.bounds.min[axis]) * scale));
+    const taken = new Set(this.session.getEntities().map((entity) => entity.id));
+    let id = entry.id;
+    for (let suffix = 2; taken.has(id); suffix += 1) id = `${entry.id}-${suffix}`;
+    const entity = createPlacedEntity({
+      id,
+      name: entry.name,
+      entityType: "model",
+      assetReference: entry.id,
+      variantId: variant?.id,
+      transform: {
+        position: { x: centre.x, y: centre.y + 0.5 + (entry.anchor === "center" ? size[1] / 2 : 0), z: centre.z },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+      placement: { anchor: entry.anchor, snapToGrid: true, surfaceAttached: true, surfaceOffset: 0 },
+      footprint: { width: size[0], height: size[1], depth: size[2] },
+      collisionMode: entry.collision,
+      tags: ["model", ...entry.tags],
+    });
+    this.session.addEntities(`Place ${entry.name}`, [entity]);
+    this.selection = [entity.id];
+    this.selectionDirty = true;
+    this.callbacks.onSelectionChange(this.selection);
+    // Until the model is in memory the object shows as a placeholder box.
+    if (!this.models.get(entry.id)) void this.models.ensureLoaded([entry.id]).then(() => this.refreshEntities());
+  }
+
   private placeObject(target: GridCoordinate) {
+    if (this.settings.modelId) {
+      this.placeModel(target, this.settings.modelId);
+      return;
+    }
     const { prefabId, variantId } = this.settings;
     const prefab = prefabId ? getPrefabDefinition(prefabId) : null;
     if (!prefab) return;
@@ -863,6 +914,15 @@ export class EditorViewport {
 /** Puts a surface-attached entity on the terrain under it; other entities are returned unchanged. */
 export function groundIfAttached(session: EditorSession, entity: PlacedMapEntity): PlacedMapEntity {
   if (!entity.placement.surfaceAttached) return entity;
+  if (entity.entityType === "model") {
+    // A model's anchor is its base (or its centre): it stands on the top of the column under it.
+    const world = session.world;
+    const cell = world.worldToGrid({ x: entity.transform.position.x, y: 0, z: entity.transform.position.z });
+    const top = cell ? world.getHighestNonAirY(cell.x, cell.z) : null;
+    if (top === null) return entity;
+    entity.transform.position.y = top + 1 + (entity.placement.anchor === "center" ? entity.footprint.height / 2 : 0);
+    return entity;
+  }
   const grounded = groundEntityOnTerrain(session.world, entity);
   return grounded.ok ? grounded.entity : entity;
 }

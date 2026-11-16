@@ -826,6 +826,9 @@ function validatePlacedEntities(
         }
       }
     }
+    if (entity.entityType === "model" && (typeof entity.assetReference !== "string" || !isStableId(entity.assetReference))) {
+      errors.push(`Model entity ${String(entity.id)} must name its model in assetReference.`);
+    }
     if (!isSerializableTransform(entity.transform)) errors.push(`${label} transform is invalid.`);
     if (!isFootprint(entity.footprint)) errors.push(`${label} footprint is invalid.`);
     if (entity.footprintOverride !== undefined && !isFootprint(entity.footprintOverride)) errors.push(`${label} footprint override is invalid.`);

@@ -2,6 +2,7 @@
 
 import type { MapBounds, MapZoneDefinition } from "@/lib/maps/map-definition";
 import type { PlacedMapEntity } from "@/lib/maps/map-entities";
+import { getPrefabDefinition } from "@/lib/prefabs/prefab-library";
 import {
   addZone,
   assignContentToSelection,
@@ -83,6 +84,7 @@ function ObjectTab() {
                   ))}
                 </span>
               </Row>
+              <VariantRow entity={single} onChange={(variantId) => update("Change variant", (entity) => { entity.variantId = variantId; })} />
               <Row label="Locked">
                 <input type="checkbox" aria-label="Locked" checked={single.locked} onChange={(event) => update(event.target.checked ? "Lock object" : "Unlock object", (entity) => { entity.locked = event.target.checked; })} />
               </Row>
@@ -130,6 +132,23 @@ function ObjectTab() {
         </ul>
       </section>
     </div>
+  );
+}
+
+function VariantRow({ entity, onChange }: { entity: PlacedMapEntity; onChange: (variantId: string) => void }) {
+  const { models } = useEditor();
+  const variants = entity.entityType === "model"
+    ? models.entry(entity.assetReference ?? "")?.variants ?? []
+    : entity.entityType === "prefab" ? getPrefabDefinition(entity.prefabId ?? "")?.variants ?? [] : [];
+  if (variants.length < 2) return null;
+  return (
+    <Row label="Variant">
+      <select className={styles.input} aria-label="Variant" value={entity.variantId ?? variants[0].id} onChange={(event) => onChange(event.target.value)}>
+        {variants.map((variant) => (
+          <option key={variant.id} value={variant.id}>{variant.label}</option>
+        ))}
+      </select>
+    </Row>
   );
 }
 

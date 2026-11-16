@@ -110,7 +110,7 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
         describeContent: (reference: MapContentReference) => resolveContentReference(PORTFOLIO_CONTENT, reference)?.title ?? null,
         onProgress: (fraction: number) => worldBridge.set({ progress: fraction * 0.6 }),
       };
-      if (source instanceof ArrayBuffer) instance.loadBaked(source, loadOptions);
+      if (source instanceof ArrayBuffer) await instance.loadBaked(source, loadOptions);
       else await instance.loadMap(migrateMapDefinition(source), loadOptions);
       if (signal.aborted) return;
 

@@ -48,6 +48,37 @@ Accepts schema v1–v4, writes `maps/my-map/map.json` in v5. `--backdrop N` adds
 - Any map in `maps/` is reachable at `/map/<id>`.
 - The default map shown on `/` is `defaultMapId` in `maps/index.json`. Commit and deploy to change it for visitors. In the editor: **Maps → Make default**.
 
+## Add a model
+
+1. Create `assets/models/<id>/` (lowercase letters, digits, dashes). Put the model there as `model.glb` (or `model.gltf` with its files).
+2. Add `asset.json` next to it. Only `name` and `category` are required:
+
+   ```json
+   {
+     "name": "Oak",
+     "category": "nature",
+     "scale": 1,
+     "rotationY": 0,
+     "anchor": "bottom",
+     "collision": "blocking",
+     "variants": [
+       { "id": "standard", "label": "Standard" },
+       { "id": "large", "label": "Large", "scale": 1.5 },
+       { "id": "autumn", "label": "Autumn", "tint": "#d98a3a" }
+     ],
+     "animation": "Idle",
+     "replacesPrefabs": ["deciduous-tree"]
+   }
+   ```
+
+   `scale` converts the model's units to blocks. `anchor` is the point that sits at an instance's position: the centre of the base (`bottom`) or the centre of the model. `animation` names a clip to loop. `replacesPrefabs` draws every placed instance of those procedural prefabs with this model.
+3. Run `pnpm assets` (or restart `pnpm dev`, or press **Rescan models** in the editor). The table it prints shows the size before and after, triangles and textures; errors name the asset and the problem.
+4. In the editor, choose the Object tool: the model is under **Models** with its picture and size. Place it like any object.
+
+To replace a model, overwrite its file and run `pnpm assets`: every placed instance changes. Do not rename the folder once maps use it; the folder name is the id maps store.
+
+To add an object type that is not a model, add a procedural prefab to `lib/prefabs/prefab-library.ts`; it appears in the same picker.
+
 ## Bake a map
 
 ```bash
@@ -110,6 +141,5 @@ A new kind of edit that the session cannot express yet (not terrain cells, zone 
 
 | Recipe | Stage |
 |---|---|
-| Add a model or object type | 6 |
 | Replace or add a material, shader or post-processing effect | 6 |
 | Add a mini-game | 8 |

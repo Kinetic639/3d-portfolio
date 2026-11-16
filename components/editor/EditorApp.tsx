@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { EditorSession } from "@/lib/editor/editor-session";
 import { EditorViewport, MAX_BRUSH_SIZE, type HoverInfo } from "@/lib/editor/editor-viewport";
+import { Thumbnailer } from "@/lib/editor/thumbnailer";
+import { getModelLibrary } from "@/lib/engine/model-library";
 import { buildWorldForMap } from "@/lib/engine/terrain-meshes";
 import { migrateMapDefinition } from "@/lib/maps/map-definition";
 import { ROTATION_VALUES } from "@/lib/voxel-shapes/shape-ids";
@@ -29,10 +31,17 @@ export default function EditorApp({ mapId, notice }: { mapId: string; notice?: s
     if (!canvas) return;
     const controller = new AbortController();
     let viewport: EditorViewport | null = null;
+    let thumbnails: Thumbnailer | null = null;
 
     const load = async () => {
       const definition = migrateMapDefinition(await api<unknown>(`/api/editor/maps/${mapId}`, { signal: controller.signal }));
-      const { world, terrain } = await buildWorldForMap(definition, { signal: controller.signal, onProgress: setProgress });
+      const [{ world, terrain }, models] = await Promise.all([
+        buildWorldForMap(definition, { signal: controller.signal, onProgress: setProgress }),
+        getModelLibrary().then(async (library) => {
+          await library.ensureLoaded(library.idsFor(definition.entities));
+          return library;
+        }),
+      ]);
       if (controller.signal.aborted) {
         terrain.dispose();
         return;
@@ -42,7 +51,7 @@ export default function EditorApp({ mapId, notice }: { mapId: string; notice?: s
       const firstZone = session.getMeta().zones[0]?.numericId;
       if (firstZone !== undefined) store.setState({ settings: { ...store.getState().settings, zoneId: firstZone } });
 
-      viewport = new EditorViewport(canvas, session, terrain, store.getState().settings, {
+      viewport = new EditorViewport(canvas, session, terrain, models, store.getState().settings, {
         onSelectionChange: (ids) => store.setState(ids.length > 0 ? { selection: ids, inspectorTab: "object" } : { selection: ids }),
         // Hover changes with every pointer move: written straight to the DOM, never through React.
         onHover: (info) => {
@@ -66,7 +75,8 @@ export default function EditorApp({ mapId, notice }: { mapId: string; notice?: s
           entitiesRevision: state.entitiesRevision + (change.entitiesStructural || change.entitiesUpdated.length > 0 ? 1 : 0),
         });
       });
-      const value = { mapId, session, viewport, store };
+      thumbnails = new Thumbnailer(models);
+      const value = { mapId, session, viewport, models, thumbnails, store };
       void refreshBakeStatus(value);
       (window as unknown as { __editor?: EditorContextValue }).__editor = value;
       setEditor(value);
@@ -79,6 +89,7 @@ export default function EditorApp({ mapId, notice }: { mapId: string; notice?: s
     return () => {
       controller.abort();
       viewport?.dispose();
+      thumbnails?.dispose();
       setEditor(null);
     };
   }, [mapId]);

@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
   // Pages read maps from disk, so file tracing would otherwise copy the
   // editor's source files into the deployment alongside them.
   outputFileTracingExcludes: {
-    "/*": ["app/editor/**", "app/api/editor/**", "components/editor/**", "lib/editor/**", "e2e/**", "docs/**"],
+    "/*": ["app/editor/**", "app/api/editor/**", "components/editor/**", "lib/editor/**", "e2e/**", "docs/**", "assets/**"],
   },
 };
 

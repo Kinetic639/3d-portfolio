@@ -7,6 +7,7 @@ import { CameraRig } from "./camera-rig";
 import { buildEntityLayer, type EntityLayer } from "./entity-meshes";
 import { Environment } from "./environment";
 import { InteractionLayer, type Interactable } from "./interactables";
+import { getModelLibrary, type ModelLibrary } from "./model-library";
 import { buildWorldForMap, type TerrainSource } from "./terrain-meshes";
 import { createVoxelWorldQuery, type WorldQuery } from "./world-query";
 
@@ -154,25 +155,34 @@ export class WorldEngine {
    */
   async loadMap(definition: MapDefinition, options: LoadMapOptions = {}) {
     this.unloadMap();
-    const { world, terrain } = await buildWorldForMap(definition, options);
+    const [{ world, terrain }, models] = await Promise.all([buildWorldForMap(definition, options), this.loadModels(definition)]);
     if (this.disposed || options.signal?.aborted) {
       terrain.dispose();
       return;
     }
-    this.install(definition, terrain, createVoxelWorldQuery(world), options);
+    this.install(definition, terrain, createVoxelWorldQuery(world), models, options);
   }
 
   /** Loads a baked world file: static geometry, no voxel data, nothing to build. */
-  loadBaked(file: ArrayBuffer, options: LoadMapOptions = {}) {
+  async loadBaked(file: ArrayBuffer, options: LoadMapOptions = {}) {
     this.unloadMap();
     const baked = decodeBakedWorld(file);
-    this.install(baked.header.map, createBakedTerrain(baked), createBakedQuery(baked), options);
+    const models = await this.loadModels(baked.header.map);
+    if (this.disposed || options.signal?.aborted) return;
+    this.install(baked.header.map, createBakedTerrain(baked), createBakedQuery(baked), models, options);
     options.onProgress?.(1);
   }
 
-  private install(definition: RuntimeMap, terrain: TerrainSource, query: WorldQuery, options: LoadMapOptions) {
+  /** The models the map's objects use, loaded before the map is shown so warm-up covers them. */
+  private async loadModels(definition: RuntimeMap) {
+    const models = await getModelLibrary();
+    await models.ensureLoaded(models.idsFor(definition.entities));
+    return models;
+  }
+
+  private install(definition: RuntimeMap, terrain: TerrainSource, query: WorldQuery, models: ModelLibrary, options: LoadMapOptions) {
     this.terrain = terrain;
-    this.entities = buildEntityLayer(definition.entities);
+    this.entities = buildEntityLayer(definition.entities, models);
     this.interaction = new InteractionLayer({
       map: definition,
       query,
@@ -484,6 +494,8 @@ export class WorldEngine {
     this.lastTickAt = now;
     this.elapsedSeconds += delta;
     const cameraMoving = this.rig.update(delta);
+    // Animated models need a frame every frame for as long as the world is shown.
+    const animating = this.entities?.update(delta) ?? false;
     this.environment.update(this.elapsedSeconds);
     if (this.interaction) {
       this.rig.camera.updateMatrixWorld();
@@ -501,14 +513,15 @@ export class WorldEngine {
     this.stats.geometries = info.memory.geometries;
     this.stats.textures = info.memory.textures;
     this.stats.programs = info.programs?.length ?? 0;
-    this.lastFrameAt = cameraMoving ? now : 0;
+    this.lastFrameAt = cameraMoving || animating ? now : 0;
 
     if (cameraMoving) {
       this.invalidate();
       return;
     }
-    // The loop stops here; the next frame after an idle gap starts a fresh time step.
-    this.lastTickAt = 0;
+    if (animating) this.invalidate();
+    // Otherwise the loop stops here; the next frame after an idle gap starts a fresh time step.
+    else this.lastTickAt = 0;
     if (this.entering) {
       // The approach has landed: the visitor may take over.
       this.entering = false;
@@ -517,7 +530,7 @@ export class WorldEngine {
       this.bridge.events.emit({ type: "entered" });
     }
     // The world moved under a resting pointer: what it hovers may have changed.
-    if (this.pointer) this.schedulePick();
+    if (this.pointer && !animating) this.schedulePick();
   };
 
   private resize() {

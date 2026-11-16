@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { listLibraryItems, type LibraryItem } from "@/lib/assets/library";
 import { MAX_BRUSH_SIZE, type EditorTool } from "@/lib/editor/editor-viewport";
-import { BUILT_IN_PREFABS, getPrefabDefinition, listPrefabCategories } from "@/lib/prefabs/prefab-library";
 import { ROTATIONS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 import { SHAPE_DEFINITIONS } from "@/lib/voxel-shapes/shape-registry";
 import { RENDERABLE_BLOCK_DEFINITIONS } from "@/lib/world/block-registry";
+import { api } from "./editor-actions";
 import { updateSettings, useEditor, useEditorState } from "./editor-store";
 import { Row } from "./fields";
 import styles from "./Editor.module.css";
@@ -128,7 +129,7 @@ export default function ToolPanel() {
         </section>
       ) : null}
 
-      {settings.tool === "object" ? <PrefabPicker /> : null}
+      {settings.tool === "object" ? <LibraryPicker /> : null}
     </aside>
   );
 }
@@ -150,54 +151,115 @@ function ActiveZone() {
   );
 }
 
-function PrefabPicker() {
+const kb = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+
+function Thumbnail({ item }: { item: LibraryItem }) {
+  const { thumbnails } = useEditor();
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let current = true;
+    thumbnails.render(item).then((result) => {
+      if (current) setUrl(result);
+    }, () => undefined);
+    return () => {
+      current = false;
+    };
+  }, [thumbnails, item]);
+  // Decorative: the name is next to it.
+  // eslint-disable-next-line @next/next/no-img-element
+  return url ? <img className={styles.thumb} src={url} alt="" width={56} height={56} /> : <span className={styles.thumb} />;
+}
+
+/** Models from assets/models and the procedural prefabs, in one list. */
+function LibraryPicker() {
   const editor = useEditor();
   const prefabId = useEditorState((state) => state.settings.prefabId);
+  const modelId = useEditorState((state) => state.settings.modelId);
   const variantId = useEditorState((state) => state.settings.variantId);
-  const categories = useMemo(() => listPrefabCategories(), []);
-  const [category, setCategory] = useState(categories[0]);
+  const dirty = useEditorState((state) => state.dirty);
+  const items = useMemo(() => listLibraryItems(editor.models.manifest), [editor.models]);
+  const models = items.filter((item) => item.kind === "model");
+  const categories = useMemo(() => [...new Set(items.map((item) => item.category))], [items]);
+  const [category, setCategory] = useState(models.length > 0 ? "models" : categories[0]);
   const [query, setQuery] = useState("");
-  const prefab = prefabId ? getPrefabDefinition(prefabId) : null;
+  const [scanning, setScanning] = useState(false);
   const needle = query.trim().toLowerCase();
-  const prefabs = BUILT_IN_PREFABS.filter((candidate) => (needle ? candidate.name.toLowerCase().includes(needle) : candidate.category === category));
+  const shown = needle
+    ? items.filter((item) => item.name.toLowerCase().includes(needle))
+    : category === "models" ? models : items.filter((item) => item.category === category);
+  const selectedKey = modelId ? `model:${modelId}` : prefabId ? `prefab:${prefabId}` : null;
+  const selected = items.find((item) => item.key === selectedKey) ?? null;
+  const totalBytes = models.reduce((sum, item) => sum + (item.bytes ?? 0), 0);
+
+  const rescan = async () => {
+    setScanning(true);
+    try {
+      const result = await api<{ errors: string[] }>("/api/editor/assets", { method: "POST" });
+      if (result.errors.length > 0) {
+        editor.store.setState({ notice: { kind: "error", text: `Models: ${result.errors.join(" ")}` } });
+      } else if (dirty) {
+        editor.store.setState({ notice: { kind: "info", text: "Models rescanned. Save, then reload the editor to see the changes." } });
+      } else {
+        window.location.reload();
+      }
+    } catch (error) {
+      editor.store.setState({ notice: { kind: "error", text: `Rescan failed: ${error instanceof Error ? error.message : String(error)}` } });
+    }
+    setScanning(false);
+  };
 
   return (
     <section className={styles.section}>
       <h3>Object</h3>
       <input className={styles.input} type="search" placeholder="Search objects" aria-label="Search objects" value={query} onChange={(event) => setQuery(event.target.value)} />
       {needle ? null : (
-        <select className={styles.input} aria-label="Object category" value={category} onChange={(event) => setCategory(event.target.value as typeof category)}>
+        <select className={styles.input} aria-label="Object category" value={category} onChange={(event) => setCategory(event.target.value)}>
+          <option value="models">Models ({models.length})</option>
           {categories.map((name) => (
             <option key={name} value={name}>{name}</option>
           ))}
         </select>
       )}
-      <ul className={styles.list} role="listbox" aria-label="Objects">
-        {prefabs.map((candidate) => (
-          <li key={candidate.id}>
+      <ul className={styles.library} role="listbox" aria-label="Objects">
+        {shown.map((item) => (
+          <li key={item.key}>
             <button
               type="button"
               role="option"
-              aria-selected={candidate.id === prefabId}
-              className={styles.listItem}
-              onClick={() => updateSettings(editor, { prefabId: candidate.id, variantId: candidate.defaultVariantId })}
+              aria-selected={item.key === selectedKey}
+              className={styles.libraryItem}
+              onClick={() => updateSettings(editor, item.kind === "model"
+                ? { modelId: item.id, prefabId: null, variantId: item.defaultVariantId }
+                : { prefabId: item.id, modelId: null, variantId: item.defaultVariantId })}
             >
-              {candidate.name}
+              <Thumbnail item={item} />
+              <span>
+                {item.name}
+                <small>
+                  {item.kind === "model"
+                    ? `model · ${kb(item.bytes ?? 0)} · ${(item.triangles ?? 0).toLocaleString("en")} tris${item.animated ? " · animated" : ""}`
+                    : item.replacedBy ? `drawn as model ${item.replacedBy}` : "placeholder"}
+                </small>
+              </span>
             </button>
           </li>
         ))}
-        {prefabs.length === 0 ? <li className={styles.muted}>Nothing matches.</li> : null}
+        {shown.length === 0 ? <li className={styles.muted}>{category === "models" && !needle ? "No models yet. Add a folder to assets/models and rescan." : "Nothing matches."}</li> : null}
       </ul>
-      {prefab && prefab.variants.length > 1 ? (
+      {selected && selected.variants.length > 1 ? (
         <Row label="Variant">
-          <select className={styles.input} aria-label="Object variant" value={variantId ?? prefab.defaultVariantId} onChange={(event) => updateSettings(editor, { variantId: event.target.value })}>
-            {prefab.variants.map((variant) => (
+          <select className={styles.input} aria-label="Object variant" value={variantId ?? selected.defaultVariantId ?? ""} onChange={(event) => updateSettings(editor, { variantId: event.target.value })}>
+            {selected.variants.map((variant) => (
               <option key={variant.id} value={variant.id}>{variant.label}</option>
             ))}
           </select>
         </Row>
       ) : null}
-      {prefab ? null : <p className={styles.muted}>Choose an object, then click the ground.</p>}
+      {selected ? null : <p className={styles.muted}>Choose an object, then click the ground.</p>}
+      <div className={styles.buttons}>
+        <button type="button" onClick={rescan} disabled={scanning} title="Runs the model pipeline again, like pnpm assets">{scanning ? "Scanning…" : "Rescan models"}</button>
+        <span className={styles.muted}>{models.length} models, {kb(totalBytes)}</span>
+      </div>
     </section>
   );
 }
