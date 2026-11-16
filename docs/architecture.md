@@ -537,3 +537,7 @@ The first bake smoothed the terrain (density, blur, Surface Nets, simplification
 
 - The lab's crow controller on the engine (`Actor`), chosen and sent in the world with a following camera, its motion and clip preview in the editor. Animated models animate only in view.
 - Editor shortcuts (Ctrl+S, Ctrl+Z) work after using a slider: both copies of the "is the visitor typing" check now leave sliders and checkboxes out.
+
+### Style-lab port, point 6: the engine stays free of React
+
+- `eslint.config.mjs` forbids React, Next.js, zustand's React entry, `@/components/*` and the two React hooks in `lib/` (the hooks themselves and the design system's fonts excepted). `lib/engine/EngineBoundary.test.ts` checks that the rule is there and bites. The monorepo plan's package-boundary checks are not ported: this repository is one app.

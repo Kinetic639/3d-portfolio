@@ -206,6 +206,9 @@ Animated models animate, and ask for frames, only while they are in view (or tra
 
 ## Add an engine system (wind, weather, time of day)
 
+Everything in `lib/` stays free of React and Next.js (`pnpm lint` enforces it): the engine runs outside React and talks to the page only through `lib/bridge`. A React hook that reads engine state belongs next to `lib/bridge/use-world-bridge.ts`.
+
+
 1. Put shared values in `Environment.uniforms` (`lib/engine/environment.ts`) and update them in `Environment.update` or a setter.
 2. In a custom material, spread `environment.uniforms` into the material's uniforms and read them in the shader.
 3. Drive effects through uniform values and light parameters, not through shader `#define` variants, so changing the weather never compiles a shader during play.
