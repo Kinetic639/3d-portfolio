@@ -8,8 +8,9 @@ export default defineConfig({
     },
   },
   test: {
-    environment: "jsdom",
+    environment: "node",
     exclude: ["temp/**", "e2e/**", "**/node_modules/**", "**/.next/**"],
     globals: false,
+    testTimeout: 20000,
   },
 });

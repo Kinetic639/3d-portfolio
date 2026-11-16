@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Portfolio
 
-## Getting Started
+Michał Stępień's portfolio: a Next.js site whose centrepiece is an interactive 3D world built from voxels in a local editor and baked into static geometry for production.
 
-First, run the development server:
+The project is being rebuilt in stages on the `rebuild/base` branch. Stages 1–6 are done: the map format and content model, the engine and its bridge to the page UI, clickable objects with a content panel and a URL per item, the landing page with background loading, warm-up and the entry transition, the map editor, baking of voxel maps, and the model pipeline. The original look is being brought back on the new engine: textured voxel terrain, the low rotatable camera, the loader with its entry (wave and object pop-up), the original editor and a bake that keeps the terrain exactly are done; the mini-game, a performance overlay and a performance regression test are next.
+
+## Run it
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000. The page is the portfolio as plain HTML; the loader (a gold platform with a floating crystal) sits at the bottom; once the world is ready, click it to enter. Inside, drag or use the arrow keys to move, scroll or press + and - to zoom, Ctrl + right drag or Q and E to turn, and click the icons to open content.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Edit maps
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+With `pnpm dev` running, open http://localhost:3000/editor. The editor saves straight to `maps/<id>/map.json` and is not part of a production build. See `docs/developer-guide.md`.
 
-## Learn More
+## Checks
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm e2e
+pnpm bake --check
+pnpm build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Where things are
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Path | What |
+|---|---|
+| `content/portfolio.ts` | All portfolio copy |
+| `maps/` | Map files and the default-map index |
+| `lib/engine/` | 3D runtime (three.js, no React) |
+| `lib/bridge/` | The single channel between the engine and the UI |
+| `lib/editor/`, `components/editor/` | Map editor (development only) |
+| `lib/bake/` | Baking voxels into the world visitors load (`pnpm bake`) |
+| `assets/models/`, `lib/assets/` | Model sources and the pipeline that optimises them (`pnpm assets`) |
+| `lib/maps/`, `lib/world/` | Map format and voxel world |
+| `docs/architecture.md` | How it works and why, with measurements |
+| `docs/developer-guide.md` | Step-by-step recipes |
 
-## Deploy on Vercel
+## Stack
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Next.js 16 (App Router), React 19, three.js, zustand, Tailwind CSS 4, Vitest, Playwright. Hosted on Vercel.

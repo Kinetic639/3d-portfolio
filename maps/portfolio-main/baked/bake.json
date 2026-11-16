@@ -1,0 +1,15 @@
+{
+  "format": 2,
+  "sourceHash": "eb91f717c08d32b6",
+  "hash": "39efadf714ddd902",
+  "fileBytes": 11932,
+  "bakedAt": "2026-11-16T12:16:43.706Z",
+  "stats": {
+    "sourceFaces": 50792,
+    "faces": 50792,
+    "cells": 46606,
+    "tiles": 9,
+    "bytes": 642732,
+    "bakeMs": 717
+  }
+}

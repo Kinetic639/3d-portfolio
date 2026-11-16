@@ -10,15 +10,30 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "on-first-retry",
+    // Use the real GPU when there is one: software WebGL makes frame-pacing checks meaningless.
+    launchOptions: {
+      args: ["--enable-gpu", "--ignore-gpu-blocklist", ...(process.platform === "win32" ? ["--use-angle=d3d11"] : [])],
+    },
   },
   webServer: {
-    command: `pnpm exec next ${serverMode} -p ${port}`,
+    // Models are generated files: build them before the server starts, as `pnpm dev` does.
+    command: `pnpm assets && pnpm exec next ${serverMode} -p ${port}`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
   },
+  // The editor tests write map files. In development the site watches those
+  // files and reloads pages that use them, so the editor runs after the site
+  // tests instead of beside them.
   projects: [
     {
-      name: "chromium",
+      name: "site",
+      testIgnore: /editor.spec.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "editor",
+      testMatch: /editor.spec.ts/,
+      dependencies: ["site"],
       use: { ...devices["Desktop Chrome"] },
     },
   ],

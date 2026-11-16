@@ -624,7 +624,6 @@ function solidWoodenWallFaces(rotation: CellRotation, type: "full" | "end" | "co
   const connector = solidWoodenWallConnectorFaces();
   const fullX = solidWoodenWallSegmentFaces("x", -0.5, 0.5);
   const eastX = solidWoodenWallSegmentFaces("x", -0.02, 0.5);
-  const westX = solidWoodenWallSegmentFaces("x", -0.5, 0.02);
   const northZ = solidWoodenWallSegmentFaces("z", -0.02, 0.5);
   const fullZ = solidWoodenWallSegmentFaces("z", -0.5, 0.5);
   const gate = [

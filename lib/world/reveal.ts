@@ -1,22 +1,27 @@
 import { isRenderableBlock, type BlockId } from "./block-registry";
-import { WORLD_CONFIG } from "@/lib/world/world-config";
+import { getWorldMaxY, WORLD_CONFIG } from "@/lib/world/world-config";
 
 // The center-platform "wave" reveal timing shared by every renderer that
 // grows terrain in on load: the instanced cube-reveal path (voxel-world.ts's
 // renderable cells) and the surface-mesh reveal path (surface-mesher.ts).
 // Both need identical numbers here or the two renderers would animate out of
 // sync with each other whenever a project switches between them mid-reveal.
-const CENTER_MIN = WORLD_CONFIG.width / 2 - 1;
-const CENTER_MAX = WORLD_CONFIG.width / 2;
 export const MAX_WAVE_DELAY = 0.74;
+export const TERRAIN_REVEAL_WINDOW = 0.22;
 
 // Minimal shape a world needs to have for the loader-platform lookup below —
 // just enough of VoxelWorld's surface that reveal.ts doesn't have to import
 // the class itself (which imports back from this module).
 type LoaderPlatformWorld = {
   getBlock(x: number, y: number, z: number): BlockId;
-  config: { height: number };
+  config: { width: number; depth: number; minY: number; height: number };
 };
+
+type RevealDimensions = Pick<LoaderPlatformWorld["config"], "width" | "depth">;
+
+function getCenterBounds(size: number) {
+  return { min: size / 2 - 1, max: size / 2 };
+}
 
 // Which cell is "the loader platform" (always fully revealed, no growth
 // delay, plus the gentle idle wave, plus its own fixed look) is driven by
@@ -27,7 +32,9 @@ type LoaderPlatformWorld = {
 // or re-skinned in the editor (stacking slabs on top, repainting materials)
 // instead of breaking every time someone changes what's *in* the cell.
 export function isLoaderPlatformTopCell(world: LoaderPlatformWorld, x: number, y: number, z: number): boolean {
-  if (x < CENTER_MIN || x > CENTER_MAX || z < CENTER_MIN || z > CENTER_MAX) {
+  const centerX = getCenterBounds(world.config.width);
+  const centerZ = getCenterBounds(world.config.depth);
+  if (x < centerX.min || x > centerX.max || z < centerZ.min || z > centerZ.max) {
     return false;
   }
 
@@ -35,7 +42,7 @@ export function isLoaderPlatformTopCell(world: LoaderPlatformWorld, x: number, y
     return false;
   }
 
-  for (let aboveY = y + 1; aboveY < world.config.height; aboveY += 1) {
+  for (let aboveY = y + 1; aboveY <= getWorldMaxY(world.config); aboveY += 1) {
     if (isRenderableBlock(world.getBlock(x, aboveY, z))) {
       return false;
     }
@@ -44,9 +51,11 @@ export function isLoaderPlatformTopCell(world: LoaderPlatformWorld, x: number, y
   return true;
 }
 
-export function distanceFromCenterPlatform(x: number, z: number): number {
-  const dx = x < CENTER_MIN ? CENTER_MIN - x : x > CENTER_MAX ? x - CENTER_MAX : 0;
-  const dz = z < CENTER_MIN ? CENTER_MIN - z : z > CENTER_MAX ? z - CENTER_MAX : 0;
+export function distanceFromCenterPlatform(x: number, z: number, dimensions: RevealDimensions = WORLD_CONFIG): number {
+  const centerX = getCenterBounds(dimensions.width);
+  const centerZ = getCenterBounds(dimensions.depth);
+  const dx = x < centerX.min ? centerX.min - x : x > centerX.max ? x - centerX.max : 0;
+  const dz = z < centerZ.min ? centerZ.min - z : z > centerZ.max ? z - centerZ.max : 0;
 
   return Math.hypot(dx, dz);
 }
@@ -55,6 +64,27 @@ export function computeExpansionDelay(world: LoaderPlatformWorld, x: number, y: 
   if (isLoaderPlatformTopCell(world, x, y, z)) {
     return 0;
   }
+  return revealDelayAt(world.config, x, z);
+}
 
-  return (distanceFromCenterPlatform(x, z) / distanceFromCenterPlatform(0, 0)) * MAX_WAVE_DELAY;
+const ORIGINAL_CORNER_DISTANCE = distanceFromCenterPlatform(0, 0, WORLD_CONFIG);
+
+/**
+ * When the wave reaches a column, from its distance to the loader platform.
+ * Keeps the established 64x64 reveal speed: larger worlds extend the same
+ * wave beyond the former boundary instead of renormalizing its duration.
+ */
+export function revealDelayAt(dimensions: RevealDimensions, x: number, z: number): number {
+  return (distanceFromCenterPlatform(x, z, dimensions) / ORIGINAL_CORNER_DISTANCE) * MAX_WAVE_DELAY;
+}
+
+export function getExpansionRevealEnd(world: LoaderPlatformWorld): number {
+  const maxX = world.config.width - 1;
+  const maxZ = world.config.depth - 1;
+  return Math.max(
+    computeExpansionDelay(world, 0, world.config.minY, 0),
+    computeExpansionDelay(world, maxX, world.config.minY, 0),
+    computeExpansionDelay(world, 0, world.config.minY, maxZ),
+    computeExpansionDelay(world, maxX, world.config.minY, maxZ),
+  ) + TERRAIN_REVEAL_WINDOW;
 }

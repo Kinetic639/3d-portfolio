@@ -1,0 +1,870 @@
+import * as THREE from "three";
+import type { QualityTier, WorldBridge, WorldCommand } from "@/lib/bridge/world-bridge";
+import { decodeBakedWorld, type RuntimeMap } from "@/lib/bake/baked-format";
+import type { MapContentReference, MapDefinition } from "@/lib/maps/map-definition";
+import { createBakedQuery } from "./baked-terrain";
+import { CameraRig, VISITOR_CAMERA } from "./camera-rig";
+import { buildEntityLayer, type EntityLayer } from "./entity-meshes";
+import { ENTRY_SECONDS, FOCUS_SECONDS, loaderView, POP_COMPLETE, rehearsalTimes, sampleEntry, WAVE_UNITS_PER_SECOND, WAVE_WINDOW, type EntryPlan } from "./entry-sequence";
+import { Environment } from "./environment";
+import { LoaderBeacon } from "./loader-beacon";
+import { InteractionLayer, type Interactable } from "./interactables";
+import { getModelLibrary, type ModelLibrary } from "./model-library";
+import type { TerrainChunkSummary } from "./terrain-chunk";
+import { getTerrainAtlas, REVEAL_COMPLETE } from "./terrain-material";
+import { buildBakedTerrain, buildWorldForMap, type TerrainSource } from "./terrain-meshes";
+import { createVoxelWorldQuery, type WorldQuery } from "./world-query";
+
+/**
+ * The 3D runtime. Plain TypeScript on three.js: no React anywhere in this
+ * folder. The page talks to it only through the `WorldBridge`.
+ *
+ * Lifecycle: construct -> `loadMap` -> `warmUp` -> (enter <-> exit)*.
+ *
+ * Before the visitor enters, the engine draws only the *loader*: the platform
+ * at the centre of the map and the crystal over it, in a small box at the
+ * bottom of the canvas (LOADER_VIEWPORT). The rest of the canvas is cleared
+ * to transparent, so the page shows through. Only the objects on
+ * LOADER_LAYER are drawn, scissored to the box.
+ *
+ * Entering plays the original entry (entry-sequence.ts): the camera leaves
+ * the loader, the terrain grows out of the platform in a wave and the objects
+ * pop up. The wave and the pop are shader uniforms over geometry that is
+ * already on the GPU, so nothing is built or swapped while it plays.
+ *
+ * In the world, rendering is on demand: a frame is drawn only when something
+ * invalidates the view, so an idle world costs no CPU or GPU time.
+ */
+export type EngineStats = {
+  /** Frames drawn since the engine started (warm-up and loader frames excluded). */
+  frames: number;
+  /** Loader frames drawn on the landing page. */
+  loaderFrames: number;
+  /** Hover picks performed since the engine started. */
+  picks: number;
+  /** CPU time of the last frame's update + render, ms. */
+  frameCpuMs: number;
+  /** Time since the previous frame, ms. Only meaningful while frames are continuous. */
+  frameIntervalMs: number;
+  /** Longest interval between two consecutive frames since the last `resetFramePacing()`, ms. */
+  worstFrameIntervalMs: number;
+  drawCalls: number;
+  triangles: number;
+  geometries: number;
+  textures: number;
+  programs: number;
+};
+
+export type LoadMapOptions = {
+  signal?: AbortSignal;
+  onProgress?: (fraction: number) => void;
+  /** Display title for a content reference, or null if it does not exist. Without it nothing is interactive. */
+  describeContent?: (reference: MapContentReference) => string | null;
+};
+
+export type WarmUpReport = {
+  /** True when the measured pass stayed in budget and created no GPU resources. */
+  ok: boolean;
+  durationMs: number;
+  quality: QualityTier;
+  programs: number;
+  geometries: number;
+  textures: number;
+  /** Frames spent uploading buffers, each kept short. */
+  uploadFrames: number;
+  /** Frames rendered along the entry path in the measured pass. */
+  testFrames: number;
+  medianFrameMs: number;
+  maxFrameMs: number;
+  /** Programs + geometries + textures that appeared during the measured pass. Must be 0. */
+  newResourcesDuringTest: number;
+};
+
+const PIXEL_RATIO_CAP: Record<QualityTier, number> = { low: 1, medium: 1.25, high: 1.5 };
+const LOWER_QUALITY: Record<QualityTier, QualityTier | null> = { high: "medium", medium: "low", low: null };
+const FOCUS_DISTANCE = 38;
+const LEAVE_MS = 450;
+/** The box at the bottom centre of the canvas where the loader is drawn on the landing page, in CSS pixels. */
+export const LOADER_VIEWPORT = { width: 260, height: 200 } as const;
+/** Layer of everything the loader view draws: the platform's terrain chunks, the crystal and the lights. */
+const LOADER_LAYER = 1;
+/** Seconds the platform's idle wave takes to settle once the world is ready (original: 0.45). */
+const LOADER_SETTLE_SECONDS = 0.45;
+/** A warm frame (CPU + GPU, forced to finish) must fit comfortably inside a 60 Hz frame. */
+const WARM_FRAME_BUDGET_MS = 10;
+/** Longest single slice of warm-up work per animation frame. */
+const WARM_SLICE_MS = 6;
+
+const nextFrame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve));
+
+export class WorldEngine {
+  readonly stats: EngineStats = { frames: 0, loaderFrames: 0, picks: 0, frameCpuMs: 0, frameIntervalMs: 0, worstFrameIntervalMs: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, programs: 0 };
+  warmUpReport: WarmUpReport | null = null;
+  private readonly canvas: HTMLCanvasElement;
+  private readonly bridge: WorldBridge;
+  private readonly renderer: THREE.WebGLRenderer;
+  private readonly scene = new THREE.Scene();
+  private readonly environment: Environment;
+  private readonly rig: CameraRig;
+  private readonly rehearsalCamera = new THREE.PerspectiveCamera();
+  private readonly loaderCamera = new THREE.PerspectiveCamera(32, 1, 0.5, 600);
+  private readonly beacon = new LoaderBeacon();
+  private entryPlan: EntryPlan | null = null;
+  /** Terrain meshes that hold the loader platform. */
+  private loaderMeshes: THREE.Object3D[] = [];
+  /** Largest reveal delay on the map: the wave is over when it passes this. */
+  private revealEnd = 0;
+  /** The entry in progress, or null. */
+  private entry: { elapsed: number; reducedMotion: boolean; focus?: MapContentReference; inset?: { right?: number; bottom?: number } } | null = null;
+  /** The wave still growing far terrain after the camera has arrived, or null. */
+  private wave: number | null = null;
+  private readonly entryTarget = new THREE.Vector3();
+  /** Background of the scene, kept so it can be taken away while the page fades out behind the world. */
+  private sky: THREE.Scene["background"] = null;
+  /** Where the camera rests at the start of a visit. */
+  private spawn = { x: 0, z: 0 };
+  private landing = false;
+  /** Shaders are compiled (warm-up step 1): the loader may draw without compiling anything on the main thread. */
+  private loaderReady = false;
+  /** Warm-up is running; it draws the loader itself after each of its own renders. */
+  private warming = false;
+  private landingHandle = 0;
+  private lastLandingAt = 0;
+  /** Seconds the platform's wave has been settling, or null when not settling. */
+  private loaderSettle: number | null = null;
+  private readonly resizeObserver: ResizeObserver;
+  private readonly cleanup: Array<() => void> = [];
+  private terrain: TerrainSource | null = null;
+  private entities: EntityLayer | null = null;
+  private interaction: InteractionLayer | null = null;
+  private active = false;
+  private entering = false;
+  private leaveTimer = 0;
+  private frameHandle = 0;
+  private pickHandle = 0;
+  private pointer: { x: number; y: number } | null = null;
+  private viewBeforeFocus: ReturnType<CameraRig["getGoal"]> | null = null;
+  private lastFrameAt = 0;
+  private lastTickAt = 0;
+  private elapsedSeconds = 0;
+  private disposed = false;
+
+  /**
+   * `context` is a WebGL 2 context already created on `canvas`. The caller
+   * creates it so that a missing WebGL can be handled quietly before any
+   * engine code runs.
+   */
+  constructor(canvas: HTMLCanvasElement, bridge: WorldBridge, context: WebGL2RenderingContext) {
+    this.canvas = canvas;
+    this.bridge = bridge;
+    this.renderer = new THREE.WebGLRenderer({ canvas, context, antialias: true, alpha: true });
+    this.environment = new Environment(this.scene);
+    this.sky = this.scene.background;
+    this.rig = new CameraRig(canvas, {
+      ...VISITOR_CAMERA,
+      onChange: () => this.invalidate(),
+      onTap: (clientX, clientY) => this.handleTap(clientX, clientY),
+    });
+    this.rig.setEnabled(false);
+
+    this.beacon.group.traverse((object) => object.layers.enable(LOADER_LAYER));
+    this.scene.add(this.beacon.group);
+    // Lights are filtered by layer too; the crystal needs them in the loader view.
+    this.scene.traverse((object) => {
+      if ((object as THREE.Light).isLight) object.layers.enable(LOADER_LAYER);
+    });
+    this.loaderCamera.layers.set(LOADER_LAYER);
+    this.cleanup.push(bridge.store.subscribe((state, previous) => {
+      if (state.phase === "ready" && previous.phase !== "ready") this.presentLoader();
+    }));
+
+    this.resizeObserver = new ResizeObserver(() => this.resize());
+    this.resizeObserver.observe(canvas);
+    this.resize();
+
+    const onContextLost = (event: Event) => {
+      event.preventDefault();
+      this.bridge.set({ phase: "unavailable", error: "The graphics context was lost." });
+    };
+    canvas.addEventListener("webglcontextlost", onContextLost);
+    this.cleanup.push(() => canvas.removeEventListener("webglcontextlost", onContextLost));
+
+    const listen = <K extends keyof HTMLElementEventMap>(type: K, handler: (event: HTMLElementEventMap[K]) => void) => {
+      canvas.addEventListener(type, handler);
+      this.cleanup.push(() => canvas.removeEventListener(type, handler));
+    };
+    listen("pointermove", (event) => {
+      // Touch has no hover; a tap picks directly.
+      if (event.pointerType === "touch") return;
+      this.pointer = { x: event.clientX, y: event.clientY };
+      this.schedulePick();
+    });
+    listen("pointerleave", () => {
+      this.pointer = null;
+      this.schedulePick();
+    });
+    this.cleanup.push(bridge.commands.subscribe((command) => this.handleCommand(command)));
+  }
+
+  /**
+   * Loads a map from its voxels: the unbaked path, used for maps without a
+   * current bake. The voxel world is built and meshed in a worker.
+   */
+  async loadMap(definition: MapDefinition, options: LoadMapOptions = {}) {
+    this.unloadMap();
+    // The terrain textures are part of the world: loaded before it is shown, so warm-up uploads them.
+    const [{ world, terrain }, models] = await Promise.all([buildWorldForMap(definition, options), this.loadModels(definition), getTerrainAtlas().ready]);
+    if (this.disposed || options.signal?.aborted) {
+      terrain.dispose();
+      return;
+    }
+    this.install(definition, terrain, createVoxelWorldQuery(world), models, options);
+  }
+
+  /**
+   * Loads a baked world file: the visible faces it lists are written out in a
+   * worker, with no voxel world to build and no neighbour to test.
+   */
+  async loadBaked(file: ArrayBuffer, options: LoadMapOptions = {}) {
+    this.unloadMap();
+    const baked = decodeBakedWorld(file);
+    const query = createBakedQuery(baked);
+    const [terrain, models] = await Promise.all([
+      buildBakedTerrain(baked, { signal: options.signal, onProgress: options.onProgress }),
+      this.loadModels(baked.header.map),
+      getTerrainAtlas().ready,
+    ]);
+    if (this.disposed || options.signal?.aborted) {
+      terrain.dispose();
+      return;
+    }
+    this.install(baked.header.map, terrain, query, models, options);
+    options.onProgress?.(1);
+  }
+
+  /** The models the map's objects use, loaded before the map is shown so warm-up covers them. */
+  private async loadModels(definition: RuntimeMap) {
+    const models = await getModelLibrary();
+    await models.ensureLoaded(models.idsFor(definition.entities));
+    return models;
+  }
+
+  private install(definition: RuntimeMap, terrain: TerrainSource, query: WorldQuery, models: ModelLibrary, options: LoadMapOptions) {
+    this.terrain = terrain;
+    this.entities = buildEntityLayer(definition.entities, models);
+    this.interaction = new InteractionLayer({
+      map: definition,
+      query,
+      entities: this.entities,
+      describeContent: options.describeContent ?? (() => null),
+    });
+    this.scene.add(terrain.group, this.entities.group, this.interaction.group);
+    this.environment.apply(definition.environment);
+
+    // The camera may only centre on the playable area; backdrop scenery stays out of reach.
+    const min = query.cellToWorld(definition.playableBounds.minX, 0, definition.playableBounds.minZ);
+    const max = query.cellToWorld(definition.playableBounds.maxX, 0, definition.playableBounds.maxZ);
+    const margin = 6;
+    this.rig.setBounds({ minX: min.x + margin, maxX: max.x - margin, minZ: min.z + margin, maxZ: max.z - margin });
+    const spawn = definition.spawnPoints.find((candidate) => candidate.id === definition.defaultSpawnId) ?? definition.spawnPoints[0];
+    const focus = spawn
+      ? query.cellToWorld(spawn.cameraTarget?.x ?? spawn.position.x, 0, spawn.cameraTarget?.z ?? spawn.position.z)
+      : { x: (min.x + max.x) / 2, z: (min.z + max.z) / 2 };
+    this.spawn = { x: focus.x, z: focus.z };
+    this.prepareEntry();
+    this.resetToLoader();
+  }
+
+  /**
+   * Finds the loader platform in the terrain (the vertices the mesher marked
+   * with a negative reveal delay; each chunk's summary, worked out by the
+   * worker, says where they are), puts those chunks on the loader layer, and
+   * works out the entry path and how long the wave runs.
+   */
+  private prepareEntry() {
+    let top = -Infinity;
+    let sumX = 0;
+    let sumZ = 0;
+    let count = 0;
+    let revealEnd = 0;
+    this.loaderMeshes = [];
+    for (const mesh of this.terrain?.meshes() ?? []) {
+      const summary = mesh.geometry.userData.summary as TerrainChunkSummary | undefined;
+      if (!summary) continue;
+      revealEnd = Math.max(revealEnd, summary.revealEnd);
+      if (!summary.platform) continue;
+      top = Math.max(top, summary.platform.top);
+      sumX += summary.platform.sumX;
+      sumZ += summary.platform.sumZ;
+      count += summary.platform.count;
+      mesh.layers.enable(LOADER_LAYER);
+      this.loaderMeshes.push(mesh);
+    }
+    this.revealEnd = revealEnd;
+    const platformX = count > 0 ? sumX / count : 0;
+    const platformZ = count > 0 ? sumZ / count : 0;
+    const platformTop = count > 0 ? top : 0;
+    this.beacon.place(platformX, platformTop, platformZ);
+
+    // The path ends where the visitor's camera rests at the spawn.
+    this.rig.setOrientation(VISITOR_CAMERA.yawDegrees, VISITOR_CAMERA.pitchDegrees, true);
+    this.rig.lookAt(this.spawn.x, this.spawn.z, VISITOR_CAMERA.initialDistance, true);
+    const finalPosition = this.rig.camera.position.clone();
+    const finalTarget = new THREE.Vector3(this.spawn.x, VISITOR_CAMERA.targetHeight, this.spawn.z);
+    this.entryPlan = { platformX, platformZ, platformTop, finalPosition, finalTarget };
+    loaderView(this.entryPlan, this.loaderCamera.position, this.entryTarget);
+    this.loaderCamera.lookAt(this.entryTarget);
+    this.loaderCamera.updateMatrixWorld();
+  }
+
+  /** The landing state: only the platform shows, objects are hidden, the camera is back at the spawn. */
+  private resetToLoader() {
+    this.entry = null;
+    this.wave = null;
+    const uniforms = this.terrain?.uniforms;
+    if (uniforms) {
+      uniforms.uExpansionProgress.value = 0;
+      // The platform ripples while the world is still being prepared.
+      uniforms.uLoaderMotion.value = this.bridge.store.getState().phase === "ready" ? 0 : 1;
+    }
+    this.entities?.setPopTime(-1);
+    if (this.interaction) this.interaction.group.visible = false;
+    this.rig.setOrientation(VISITOR_CAMERA.yawDegrees, VISITOR_CAMERA.pitchDegrees, true);
+    this.rig.lookAt(this.spawn.x, this.spawn.z, VISITOR_CAMERA.initialDistance, true);
+    if (this.loaderReady) this.startLanding();
+  }
+
+  /** The world is ready to enter: the platform settles, then the crystal appears. */
+  private presentLoader() {
+    const motion = this.terrain?.uniforms?.uLoaderMotion;
+    if (motion && motion.value > 0) {
+      this.loaderSettle = 0;
+    } else {
+      this.beacon.show();
+    }
+  }
+
+  private startLanding() {
+    if (this.disposed) return;
+    this.landing = true;
+    this.lastLandingAt = 0;
+    if (this.landingHandle === 0) this.landingHandle = requestAnimationFrame(this.landingFrame);
+  }
+
+  private stopLanding() {
+    this.landing = false;
+    cancelAnimationFrame(this.landingHandle);
+    this.landingHandle = 0;
+  }
+
+  /** One loader frame. Runs every animation frame while the landing page shows the loader. */
+  private readonly landingFrame = (now: number) => {
+    this.landingHandle = 0;
+    if (this.disposed || !this.landing) return;
+    const delta = this.lastLandingAt > 0 ? Math.min((now - this.lastLandingAt) / 1000, 0.1) : 1 / 60;
+    this.lastLandingAt = now;
+    this.elapsedSeconds += delta;
+    const uniforms = this.terrain?.uniforms;
+    if (uniforms) uniforms.uTime.value = this.elapsedSeconds;
+    if (this.loaderSettle !== null && uniforms) {
+      this.loaderSettle += delta;
+      const t = Math.min(1, this.loaderSettle / LOADER_SETTLE_SECONDS);
+      // power2.out from 1 to 0.
+      uniforms.uLoaderMotion.value = (1 - t) * (1 - t);
+      if (t >= 1) {
+        this.loaderSettle = null;
+        this.beacon.show();
+      }
+    }
+    this.beacon.update(delta, this.elapsedSeconds);
+    this.environment.update(this.elapsedSeconds);
+    if (!this.warming) {
+      this.drawLoader();
+      this.stats.loaderFrames += 1;
+    }
+    this.landingHandle = requestAnimationFrame(this.landingFrame);
+  };
+
+  /**
+   * Clears the canvas to transparent and draws the loader into its box.
+   * Leaves the renderer's scissor and every object's visibility as it found
+   * them, so warm-up can call it after each of its own renders and the
+   * visitor never sees those.
+   */
+  private drawLoader() {
+    const width = this.canvas.clientWidth;
+    if (width === 0 || !this.landing) return;
+    const renderer = this.renderer;
+    const scissorWas = renderer.getScissorTest();
+    const scissor = renderer.getScissor(new THREE.Vector4());
+    const hidden = this.loaderMeshes.filter((mesh) => !mesh.visible);
+    hidden.forEach((mesh) => { mesh.visible = true; });
+    const uniforms = this.terrain?.uniforms;
+    const wave = uniforms?.uExpansionProgress.value ?? 0;
+    if (uniforms) uniforms.uExpansionProgress.value = 0;
+    // Warm-up forces the crystal on to compile it; the visitor sees it only once it has been shown.
+    const beaconVisible = this.beacon.group.visible;
+    this.beacon.group.visible = this.beacon.shown;
+
+    // No sky around the loader: the page shows through.
+    const background = this.scene.background;
+    this.scene.background = null;
+    renderer.setClearAlpha(0);
+    renderer.setScissorTest(false);
+    renderer.clear();
+    renderer.setScissorTest(true);
+    renderer.setScissor((width - LOADER_VIEWPORT.width) / 2, 0, LOADER_VIEWPORT.width, LOADER_VIEWPORT.height);
+    renderer.render(this.scene, this.loaderCamera);
+    this.scene.background = background;
+
+    if (uniforms) uniforms.uExpansionProgress.value = wave;
+    this.beacon.group.visible = beaconVisible;
+    hidden.forEach((mesh) => { mesh.visible = false; });
+    renderer.setScissor(scissor);
+    renderer.setScissorTest(scissorWas);
+  }
+
+  /**
+   * Prepares the GPU so that entering the world loads, compiles and uploads
+   * nothing. Work is spread over animation frames in slices of a few
+   * milliseconds, so the page in front keeps its frame rate.
+   *
+   * 1. Compile every shader program the scene uses.
+   * 2. Upload every vertex buffer and texture by drawing each object once
+   *    into a one-pixel scissor (same programs as real frames, no fill cost).
+   * 3. Rehearse the entry: render the views the transition will pass
+   *    through, twice. The first pass absorbs one-off costs; the second is
+   *    measured and must stay in budget without creating any GPU resource.
+   *    If it is too slow, the quality tier drops and the rehearsal repeats.
+   */
+  async warmUp(options: { signal?: AbortSignal; onProgress?: (fraction: number) => void } = {}): Promise<WarmUpReport | null> {
+    const startedAt = performance.now();
+    const aborted = () => this.disposed || options.signal?.aborted === true;
+    const gl = this.renderer.getContext();
+    const camera = this.rig.camera;
+    const renderSync = (view: THREE.Camera) => {
+      const begin = performance.now();
+      this.renderer.render(this.scene, view);
+      // Without finish() the GPU work would be deferred and the timing meaningless.
+      gl.finish();
+      return performance.now() - begin;
+    };
+
+    // Everything the entry will show must be compiled and uploaded now, including what the landing hides.
+    const interactionGroup = this.interaction?.group;
+    if (interactionGroup) interactionGroup.visible = true;
+    this.beacon.forceVisible();
+    const restore = () => {
+      if (interactionGroup) interactionGroup.visible = false;
+      if (this.bridge.store.getState().phase === "ready") this.beacon.show();
+      else this.beacon.hide();
+      if (this.terrain?.uniforms) this.terrain.uniforms.uExpansionProgress.value = 0;
+      this.entities?.setPopTime(-1);
+      this.drawLoader();
+    };
+    this.warming = true;
+    try {
+      return await this.warmUpSteps(options, startedAt, aborted, renderSync, camera);
+    } finally {
+      this.warming = false;
+      restore();
+    }
+  }
+
+  private async warmUpSteps(
+    options: { signal?: AbortSignal; onProgress?: (fraction: number) => void },
+    startedAt: number,
+    aborted: () => boolean,
+    renderSync: (view: THREE.Camera) => number,
+    camera: THREE.PerspectiveCamera,
+  ): Promise<WarmUpReport | null> {
+    await this.renderer.compileAsync(this.scene, camera);
+    if (aborted()) return null;
+    options.onProgress?.(0.2);
+    // Every program exists now: the loader can start showing without a compile on the main thread.
+    this.loaderReady = true;
+    this.startLanding();
+    this.drawLoader();
+
+    // Step 2: uploads.
+    const objects: THREE.Object3D[] = [
+      ...(this.terrain?.meshes() ?? []),
+      ...(this.entities?.group.children ?? []),
+      ...(this.interaction?.group.children ?? []),
+    ];
+    const culling = objects.map((object) => object.frustumCulled);
+    objects.forEach((object) => {
+      object.visible = false;
+      object.frustumCulled = false;
+    });
+    this.renderer.setScissorTest(true);
+    this.renderer.setScissor(0, 0, 1, 1);
+    let uploadFrames = 0;
+    let batchSize = 4;
+    try {
+      for (let index = 0; index < objects.length;) {
+        await nextFrame();
+        if (aborted()) return null;
+        const batch = objects.slice(index, index + batchSize);
+        batch.forEach((object) => { object.visible = true; });
+        const elapsed = renderSync(camera);
+        batch.forEach((object) => { object.visible = false; });
+        // Keep the visible loader box showing the loader, not the upload pass.
+        this.drawLoader();
+        index += batch.length;
+        uploadFrames += 1;
+        if (elapsed > WARM_SLICE_MS) batchSize = Math.max(1, Math.floor(batchSize / 2));
+        else if (elapsed < WARM_SLICE_MS / 2) batchSize = Math.min(32, batchSize * 2);
+        options.onProgress?.(0.2 + 0.5 * (index / objects.length));
+      }
+    } finally {
+      this.renderer.setScissorTest(false);
+      objects.forEach((object, index) => {
+        object.visible = true;
+        object.frustumCulled = culling[index];
+      });
+    }
+
+    // Step 3: rehearsal of the entry, wave and pop included, then the resting view.
+    const plan = this.entryPlan;
+    const uniforms = this.terrain?.uniforms;
+    const resourceCount = () => (this.renderer.info.programs?.length ?? 0) + this.renderer.info.memory.geometries + this.renderer.info.memory.textures;
+    const rehearse = async () => {
+      const times: number[] = [];
+      const moments = plan ? rehearsalTimes(12) : [];
+      for (const moment of [...moments, -1, -1]) {
+        await nextFrame();
+        if (aborted()) return null;
+        this.rehearsalCamera.copy(camera);
+        if (plan && moment >= 0) {
+          const sample = sampleEntry(plan, moment, this.rehearsalCamera.position, this.entryTarget);
+          this.rehearsalCamera.lookAt(this.entryTarget);
+          if (uniforms) uniforms.uExpansionProgress.value = sample.wave;
+          this.entities?.setPopTime(sample.popSeconds);
+        } else {
+          if (uniforms) uniforms.uExpansionProgress.value = REVEAL_COMPLETE;
+          this.entities?.setPopTime(POP_COMPLETE);
+        }
+        this.rehearsalCamera.updateMatrixWorld();
+        times.push(renderSync(this.rehearsalCamera));
+        this.drawLoader();
+      }
+      return times;
+    };
+
+    let report: WarmUpReport | null = null;
+    for (;;) {
+      if (!(await rehearse())) return null;
+      const before = resourceCount();
+      const times = await rehearse();
+      if (!times) return null;
+      const sorted = [...times].sort((left, right) => left - right);
+      const quality = this.bridge.store.getState().quality;
+      report = {
+        ok: sorted[sorted.length - 1] <= WARM_FRAME_BUDGET_MS && resourceCount() === before,
+        durationMs: performance.now() - startedAt,
+        quality,
+        programs: this.renderer.info.programs?.length ?? 0,
+        geometries: this.renderer.info.memory.geometries,
+        textures: this.renderer.info.memory.textures,
+        uploadFrames,
+        testFrames: times.length,
+        medianFrameMs: sorted[sorted.length >> 1],
+        maxFrameMs: sorted[sorted.length - 1],
+        newResourcesDuringTest: resourceCount() - before,
+      };
+      const lower = LOWER_QUALITY[quality];
+      if (report.maxFrameMs <= WARM_FRAME_BUDGET_MS || !lower) break;
+      // Too slow for this device: render fewer pixels and measure again.
+      this.bridge.set({ quality: lower });
+      this.resize();
+    }
+    options.onProgress?.(1);
+    this.warmUpReport = report;
+    return report;
+  }
+
+  /** Requests one more frame. Cheap and idempotent; ignored while the world is not shown. */
+  invalidate() {
+    if (this.disposed || !this.active || this.frameHandle !== 0) return;
+    this.frameHandle = requestAnimationFrame(this.frame);
+  }
+
+  resetFramePacing() {
+    this.stats.worstFrameIntervalMs = 0;
+  }
+
+  dispose() {
+    this.disposed = true;
+    cancelAnimationFrame(this.frameHandle);
+    cancelAnimationFrame(this.pickHandle);
+    window.clearTimeout(this.leaveTimer);
+    this.frameHandle = this.pickHandle = 0;
+    this.resizeObserver.disconnect();
+    this.cleanup.forEach((stop) => stop());
+    this.stopLanding();
+    this.beacon.dispose();
+    this.rig.dispose();
+    this.unloadMap();
+    this.renderer.dispose();
+  }
+
+  private unloadMap() {
+    this.stopLanding();
+    this.loaderReady = false;
+    this.loaderMeshes = [];
+    this.entryPlan = null;
+    if (this.terrain) {
+      this.scene.remove(this.terrain.group);
+      this.terrain.dispose();
+      this.terrain = null;
+    }
+    if (this.interaction) {
+      this.scene.remove(this.interaction.group);
+      this.interaction.dispose();
+      this.interaction = null;
+    }
+    if (this.entities) {
+      this.scene.remove(this.entities.group);
+      this.entities.dispose();
+      this.entities = null;
+    }
+    this.viewBeforeFocus = null;
+    this.bridge.set({ hovered: null });
+  }
+
+  private handleCommand(command: WorldCommand) {
+    switch (command.type) {
+      case "enter":
+        this.enter(command);
+        break;
+      case "exit":
+        this.exit(command.reducedMotion === true);
+        break;
+      case "set-quality":
+        this.bridge.set({ quality: command.quality });
+        this.resize();
+        break;
+      case "focus-content":
+        this.focusContent(command.content, command.inset);
+        this.invalidate();
+        break;
+      case "clear-focus":
+        this.interaction?.setFocused(null);
+        if (this.viewBeforeFocus) {
+          this.rig.lookAt(this.viewBeforeFocus.x, this.viewBeforeFocus.z, this.viewBeforeFocus.distance);
+          this.viewBeforeFocus = null;
+        }
+        this.invalidate();
+        break;
+      default:
+        break;
+    }
+  }
+
+  private focusContent(content: MapContentReference, inset?: { right?: number; bottom?: number }) {
+    const item = this.interaction?.findByContent(content) ?? null;
+    if (!item) {
+      // Content with no place on this map: the panel still opens, the camera stays put.
+      this.interaction?.setFocused(null);
+      return;
+    }
+    // Remember where the visitor was only for the first focus in a row.
+    this.viewBeforeFocus ??= this.rig.getGoal();
+    this.interaction?.setFocused(item.id);
+    this.rig.focusOn(item.focus.x, item.focus.z, Math.min(this.rig.getGoal().distance, FOCUS_DISTANCE), inset);
+  }
+
+  private enter(command: Extract<WorldCommand, { type: "enter" }>) {
+    if (this.bridge.store.getState().phase !== "ready") return;
+    window.clearTimeout(this.leaveTimer);
+    this.stopLanding();
+    this.loaderSettle = null;
+    if (this.terrain?.uniforms) this.terrain.uniforms.uLoaderMotion.value = 0;
+    this.beacon.hide();
+    this.active = true;
+    this.entering = true;
+    this.bridge.set({ phase: "entering" });
+    this.entry = { elapsed: 0, reducedMotion: command.reducedMotion === true, focus: command.focus, inset: command.inset };
+    this.lastTickAt = 0;
+    this.lastFrameAt = 0;
+    this.resetFramePacing();
+    this.invalidate();
+  }
+
+  private exit(reducedMotion: boolean) {
+    const phase = this.bridge.store.getState().phase;
+    if (phase !== "world" && phase !== "entering") return;
+    this.entering = false;
+    this.entry = null;
+    this.wave = null;
+    this.rig.setEnabled(false);
+    this.interaction?.setHovered(null);
+    this.interaction?.setFocused(null);
+    this.viewBeforeFocus = null;
+    this.canvas.style.cursor = "";
+    this.bridge.set({ phase: phase === "entering" ? "world" : phase, hovered: null });
+    this.bridge.set({ phase: "leaving" });
+    // The page fades the canvas out; keep the last frame until it has.
+    this.leaveTimer = window.setTimeout(() => {
+      this.active = false;
+      cancelAnimationFrame(this.frameHandle);
+      this.frameHandle = 0;
+      this.resetToLoader();
+      this.bridge.set({ phase: "ready" });
+      this.bridge.events.emit({ type: "exited" });
+    }, reducedMotion ? 0 : LEAVE_MS);
+  }
+
+  private isInteractive() {
+    return this.active && this.bridge.store.getState().phase === "world" && this.interaction !== null;
+  }
+
+  private pickAt(clientX: number, clientY: number): Interactable | null {
+    if (!this.interaction) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    this.stats.picks += 1;
+    return this.interaction.pick(
+      this.rig.camera,
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+  }
+
+  /** Coalesces pointer moves: at most one pick per animation frame, and no render unless the result changed. */
+  private schedulePick() {
+    if (this.disposed || !this.active || this.pickHandle !== 0) return;
+    this.pickHandle = requestAnimationFrame(() => {
+      this.pickHandle = 0;
+      this.updateHover();
+    });
+  }
+
+  private updateHover() {
+    if (!this.interaction) return;
+    const canHover = this.isInteractive() && this.pointer !== null && !this.rig.isPointerDown();
+    const item = canHover ? this.pickAt(this.pointer!.x, this.pointer!.y) : null;
+    if (!this.interaction.setHovered(item?.id ?? null)) return;
+    this.canvas.style.cursor = item ? "pointer" : "";
+    this.bridge.set({ hovered: item ? { id: item.id, label: item.label, content: item.content } : null });
+    this.invalidate();
+  }
+
+  private handleTap(clientX: number, clientY: number) {
+    if (!this.isInteractive()) return;
+    const item = this.pickAt(clientX, clientY);
+    if (item) {
+      this.bridge.events.emit({ type: "content-activated", content: item.content, interactableId: item.id });
+    }
+  }
+
+  private readonly frame = (now: number) => {
+    this.frameHandle = 0;
+    if (this.disposed || !this.active) return;
+    const startedAt = performance.now();
+    // Clamp: after an idle gap the first frame must not see a huge time step.
+    const delta = this.lastTickAt > 0 ? Math.min((now - this.lastTickAt) / 1000, 0.1) : 1 / 60;
+    this.lastTickAt = now;
+    this.elapsedSeconds += delta;
+    const cameraMoving = this.entry ? this.advanceEntry(delta) : this.rig.update(delta);
+    const waving = this.advanceWave(delta);
+    // Animated models need a frame every frame for as long as the world is shown.
+    const animating = (this.entities?.update(delta) ?? false) || waving;
+    this.environment.update(this.elapsedSeconds);
+    if (this.terrain?.uniforms) this.terrain.uniforms.uTime.value = this.elapsedSeconds;
+    // While the camera leaves the loader, the page is still fading out underneath: no sky yet,
+    // so the canvas covers the whole viewport at once without a visible edge.
+    const transparent = this.entry !== null && this.entry.elapsed < FOCUS_SECONDS;
+    this.scene.background = transparent ? null : this.sky;
+    this.renderer.setClearAlpha(transparent ? 0 : 1);
+    if (this.interaction) {
+      this.rig.camera.updateMatrixWorld();
+      this.interaction.updateOccluders(this.rig.camera);
+    }
+    this.renderer.render(this.scene, this.rig.camera);
+
+    const info = this.renderer.info;
+    this.stats.frames += 1;
+    this.stats.frameCpuMs = performance.now() - startedAt;
+    this.stats.frameIntervalMs = this.lastFrameAt > 0 ? now - this.lastFrameAt : 0;
+    this.stats.worstFrameIntervalMs = Math.max(this.stats.worstFrameIntervalMs, this.stats.frameIntervalMs);
+    this.stats.drawCalls = info.render.calls;
+    this.stats.triangles = info.render.triangles;
+    this.stats.geometries = info.memory.geometries;
+    this.stats.textures = info.memory.textures;
+    this.stats.programs = info.programs?.length ?? 0;
+    this.lastFrameAt = cameraMoving || animating ? now : 0;
+
+    if (this.entering && !this.entry) {
+      // The camera has arrived: the visitor may take over.
+      this.entering = false;
+      this.rig.setEnabled(true);
+      this.bridge.set({ phase: "world" });
+      this.bridge.events.emit({ type: "entered" });
+    }
+    if (cameraMoving) {
+      this.invalidate();
+      return;
+    }
+    if (animating) this.invalidate();
+    // Otherwise the loop stops here; the next frame after an idle gap starts a fresh time step.
+    else this.lastTickAt = 0;
+    // The world moved under a resting pointer: what it hovers may have changed.
+    if (this.pointer && !animating) this.schedulePick();
+  };
+
+  /** Moves the entry along. Returns true while the camera is still travelling. */
+  private advanceEntry(delta: number) {
+    const entry = this.entry!;
+    const plan = this.entryPlan;
+    entry.elapsed = entry.reducedMotion || !plan ? ENTRY_SECONDS : entry.elapsed + delta;
+    const camera = this.rig.camera;
+    const sample = plan
+      ? sampleEntry(plan, entry.elapsed, camera.position, this.entryTarget)
+      : { wave: REVEAL_COMPLETE, popSeconds: POP_COMPLETE, done: true };
+    if (plan) camera.lookAt(this.entryTarget);
+    if (this.terrain?.uniforms) this.terrain.uniforms.uExpansionProgress.value = sample.wave;
+    this.entities?.setPopTime(sample.popSeconds);
+    if (!sample.done) return true;
+
+    this.entry = null;
+    // The camera is exactly where the rig rests; hand it back.
+    const goal = this.rig.getGoal();
+    this.rig.lookAt(goal.x, goal.z, goal.distance, true);
+    this.entities?.setPopTime(POP_COMPLETE);
+    if (this.interaction) this.interaction.group.visible = true;
+    // Far terrain may still be growing; with reduced motion it is all there at once.
+    this.wave = entry.reducedMotion ? null : sample.wave;
+    if (entry.reducedMotion && this.terrain?.uniforms) this.terrain.uniforms.uExpansionProgress.value = REVEAL_COMPLETE;
+    if (entry.focus) this.focusContent(entry.focus, entry.inset);
+    return entry.focus !== undefined;
+  }
+
+  /** Grows the rest of the terrain after the camera has arrived. Returns true while it is growing. */
+  private advanceWave(delta: number) {
+    if (this.wave === null) return false;
+    const uniforms = this.terrain?.uniforms;
+    this.wave += delta * WAVE_UNITS_PER_SECOND;
+    if (!uniforms || this.wave >= this.revealEnd + WAVE_WINDOW) {
+      this.wave = null;
+      if (uniforms) uniforms.uExpansionProgress.value = REVEAL_COMPLETE;
+      return false;
+    }
+    uniforms.uExpansionProgress.value = this.wave;
+    return true;
+  }
+
+  private resize() {
+    const width = this.canvas.clientWidth;
+    const height = this.canvas.clientHeight;
+    if (width === 0 || height === 0) return;
+    const quality = this.bridge.store.getState().quality;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, PIXEL_RATIO_CAP[quality]));
+    this.renderer.setSize(width, height, false);
+    this.rig.setAspect(width / height);
+    this.loaderCamera.aspect = width / height;
+    this.loaderCamera.updateProjectionMatrix();
+    this.invalidate();
+  }
+}

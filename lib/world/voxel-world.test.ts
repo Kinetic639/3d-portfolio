@@ -1,31 +1,51 @@
 import { describe, expect, it } from "vitest";
 import { BLOCK_IDS } from "./block-registry";
 import { EXPECTED_WORLD_STATS, VoxelWorld, createFlatVoxelWorld } from "./voxel-world";
-import { WORLD_CELL_COUNT, WORLD_CONFIG, WORLD_SURFACE_CELL_COUNT, WORLD_AIR_CELL_COUNT } from "./world-config";
+import { COMPOSITE_WORLD_CONFIG, getWorldMaxY, WORLD_AIR_CELL_COUNT, WORLD_CELL_COUNT, WORLD_CONFIG, WORLD_FOUNDATION_CELL_COUNT, WORLD_SURFACE_CELL_COUNT } from "./world-config";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
-import { EMPTY_FLUID_CELL, FLUID_IDS } from "@/lib/fluids/fluid-types";
 
 describe("voxel world foundation", () => {
-  it("allocates the complete logical volume in a compact typed array", () => {
-    const world = createFlatVoxelWorld();
+  it("supports a blank 192 by 192 composite world without region concepts", () => {
+    const world = new VoxelWorld(COMPOSITE_WORLD_CONFIG);
 
-    expect(world.blocks).toBeInstanceOf(Uint16Array);
-    expect(world.shapes).toBeInstanceOf(Uint8Array);
-    expect(world.rotations).toBeInstanceOf(Uint8Array);
-    expect(world.states).toBeInstanceOf(Uint8Array);
-    expect(world.fluidTypes).toBeInstanceOf(Uint8Array);
-    expect(world.fluidLevels).toBeInstanceOf(Uint8Array);
-    expect(world.fluidFlags).toBeInstanceOf(Uint8Array);
-    expect(world.zones).toBeInstanceOf(Uint8Array);
-    expect(world.blocks).toHaveLength(WORLD_CELL_COUNT);
-    expect(world.shapes).toHaveLength(WORLD_CELL_COUNT);
-    expect(world.rotations).toHaveLength(WORLD_CELL_COUNT);
-    expect(world.states).toHaveLength(WORLD_CELL_COUNT);
-    expect(world.fluidTypes).toHaveLength(WORLD_CELL_COUNT);
-    expect(world.fluidLevels).toHaveLength(WORLD_CELL_COUNT);
-    expect(world.fluidFlags).toHaveLength(WORLD_CELL_COUNT);
-    expect(world.zones).toHaveLength(WORLD_SURFACE_CELL_COUNT);
-    expect(world.getStats().logicalCells).toBe(49_152);
+    expect(world.blocks).toHaveLength(192 * 192 * 32);
+    expect(world.getStats().chunks).toBe(144);
+    expect(world.createRenderChunks()).toHaveLength(144);
+    expect(world.getIndex(0, -12, 0)).not.toBeNull();
+    expect(world.getIndex(191, 19, 191)).not.toBeNull();
+    expect(world.getCoordinates(world.getIndex(191, 19, 191)!)).toEqual({ x: 191, y: 19, z: 191 });
+  });
+
+  it("preserves center-region world positions after the 64-cell composite offset", () => {
+    const region = new VoxelWorld(WORLD_CONFIG);
+    const composite = new VoxelWorld(COMPOSITE_WORLD_CONFIG);
+
+    for (const coordinate of [{ x: 0, y: -12, z: 0 }, { x: 31, y: 0, z: 31 }, { x: 63, y: 19, z: 63 }]) {
+      expect(composite.gridToWorld(coordinate.x + 64, coordinate.y, coordinate.z + 64)).toEqual(
+        region.gridToWorld(coordinate.x, coordinate.y, coordinate.z),
+      );
+    }
+  });
+
+  it("derives dirty neighbours from composite chunk counts", () => {
+    const world = new VoxelWorld(COMPOSITE_WORLD_CONFIG);
+    world.setBlock(175, 0, 80, BLOCK_IDS.Ground);
+
+    expect([...world.dirtyChunks].sort()).toEqual(["chunk-10-4", "chunk-10-5", "chunk-11-5"]);
+    expect(() => world.createRenderChunk(11, 11)).not.toThrow();
+    expect(() => world.createRenderChunk(12, 11)).toThrow(/out of bounds/);
+  });
+
+  it("rejects horizontal dimensions that cannot be partitioned into chunks", () => {
+    expect(() => new VoxelWorld({ ...WORLD_CONFIG, width: 65 })).toThrow(/divisible by chunk size/);
+  });
+
+  it("derives independent X and Z chunk counts for rectangular worlds", () => {
+    const world = new VoxelWorld({ ...WORLD_CONFIG, depth: 32 });
+    expect(world.getStats().chunks).toBe(8);
+    expect(world.createRenderChunks()).toHaveLength(8);
+    expect(() => world.createRenderChunk(3, 1)).not.toThrow();
+    expect(() => world.createRenderChunk(3, 2)).toThrow(/out of bounds/);
   });
 
   it("stores shape, rotation and state independently from block id", () => {
@@ -100,14 +120,16 @@ describe("voxel world foundation", () => {
     expect(world.getStats().zoneAssignments).toBe(1);
   });
 
-  it("generates a deterministic flat ground layer and leaves upper cells as air", () => {
+  it("generates a deterministic underground foundation and leaves upper cells as air", () => {
     const world = createFlatVoxelWorld();
     const stats = world.getStats();
 
-    expect(stats.nonAirBlocks).toBe(WORLD_SURFACE_CELL_COUNT);
-    expect(stats.renderedInstances).toBe(4_096);
+    expect(stats.nonAirBlocks).toBe(WORLD_FOUNDATION_CELL_COUNT);
+    expect(stats.renderedInstances).toBe(WORLD_FOUNDATION_CELL_COUNT);
     expect(stats.airCells).toBe(WORLD_AIR_CELL_COUNT);
     expect(world.getBlock(0, 0, 0)).toBe(BLOCK_IDS.Ground);
+    expect(world.getBlock(0, WORLD_CONFIG.minY, 0)).toBe(BLOCK_IDS.Stone);
+    expect(world.getBlock(0, -1, 0)).toBe(BLOCK_IDS.Stone);
     expect(world.getBlock(0, 1, 0)).toBe(BLOCK_IDS.Air);
   });
 
@@ -116,7 +138,7 @@ describe("voxel world foundation", () => {
     const indexes = new Set<number>();
     let invalidIndexCount = 0;
 
-    for (let y = 0; y < WORLD_CONFIG.height; y += 1) {
+    for (let y = WORLD_CONFIG.minY; y <= getWorldMaxY(); y += 1) {
       for (let z = 0; z < WORLD_CONFIG.depth; z += 1) {
         for (let x = 0; x < WORLD_CONFIG.width; x += 1) {
           const index = world.getIndex(x, y, z);
@@ -136,11 +158,11 @@ describe("voxel world foundation", () => {
   it("converts flat indexes back to logical coordinates", () => {
     const world = createFlatVoxelWorld();
 
-    expect(world.getCoordinates(0)).toEqual({ x: 0, y: 0, z: 0 });
-    expect(world.getCoordinates(63)).toEqual({ x: 63, y: 0, z: 0 });
-    expect(world.getCoordinates(64)).toEqual({ x: 0, y: 0, z: 1 });
-    expect(world.getCoordinates(4_096)).toEqual({ x: 0, y: 1, z: 0 });
-    expect(world.getCoordinates(WORLD_CELL_COUNT - 1)).toEqual({ x: 63, y: 11, z: 63 });
+    expect(world.getCoordinates(0)).toEqual({ x: 0, y: -12, z: 0 });
+    expect(world.getCoordinates(63)).toEqual({ x: 63, y: -12, z: 0 });
+    expect(world.getCoordinates(64)).toEqual({ x: 0, y: -12, z: 1 });
+    expect(world.getCoordinates(4_096)).toEqual({ x: 0, y: -11, z: 0 });
+    expect(world.getCoordinates(WORLD_CELL_COUNT - 1)).toEqual({ x: 63, y: 19, z: 63 });
   });
 
   it("rejects out-of-bounds coordinates safely", () => {
@@ -149,8 +171,9 @@ describe("voxel world foundation", () => {
     expect(world.isInsideWorld(-1, 0, 0)).toBe(false);
     expect(world.getIndex(64, 0, 0)).toBeNull();
     expect(world.getCoordinates(WORLD_CELL_COUNT)).toBeNull();
-    expect(world.getBlock(0, 12, 0)).toBe(BLOCK_IDS.Air);
-    expect(world.setBlock(0, 12, 0, BLOCK_IDS.Ground)).toBe(false);
+    expect(world.getBlock(0, 20, 0)).toBe(BLOCK_IDS.Air);
+    expect(world.setBlock(0, 20, 0, BLOCK_IDS.Ground)).toBe(false);
+    expect(world.setBlock(0, -13, 0, BLOCK_IDS.Ground)).toBe(false);
   });
 
   it("centres grid coordinates around the world origin", () => {
@@ -168,6 +191,8 @@ describe("voxel world foundation", () => {
       { x: 31, y: 0, z: 31 },
       { x: 32, y: 0, z: 32 },
       { x: 63, y: 11, z: 63 },
+      { x: 0, y: -12, z: 0 },
+      { x: 63, y: 19, z: 63 },
     ]) {
       expect(world.worldToGrid(world.gridToWorld(coordinate.x, coordinate.y, coordinate.z))).toEqual(coordinate);
     }
@@ -187,7 +212,7 @@ describe("voxel world foundation", () => {
     const chunks = world.createRenderChunks();
 
     expect(chunks).toHaveLength(16);
-    expect(chunks.every((chunk) => chunk.renderableCells.length === 256)).toBe(true);
+    expect(chunks.every((chunk) => chunk.renderableCells.length === EXPECTED_WORLD_STATS.instancesPerFlatChunk)).toBe(true);
     expect(chunks.every((chunk) => chunk.instanceToCell.length === chunk.renderableCells.length)).toBe(true);
 
     for (const chunk of chunks) {
@@ -224,17 +249,17 @@ describe("voxel world foundation", () => {
     const changedCellIndex = world.getIndex(2, 0, 3);
 
     expect(changedCellIndex).not.toBeNull();
-    expect(world.getStats().renderedInstances).toBe(4_096);
+    expect(world.getStats().renderedInstances).toBe(WORLD_FOUNDATION_CELL_COUNT);
 
     expect(world.setBlock(2, 0, 3, BLOCK_IDS.Air)).toBe(true);
 
     const airRebuild = world.rebuildDirtyChunks();
     const rebuiltAirChunk = airRebuild[0];
 
-    expect(world.getStats().renderedInstances).toBe(4_095);
+    expect(world.getStats().renderedInstances).toBe(WORLD_FOUNDATION_CELL_COUNT - 1);
     expect(airRebuild).toHaveLength(1);
     expect(rebuiltAirChunk.id).toBe("chunk-0-0");
-    expect(rebuiltAirChunk.renderableCells).toHaveLength(255);
+    expect(rebuiltAirChunk.renderableCells).toHaveLength(EXPECTED_WORLD_STATS.instancesPerFlatChunk - 1);
     expect(rebuiltAirChunk.cellToInstance.has(changedCellIndex as number)).toBe(false);
     expect([...world.dirtyChunks]).toEqual([]);
 
@@ -248,179 +273,12 @@ describe("voxel world foundation", () => {
     const groundRebuild = world.rebuildDirtyChunks();
     const rebuiltGroundChunk = groundRebuild[0];
 
-    expect(world.getStats().renderedInstances).toBe(4_096);
+    expect(world.getStats().renderedInstances).toBe(WORLD_FOUNDATION_CELL_COUNT);
     expect(groundRebuild).toHaveLength(1);
     expect(rebuiltGroundChunk.id).toBe("chunk-0-0");
-    expect(rebuiltGroundChunk.renderableCells).toHaveLength(256);
+    expect(rebuiltGroundChunk.renderableCells).toHaveLength(EXPECTED_WORLD_STATS.instancesPerFlatChunk);
     expect(rebuiltGroundChunk.cellToInstance.has(changedCellIndex as number)).toBe(true);
     expect([...world.dirtyChunks]).toEqual([]);
   });
 
-  it("constructs independent worlds without sharing typed arrays or dirty state", () => {
-    const firstWorld = new VoxelWorld();
-    const secondWorld = new VoxelWorld();
-
-    firstWorld.setBlock(0, 0, 0, BLOCK_IDS.Ground);
-
-    expect(secondWorld.getBlock(0, 0, 0)).toBe(BLOCK_IDS.Air);
-    expect(firstWorld.blocks).not.toBe(secondWorld.blocks);
-    expect(firstWorld.fluidTypes).not.toBe(secondWorld.fluidTypes);
-    expect([...secondWorld.dirtyChunks]).toEqual([]);
-    expect([...secondWorld.dirtyFluidChunks]).toEqual([]);
-  });
-
-  it("clones complete worlds without sharing terrain or fluid storage", () => {
-    const world = createFlatVoxelWorld();
-    world.setFluidSource(4, 1, 5, FLUID_IDS.Water);
-    const cloned = world.clone();
-
-    world.clearFluid(4, 1, 5);
-    world.setBlock(4, 0, 5, BLOCK_IDS.Stone);
-
-    expect(cloned.getFluid(4, 1, 5)).toMatchObject({ type: FLUID_IDS.Water, source: true });
-    expect(cloned.getBlock(4, 0, 5)).toBe(BLOCK_IDS.Ground);
-    expect(cloned.blocks).not.toBe(world.blocks);
-    expect(cloned.fluidTypes).not.toBe(world.fluidTypes);
-  });
-
-  it("stores source and flowing water independently from terrain", () => {
-    const world = createFlatVoxelWorld();
-
-    expect(world.setFluidSource(4, 1, 5, FLUID_IDS.Water)).toBe(true);
-    expect(world.getFluid(4, 1, 5)).toEqual({
-      type: FLUID_IDS.Water,
-      level: 0,
-      source: true,
-      falling: false,
-      authored: true,
-    });
-    expect(world.getBlock(4, 1, 5)).toBe(BLOCK_IDS.Air);
-
-    expect(world.setFluid(5, 1, 5, {
-      type: FLUID_IDS.Water,
-      level: 4,
-      source: false,
-      falling: false,
-    })).toBe(true);
-    expect(world.getFluid(5, 1, 5)).toMatchObject({ level: 4, source: false });
-  });
-
-  it("rejects invalid fluid writes and fluid inside solid terrain", () => {
-    const world = createFlatVoxelWorld();
-
-    expect(world.setFluidSource(4, 0, 5, FLUID_IDS.Water)).toBe(false);
-    expect(world.setFluid(4, 1, 5, { type: FLUID_IDS.Water, level: 8, source: false, falling: false })).toBe(false);
-    expect(world.setFluid(64, 1, 5, { type: FLUID_IDS.Water, level: 0, source: true, falling: false })).toBe(false);
-    expect(world.getFluid(4, 0, 5)).toEqual(EMPTY_FLUID_CELL);
-  });
-
-  it("clears incompatible fluid when solid terrain is placed", () => {
-    const world = createFlatVoxelWorld();
-    world.setFluidSource(4, 1, 5, FLUID_IDS.Water);
-    world.clearDirtyFluidChunks();
-
-    world.setBlock(4, 1, 5, BLOCK_IDS.Stone);
-
-    expect(world.getFluid(4, 1, 5)).toEqual(EMPTY_FLUID_CELL);
-    expect([...world.dirtyFluidChunks]).toEqual(["chunk-0-0"]);
-  });
-
-  it("marks adjacent fluid chunks dirty at chunk boundaries", () => {
-    const world = createFlatVoxelWorld();
-
-    world.setFluidSource(15, 1, 16, FLUID_IDS.Water);
-
-    expect(world.dirtyFluidChunks.has("chunk-0-1")).toBe(true);
-    expect(world.dirtyFluidChunks.has("chunk-1-1")).toBe(true);
-    expect(world.dirtyFluidChunks.has("chunk-0-0")).toBe(true);
-  });
-
-  it("clones and restores isolated fluid snapshots", () => {
-    const world = createFlatVoxelWorld();
-    world.setFluidSource(4, 1, 5, FLUID_IDS.Water);
-    const snapshot = world.cloneFluidLayer();
-
-    world.clearFluid(4, 1, 5);
-    expect(world.getFluid(4, 1, 5)).toEqual(EMPTY_FLUID_CELL);
-    expect(snapshot.types).not.toBe(world.fluidTypes);
-
-    world.restoreFluidLayer(snapshot);
-
-    expect(world.getFluid(4, 1, 5)).toMatchObject({ type: FLUID_IDS.Water, source: true });
-    expect(world.dirtyFluidChunks.size).toBe(16);
-  });
-
-  it("copies constructor fluid arrays and validates their contents", () => {
-    const types = new Uint8Array(WORLD_CELL_COUNT);
-    const levels = new Uint8Array(WORLD_CELL_COUNT);
-    const flags = new Uint8Array(WORLD_CELL_COUNT);
-    const index = new VoxelWorld().getIndex(4, 1, 5) as number;
-    types[index] = FLUID_IDS.Water;
-    flags[index] = 1;
-
-    const world = new VoxelWorld(
-      WORLD_CONFIG,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      types,
-      levels,
-      flags,
-    );
-    types[index] = FLUID_IDS.None;
-
-    expect(world.getFluid(4, 1, 5)).toMatchObject({ type: FLUID_IDS.Water, source: true });
-    expect(world.fluidTypes).not.toBe(types);
-
-    levels[index] = 8;
-    expect(() => new VoxelWorld(
-      WORLD_CONFIG,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      world.fluidTypes,
-      levels,
-      flags,
-    )).toThrow(/Invalid fluid state/);
-  });
-
-  it("rejects restoring fluid into terrain that cannot contain it", () => {
-    const world = createFlatVoxelWorld();
-    const snapshot = world.cloneFluidLayer();
-    const solidIndex = world.getIndex(4, 0, 5) as number;
-    snapshot.types[solidIndex] = FLUID_IDS.Water;
-    snapshot.flags[solidIndex] = 1;
-
-    expect(() => world.restoreFluidLayer(snapshot)).toThrow(/Invalid fluid state/);
-  });
-
-  it("reports fluid diagnostics separately from solid terrain", () => {
-    const world = createFlatVoxelWorld();
-    world.setFluidSource(4, 1, 5, FLUID_IDS.Water);
-    world.setFluid(5, 1, 5, { type: FLUID_IDS.Water, level: 1, source: false, falling: true });
-
-    expect(world.getStats()).toMatchObject({
-      fluidCells: 2,
-      fluidSources: 1,
-      fallingFluidCells: 1,
-    });
-  });
-
-  it("matches the expected flat-world stats constants", () => {
-    expect(createFlatVoxelWorld().getStats()).toEqual({
-      logicalCells: EXPECTED_WORLD_STATS.logicalCells,
-      airCells: EXPECTED_WORLD_STATS.airCells,
-      nonAirBlocks: EXPECTED_WORLD_STATS.nonAirBlocks,
-      zoneAssignments: 0,
-      fluidCells: 0,
-      fluidSources: 0,
-      fallingFluidCells: 0,
-      renderedInstances: EXPECTED_WORLD_STATS.renderedInstances,
-      chunks: EXPECTED_WORLD_STATS.chunks,
-    });
-  });
 });

@@ -1,4 +1,6 @@
-import type { EditorLayerId, EditorLayerState } from "@/components/experience/MapEditorToolbar";
+import type { EditorLayerId } from "./editor-tools";
+
+export type EditorLayerState = { id: EditorLayerId; label: string; visible: boolean; locked: boolean };
 
 // Persists the toggles/colors/sliders that live in the editor's top-menu
 // View and Settings dropdowns (MapEditorToolbar's ViewMenuSettings /

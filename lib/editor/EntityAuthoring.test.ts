@@ -78,7 +78,7 @@ describe("entity authoring", () => {
   });
 
   it("creates prefab entities and validates their collision footprint", () => {
-    const base = createBlankMapDefinition({ id: "prefab-authoring", name: "Prefab Authoring", flatBaseLayer: true });
+    const base = createBlankMapDefinition({ id: "prefab-authoring", name: "Prefab Authoring" });
     const bench = createPrefabEntityFromDraft({
       name: "Bench",
       prefabId: "bench",

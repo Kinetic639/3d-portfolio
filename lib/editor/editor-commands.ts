@@ -68,6 +68,10 @@ export type EditorCommandContext = {
     placeNavigationNode: () => void;
     connectNavigationNodes: () => void;
     createRoute: () => void;
+    /** Bakes the saved map (see lib/bake). */
+    bakeMap?: () => void;
+    /** Shows the bake instead of the voxels, or the voxels again. */
+    toggleBakedView?: () => void;
   };
 };
 
@@ -76,12 +80,12 @@ export function createEditorCommands(context: EditorCommandContext): EditorComma
   return [
     command("file.new-map", "New Map", "Create a blank authoring map.", "file", context.actions.newMap, { icon: "new", shortcut: "Ctrl+N" }),
     command("file.load-map", "Open/Load Map", "Load a registered map or local draft.", "file", context.actions.loadMap, { icon: "open" }),
-    command("file.save-draft", "Save Draft", "Persist the current map definition to local storage.", "file", context.actions.saveDraft, { icon: "save", shortcut: "Ctrl+S" }),
+    command("file.save-draft", "Save Map", "Write the map to its file under maps/.", "file", context.actions.saveDraft, { icon: "save", shortcut: "Ctrl+S" }),
     command("file.duplicate-map", "Duplicate Map", "Create an independent copy of the current map.", "file", context.actions.duplicateMap, { icon: "duplicate" }),
     command("file.rename-map", "Rename Map", "Rename the current map.", "file", context.actions.renameMap),
     command("file.import-map", "Import Map", "Import a map definition JSON file.", "file", context.actions.importMap, { icon: "import" }),
     command("file.export-map", "Export Map", "Export the current map definition.", "file", context.actions.exportMap, { icon: "export" }),
-    command("file.revert", "Revert to Saved", "Restore the last saved draft/export state.", "file", context.actions.revertMap),
+    command("file.revert", "Revert to Saved", "Reload the map as it was last saved.", "file", context.actions.revertMap),
     command("file.reset-flat", "Reset Flat Terrain", "Replace terrain with the flat base map.", "file", context.actions.resetFlat),
     command("edit.undo", "Undo", "Undo the previous authoring command.", "edit", context.actions.undo, { icon: "undo", shortcut: "Ctrl+Z", isEnabled: () => context.hasUndo }),
     command("edit.redo", "Redo", "Redo the previous authoring command.", "edit", context.actions.redo, { icon: "redo", shortcut: "Ctrl+Shift+Z", isEnabled: () => context.hasRedo }),
@@ -109,6 +113,8 @@ export function createEditorCommands(context: EditorCommandContext): EditorComma
     command("view.clean-preview", "Clean Preview", "Hide editor docks and helper overlays.", "view", context.actions.toggleCleanPreview, { icon: "preview", shortcut: "Shift+Space" }),
     command("view.reset-layout", "Reset Editor Layout", "Restore default dock sizes and collapsed states.", "view", context.actions.resetLayout, { icon: "layout" }),
     command("map.validate", "Validate Map", "Run map-definition validation.", "map", context.actions.validateMap, { icon: "validate" }),
+    command("map.bake", "Bake Map", "Bake the saved map into a static world.", "map", () => context.actions.bakeMap?.(), { isVisible: () => context.actions.bakeMap !== undefined }),
+    command("map.baked-view", "Toggle Baked View", "Show the bake instead of the voxels, or the voxels again.", "map", () => context.actions.toggleBakedView?.(), { icon: "preview", isVisible: () => context.actions.toggleBakedView !== undefined }),
     command("help.command-search", "Command Search", "Search editor commands.", "help", context.actions.openCommandSearch, { icon: "search", shortcut: "Ctrl+P" }),
     command("help.shortcuts", "Keyboard Shortcuts", "Show keyboard shortcuts.", "help", context.actions.openShortcuts, { icon: "help" }),
   ].filter((item) => item.isVisible?.() ?? always());

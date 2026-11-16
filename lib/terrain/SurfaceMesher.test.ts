@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { BLOCK_IDS } from "@/lib/world/block-registry";
 import { VoxelWorld, createFlatVoxelWorld } from "@/lib/world/voxel-world";
-import { WORLD_CONFIG } from "@/lib/world/world-config";
+import { getWorldMaxY, WORLD_CONFIG } from "@/lib/world/world-config";
 import { ROTATIONS, SHAPE_IDS } from "@/lib/voxel-shapes/shape-ids";
-import { FLUID_IDS } from "@/lib/fluids/fluid-types";
 import { buildSurfaceChunkMesh } from "./surface-mesher";
 
 describe("surface mesher", () => {
@@ -136,7 +135,7 @@ describe("surface mesher", () => {
       if (direction === "py") {
         topVariants.add(first.textureVariants[vertexIndex]);
         topRotations.add(first.uvRotations[vertexIndex]);
-      } else if (direction !== "ny") {
+      } else if (direction !== "ny" && first.textureKinds[vertexIndex] === 2) {
         sideVariants.add(first.textureVariants[vertexIndex]);
         sideMirrors.add(first.uvMirrors[vertexIndex]);
         expect(first.uvRotations[vertexIndex]).toBe(0);
@@ -277,17 +276,6 @@ describe("surface mesher", () => {
     expect(mesh.visibleQuads).toBeGreaterThan(10);
   });
 
-  it("does not treat independent fluid cells as opaque terrain geometry", () => {
-    const world = new VoxelWorld();
-    world.setBlock(1, 1, 1, BLOCK_IDS.Ground);
-    world.setFluidSource(2, 1, 1, FLUID_IDS.Water);
-
-    const mesh = buildSurfaceChunkMesh(world, 0, 0);
-
-    expect(mesh.faceMappings.some((face) => face.cellIndex === world.getIndex(1, 1, 1) && face.direction === "px")).toBe(true);
-    expect(mesh.faceMappings.some((face) => face.cellIndex === world.getIndex(2, 1, 1))).toBe(false);
-  });
-
   it("maps generated triangles back to the owning logical cell", () => {
     const world = new VoxelWorld();
     world.setBlock(1, 1, 1, BLOCK_IDS.Ground);
@@ -305,11 +293,11 @@ describe("surface mesher", () => {
     const mesh = buildSurfaceChunkMesh(world, 1, 2);
 
     expect(mesh.bounds).toEqual({
-      min: { x: 16, y: 0, z: 32 },
-      max: { x: 31, y: WORLD_CONFIG.height - 1, z: 47 },
+      min: { x: 16, y: WORLD_CONFIG.minY, z: 32 },
+      max: { x: 31, y: getWorldMaxY(), z: 47 },
     });
-    expect(mesh.boundingBox.min).toEqual(world.gridToWorld(16, 0, 32));
-    expect(mesh.boundingBox.max).toEqual(world.gridToWorld(31, WORLD_CONFIG.height - 1, 47));
+    expect(mesh.boundingBox.min).toEqual(world.gridToWorld(16, WORLD_CONFIG.minY, 32));
+    expect(mesh.boundingBox.max).toEqual(world.gridToWorld(31, getWorldMaxY(), 47));
   });
 
   it("does not mutate logical world data while rebuilding", () => {

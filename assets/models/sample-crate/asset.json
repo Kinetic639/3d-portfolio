@@ -1,0 +1,12 @@
+{
+  "name": "Crate (sample)",
+  "category": "decoration",
+  "description": "Static sample model that exercises the asset pipeline. Replace or delete freely.",
+  "collision": "blocking",
+  "variants": [
+    { "id": "standard", "label": "Standard" },
+    { "id": "large", "label": "Large", "scale": 1.6 },
+    { "id": "painted", "label": "Painted", "tint": "#7fa6c9" }
+  ],
+  "tags": ["sample"]
+}

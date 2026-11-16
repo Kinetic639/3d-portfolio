@@ -1,6 +1,6 @@
 import { getBrushFootprint, type TerrainBrushSettings } from "./terrain-brushes";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
-import type { GridCoordinate } from "@/lib/world/world-config";
+import { WORLD_CONFIG, type GridCoordinate, type WorldConfig } from "@/lib/world/world-config";
 
 export type ZoneEditMode = "paint" | "erase" | "replace";
 export type ZoneSelectionMode = "brush" | "rectangle";
@@ -11,8 +11,8 @@ export type ZoneColumnChange = {
   after: number;
 };
 
-export function getZoneBrushFootprint(center: GridCoordinate, settings: TerrainBrushSettings): GridCoordinate[] {
-  return getBrushFootprint(center, settings).map((cell) => ({ x: cell.x, y: center.y, z: cell.z }));
+export function getZoneBrushFootprint(center: GridCoordinate, settings: TerrainBrushSettings, bounds: Pick<WorldConfig, "width" | "depth"> = WORLD_CONFIG): GridCoordinate[] {
+  return getBrushFootprint(center, settings, bounds).map((cell) => ({ x: cell.x, y: center.y, z: cell.z }));
 }
 
 export function getZoneRectangleFootprint(start: GridCoordinate, end: GridCoordinate): GridCoordinate[] {

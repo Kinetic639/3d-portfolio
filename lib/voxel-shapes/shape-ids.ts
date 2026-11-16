@@ -117,8 +117,12 @@ export const DEFAULT_STATE = 0;
 export const SHAPE_ID_VALUES = Object.values(SHAPE_IDS) as ShapeId[];
 export const ROTATION_VALUES = Object.values(ROTATIONS) as CellRotation[];
 
+// Table lookups: these run for every cell read, including the mesher's inner loop.
+const KNOWN_SHAPE_IDS = new Uint8Array(256);
+for (const id of SHAPE_ID_VALUES) KNOWN_SHAPE_IDS[id] = 1;
+
 export function isKnownShapeId(value: number): value is ShapeId {
-  return Number.isInteger(value) && SHAPE_ID_VALUES.includes(value as ShapeId);
+  return KNOWN_SHAPE_IDS[value] === 1;
 }
 
 export function normalizeShapeId(value: number): ShapeId {
@@ -126,7 +130,7 @@ export function normalizeShapeId(value: number): ShapeId {
 }
 
 export function normalizeRotation(value: number): CellRotation {
-  return ROTATION_VALUES.includes(value as CellRotation) ? value as CellRotation : DEFAULT_ROTATION;
+  return value === 0 || value === 1 || value === 2 || value === 3 ? value : DEFAULT_ROTATION;
 }
 
 export function normalizeState(value: number) {

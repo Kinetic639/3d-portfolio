@@ -1,6 +1,6 @@
 import { BLOCK_IDS, type BlockId } from "@/lib/world/block-registry";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
-import { WORLD_CONFIG, type GridCoordinate } from "@/lib/world/world-config";
+import { getWorldMaxY, WORLD_CONFIG, type GridCoordinate, type WorldConfig } from "@/lib/world/world-config";
 import { DEFAULT_ROTATION, DEFAULT_SHAPE_ID, DEFAULT_STATE, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
 
 export type BrushShape = "single" | "square" | "circle";
@@ -47,17 +47,17 @@ export const DEFAULT_TERRAIN_BRUSH: TerrainBrushSettings = {
   flattenHeight: 0,
 };
 
-export function getBrushFootprint(center: GridCoordinate, settings: TerrainBrushSettings): GridCoordinate[] {
+export function getBrushFootprint(center: GridCoordinate, settings: TerrainBrushSettings, bounds: Pick<WorldConfig, "width" | "depth"> = WORLD_CONFIG): GridCoordinate[] {
   const size = Math.max(1, Math.floor(settings.size));
   if (settings.shape === "single" || size <= 1) {
-    return isInsideColumn(center.x, center.z) ? [{ ...center }] : [];
+    return isInsideColumn(center.x, center.z, bounds) ? [{ ...center }] : [];
   }
 
   const radius = Math.floor(size / 2);
   const cells: GridCoordinate[] = [];
   for (let z = center.z - radius; z <= center.z + radius; z += 1) {
     for (let x = center.x - radius; x <= center.x + radius; x += 1) {
-      if (!isInsideColumn(x, z)) continue;
+      if (!isInsideColumn(x, z, bounds)) continue;
       if (settings.shape === "circle" && Math.hypot(x - center.x, z - center.z) > radius + 0.001) continue;
       cells.push({ x, y: center.y, z });
     }
@@ -65,22 +65,23 @@ export function getBrushFootprint(center: GridCoordinate, settings: TerrainBrush
   return cells;
 }
 
-export function getPathFootprint(center: GridCoordinate, settings: TerrainBrushSettings): GridCoordinate[] {
+export function getPathFootprint(center: GridCoordinate, settings: TerrainBrushSettings, bounds: Pick<WorldConfig, "width" | "depth"> = WORLD_CONFIG): GridCoordinate[] {
   return getBrushFootprint(center, {
     ...settings,
     shape: settings.pathEnds === "round" ? "circle" : "square",
     size: Math.min(9, Math.max(1, settings.pathWidth)),
-  });
+  }, bounds);
 }
 
 export function getTerrainOperationFootprint(
   center: GridCoordinate,
   operation: TerrainBrushOperation,
   settings: TerrainBrushSettings,
+  bounds: Pick<WorldConfig, "width" | "depth"> = WORLD_CONFIG,
 ): GridCoordinate[] {
   return operation === "paint-path" || operation === "remove-path"
-    ? getPathFootprint(center, settings)
-    : getBrushFootprint(center, settings);
+    ? getPathFootprint(center, settings, bounds)
+    : getBrushFootprint(center, settings, bounds);
 }
 
 export function createTerrainMutations(input: {
@@ -95,12 +96,12 @@ export function createTerrainMutations(input: {
   zoneId: number;
 }): TerrainCellMutation[] {
   const settings = { ...DEFAULT_TERRAIN_BRUSH, ...input.settings };
-  const footprint = getTerrainOperationFootprint(input.center, input.operation, settings);
+  const footprint = getTerrainOperationFootprint(input.center, input.operation, settings, input.world.config);
   const seen = new Set<string>();
   const mutations: TerrainCellMutation[] = [];
 
   if (input.operation === "flatten") {
-    const desiredY = Math.max(0, Math.min(WORLD_CONFIG.height - 1, Math.floor(input.center.y)));
+    const desiredY = Math.max(input.world.config.minY, Math.min(getWorldMaxY(input.world.config), Math.floor(input.center.y)));
     for (const cell of footprint) {
       const topY = input.world.getHighestNonAirY(cell.x, cell.z);
       if (topY === desiredY) continue;
@@ -117,7 +118,7 @@ export function createTerrainMutations(input: {
         continue;
       }
 
-      const startY = topY === null ? 0 : topY + 1;
+      const startY = topY === null ? input.world.config.minY : topY + 1;
       for (let y = startY; y <= desiredY; y += 1) {
         const mutation = createDirectCellMutation(
           input.world,
@@ -251,8 +252,8 @@ function createCellMutation(
       afterZone = world.getColumnZone(cell.x, cell.z);
       break;
     case "raise": {
-      const y = topY === null ? 0 : topY + 1;
-      if (y >= WORLD_CONFIG.height) return null;
+      const y = topY === null ? world.config.minY : topY + 1;
+      if (y > getWorldMaxY(world.config)) return null;
       target = { x: cell.x, y, z: cell.z };
       afterBlock = blockId === BLOCK_IDS.Air ? BLOCK_IDS.Ground : blockId;
       afterShape = shapeId;
@@ -262,7 +263,7 @@ function createCellMutation(
       break;
     }
     case "lower": {
-      if (topY === null || topY <= 0) return null;
+      if (topY === null || topY <= world.config.minY) return null;
       target = { x: cell.x, y: topY, z: cell.z };
       afterBlock = BLOCK_IDS.Air;
       afterShape = DEFAULT_SHAPE_ID;
@@ -272,7 +273,7 @@ function createCellMutation(
       break;
     }
     case "flatten": {
-      const desiredY = Math.max(0, Math.min(WORLD_CONFIG.height - 1, Math.floor(settings.flattenHeight)));
+      const desiredY = Math.max(world.config.minY, Math.min(getWorldMaxY(world.config), Math.floor(settings.flattenHeight)));
       if (cell.y > desiredY) {
         afterBlock = BLOCK_IDS.Air;
         afterShape = DEFAULT_SHAPE_ID;
@@ -288,7 +289,7 @@ function createCellMutation(
       break;
     }
     case "paint-path":
-      target = { x: cell.x, y: topY ?? 0, z: cell.z };
+      target = { x: cell.x, y: topY ?? world.config.minY, z: cell.z };
       afterBlock = blockId;
       afterZone = world.getColumnZone(target.x, target.z);
       break;
@@ -334,6 +335,6 @@ function createCellMutation(
   };
 }
 
-function isInsideColumn(x: number, z: number) {
-  return x >= 0 && x < WORLD_CONFIG.width && z >= 0 && z < WORLD_CONFIG.depth;
+function isInsideColumn(x: number, z: number, bounds: Pick<WorldConfig, "width" | "depth">) {
+  return x >= 0 && x < bounds.width && z >= 0 && z < bounds.depth;
 }
