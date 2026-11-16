@@ -3,6 +3,8 @@ import { createLoadedMapState, type MapDefinition } from "@/lib/maps/map-definit
 import { buildSurfaceChunkMesh } from "@/lib/terrain/surface-mesher";
 import { VoxelWorld } from "@/lib/world/voxel-world";
 import { getChunkCounts } from "@/lib/world/world-config";
+import { packTerrainChunk, type TerrainChunkBuffers } from "./terrain-chunk";
+import { createTerrainGeometry, createTerrainMaterial, createTerrainUniforms, type TerrainUniforms } from "./terrain-material";
 import type { WorldBuildMessage, WorldBuildRequest } from "./world-builder.worker";
 
 /**
@@ -20,6 +22,8 @@ export type TerrainSource = {
   /** Rebuilds the listed chunks ("chunk-x-z") in place. Cost is proportional to the list, not the world. */
   rebuildChunks: (chunkIds: Iterable<string>) => void;
   triangleCount: () => number;
+  /** Reveal and loader uniforms of voxel terrain; absent on sources that have no reveal. */
+  uniforms?: TerrainUniforms;
   dispose: () => void;
 };
 
@@ -31,14 +35,7 @@ export type TerrainBuildOptions = {
   sliceBudgetMs?: number;
 };
 
-type ChunkBuffers = {
-  positions: Float32Array;
-  normals: Float32Array;
-  colors: Float32Array;
-  indices: Uint16Array | Uint32Array;
-};
-
-const srgbToLinear = (value: number) => (value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4));
+type ChunkBuffers = TerrainChunkBuffers;
 
 function yieldToMain() {
   const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
@@ -46,31 +43,17 @@ function yieldToMain() {
   return new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
-function createGeometry(buffers: ChunkBuffers) {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(buffers.positions, 3));
-  geometry.setAttribute("normal", new THREE.BufferAttribute(buffers.normals, 3));
-  geometry.setAttribute("color", new THREE.BufferAttribute(buffers.colors, 3));
-  geometry.setIndex(new THREE.BufferAttribute(buffers.indices, 1));
-  geometry.computeBoundingSphere();
-  geometry.computeBoundingBox();
-  return geometry;
-}
+const createGeometry = createTerrainGeometry;
 
 function meshChunk(world: VoxelWorld, chunkX: number, chunkZ: number): ChunkBuffers | null {
-  const data = buildSurfaceChunkMesh(world, chunkX, chunkZ, { renderOnly: true });
-  if (data.indices.length === 0) return null;
-  // The mesher emits sRGB block colours; three.js lights in linear space.
-  const colors = new Float32Array(data.colors.length);
-  for (let index = 0; index < colors.length; index += 1) colors[index] = srgbToLinear(data.colors[index]);
-  const indices = data.positions.length / 3 > 65535 ? data.indices : new Uint16Array(data.indices);
-  return { positions: data.positions, normals: data.normals, colors, indices };
+  return packTerrainChunk(buildSurfaceChunkMesh(world, chunkX, chunkZ, { skipMappings: true, packed: true }));
 }
 
 function createTerrainSource(world: VoxelWorld) {
   const group = new THREE.Group();
   group.name = "terrain";
-  const material = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const uniforms = createTerrainUniforms();
+  const material = createTerrainMaterial(uniforms);
   const meshes = new Map<string, THREE.Mesh>();
 
   const setChunk = (id: string, buffers: ChunkBuffers | null) => {
@@ -96,6 +79,7 @@ function createTerrainSource(world: VoxelWorld) {
 
   const source: TerrainSource = {
     group,
+    uniforms,
     meshes: () => [...meshes.values()],
     rebuildChunks(chunkIds) {
       for (const id of chunkIds) {

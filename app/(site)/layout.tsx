@@ -1,5 +1,4 @@
 import WorldLayer from "@/components/world/WorldLayer";
-import { listFreshBakes } from "@/lib/bake/bake-records";
 import { readMapIndex } from "@/lib/maps/map-store";
 
 /**
@@ -14,8 +13,12 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
   return (
     <>
       {children}
-      {/* Maps with a current bake load it; the rest fall back to their voxel map. */}
-      <WorldLayer defaultMapId={defaultMapId} bakes={listFreshBakes()} />
+      {/*
+        Visitors get the voxel world. Baked worlds are switched off here until the
+        bake keeps the terrain's shapes and textures; to use them again, pass
+        listFreshBakes() from lib/bake/bake-records.
+      */}
+      <WorldLayer defaultMapId={defaultMapId} bakes={{}} />
     </>
   );
 }

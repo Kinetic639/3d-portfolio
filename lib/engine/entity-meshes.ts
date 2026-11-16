@@ -127,7 +127,8 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
   const addPrimitive = (entityId: string, primitive: PrimitiveType, color: string, transform: SerializableTransform) => {
     addToBatch(`${primitive}|${color.toLowerCase()}`, entityId, composeMatrix(transform), () => ({
       geometry: createPrimitiveGeometry(primitive),
-      material: new THREE.MeshLambertMaterial({ color }),
+      // Unlit flat colour, as the placeholders have always been drawn.
+      material: new THREE.MeshBasicMaterial({ color }),
     }));
   };
 

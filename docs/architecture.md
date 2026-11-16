@@ -125,7 +125,26 @@ How it is checked: the e2e test `entering loads nothing, compiles nothing and ru
 
 **Quality tiers.** The starting tier is a guess from device hints (coarse pointer, memory, cores); warm-up lowers it from measurement. Today a tier only caps the device pixel ratio (1.5 / 1.25 / 1). Shadows and post-processing will hang off the same value.
 
+## Terrain look
+
+Voxel terrain is drawn by one material (`lib/engine/terrain-material.ts`) that carries the project's original look: textured blocks (grass top and side, dirt, stone, mossy stone, path, planks, sand, riverbed, each with variants, rotations and mirroring chosen per cell), one fixed light, and the reveal that grows each cell out of the loader platform. The shading is the original shader's, unchanged where it decides a pixel's colour. Placed procedural objects are unlit flat colours, the scene has an ambient and a directional light for models, and the background is `#edf1ed`, all as in the original.
+
+What changed is how the data reaches the GPU:
+
+| | Original | Now |
+|---|---|---|
+| Textures | 9 strips, no mipmaps | 1 array texture, a layer per tile, with mipmaps: crisp texels up close, no shimmer far away |
+| Vertex data | 12 attributes, 84 bytes per vertex | 6 attributes, 46 bytes: normals and colours as bytes, texture parameters in one byte vector, cell origin and reveal delay in one float vector |
+| Meshing | on the main thread, in React | in a worker at load; on the main thread only for edited chunks |
+| Chunk rebuild after an edit | 13–25 ms | 3–4 ms (the centre chunk about 10 ms) |
+
+The reveal uniforms (`uExpansionProgress`, `uTime`, `uLoaderMotion`) are on the terrain source; until the loader and its transition return they sit at "fully revealed".
+
+Measured after this change (production, default map): world ready 2.0 s after navigation start (3.9 s with 4× CPU throttling), total blocking time 26–33 ms, entry transition slowest frame 16.8 ms with no long task and no script fetched, JS heap 34 MB.
+
 ## Baking
+
+> **Status.** Baked worlds are switched off for visitors (`app/(site)/layout.tsx` passes no bakes) and the default map's bake was removed. The bake described below smooths the terrain, which is not what the project wants: the next version keeps the voxel shapes and textures exactly and only optimises. The editor's Bake button and Baked view still run the current version.
 
 A map is authored as voxels and shipped as a **baked world**: smooth static geometry plus the little data the runtime needs. `pnpm bake` (or **Bake** in the editor) writes it next to the map, and it is committed with the map:
 
@@ -356,3 +375,12 @@ Remaining known costs:
 - `/map/<id>` now resolves maps created after the server started.
 - Tests: 5 unit tests (metadata, pipeline on a temporary folder, library), 1 editor e2e test.
 - New dev dependencies: @gltf-transform/core, functions, extensions (replacing the unused CLI package).
+
+### Restoration, step 2: the original look on the new engine
+
+- Terrain textures, the original terrain shader, lighting, background and flat-coloured placeholders are back, on the worker-built, on-demand renderer.
+- Texture array with mipmaps and packed vertex data (see Terrain look).
+- Visitors get voxels again; the smoothing bake is no longer used live and its committed output is gone.
+- The editor shows the same textured terrain; the main-thread mesher is warmed while the editor is idle so the first stroke does not hitch.
+- Environment: lights and background are fixed to the original look; time of day only drives a uniform for now.
+- Checked against the original running from `main`: the same textures and shading at the same zoom. Still different: the camera (the original looked across the terrain from a low angle and could rotate), the zone legend, the animated character and water.

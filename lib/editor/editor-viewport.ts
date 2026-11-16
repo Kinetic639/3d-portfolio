@@ -149,7 +149,6 @@ export class EditorViewport {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.environment = new Environment(this.scene);
-    this.scene.fog = null;
 
     this.rig = new CameraRig(canvas, { onChange: () => this.invalidate(), panButtons: [1, 2], ...EDITOR_ZOOM, initialDistance: 90 });
     this.camera = this.rig.camera;
@@ -187,6 +186,29 @@ export class EditorViewport {
     this.resize();
     this.bind();
     this.invalidate();
+    this.warmMesher();
+  }
+
+  /**
+   * The map was meshed in a worker, so the first edit would run the mesher on
+   * this thread for the first time, unoptimised, and cost a visible hitch.
+   * Rebuilding a few chunks in place while the editor is idle (the result is
+   * identical) lets the engine optimise that code before the first stroke.
+   */
+  private warmMesher() {
+    const counts = getChunkCounts(this.session.world.config);
+    const centre = [Math.floor(counts.x / 2), Math.floor(counts.z / 2)];
+    const ids = [[0, 0], [-1, 0], [0, -1], [-1, -1]].map(([dx, dz]) => this.session.world.getChunkId(centre[0] + dx, centre[1] + dz));
+    let pass = 0;
+    const step = () => {
+      if (this.disposed || this.stroke) return;
+      this.terrain.rebuildChunks([ids[pass % ids.length]]);
+      pass += 1;
+      if (pass < 12) schedule();
+      else this.invalidate();
+    };
+    const schedule = () => (typeof window.requestIdleCallback === "function" ? window.requestIdleCallback(step, { timeout: 500 }) : window.setTimeout(step, 50));
+    schedule();
   }
 
   setSettings(settings: ToolSettings) {
@@ -207,7 +229,6 @@ export class EditorViewport {
     this.preview = preview;
     this.stroke = null;
     this.overlays.visible = !preview;
-    this.scene.fog = preview ? this.environment.fog : null;
     this.applyCameraMode();
     if (preview) {
       this.viewBeforePreview = this.rig.getGoal();

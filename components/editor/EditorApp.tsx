@@ -5,6 +5,7 @@ import { EditorSession } from "@/lib/editor/editor-session";
 import { EditorViewport, MAX_BRUSH_SIZE, type HoverInfo } from "@/lib/editor/editor-viewport";
 import { Thumbnailer } from "@/lib/editor/thumbnailer";
 import { getModelLibrary } from "@/lib/engine/model-library";
+import { getTerrainAtlas } from "@/lib/engine/terrain-material";
 import { buildWorldForMap } from "@/lib/engine/terrain-meshes";
 import { migrateMapDefinition } from "@/lib/maps/map-definition";
 import { ROTATION_VALUES } from "@/lib/voxel-shapes/shape-ids";
@@ -41,6 +42,7 @@ export default function EditorApp({ mapId, notice }: { mapId: string; notice?: s
           await library.ensureLoaded(library.idsFor(definition.entities));
           return library;
         }),
+        getTerrainAtlas().ready,
       ]);
       if (controller.signal.aborted) {
         terrain.dispose();

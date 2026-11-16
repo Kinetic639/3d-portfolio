@@ -8,6 +8,7 @@ import { buildEntityLayer, type EntityLayer } from "./entity-meshes";
 import { Environment } from "./environment";
 import { InteractionLayer, type Interactable } from "./interactables";
 import { getModelLibrary, type ModelLibrary } from "./model-library";
+import { getTerrainAtlas } from "./terrain-material";
 import { buildWorldForMap, type TerrainSource } from "./terrain-meshes";
 import { createVoxelWorldQuery, type WorldQuery } from "./world-query";
 
@@ -155,7 +156,8 @@ export class WorldEngine {
    */
   async loadMap(definition: MapDefinition, options: LoadMapOptions = {}) {
     this.unloadMap();
-    const [{ world, terrain }, models] = await Promise.all([buildWorldForMap(definition, options), this.loadModels(definition)]);
+    // The terrain textures are part of the world: loaded before it is shown, so warm-up uploads them.
+    const [{ world, terrain }, models] = await Promise.all([buildWorldForMap(definition, options), this.loadModels(definition), getTerrainAtlas().ready]);
     if (this.disposed || options.signal?.aborted) {
       terrain.dispose();
       return;

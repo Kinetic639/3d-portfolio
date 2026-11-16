@@ -2,7 +2,7 @@
 
 Michał Stępień's portfolio: a Next.js site whose centrepiece is an interactive 3D world built from voxels in a local editor and baked into static geometry for production.
 
-The project is being rebuilt in stages on the `rebuild/base` branch. Stages 1–6 are done: the map format and content model, the engine and its bridge to the page UI, clickable objects with a content panel and a URL per item, the landing page with background loading, warm-up and the entry transition, the map editor, baking of voxel maps, and the model pipeline. The look of the baked world and of the entry into the world is being reworked; the mini-game follows.
+The project is being rebuilt in stages on the `rebuild/base` branch. Stages 1–6 are done: the map format and content model, the engine and its bridge to the page UI, clickable objects with a content panel and a URL per item, the landing page with background loading, warm-up and the entry transition, the map editor, baking of voxel maps, and the model pipeline. The original look is being brought back on the new engine: textured voxel terrain is done; the loader with its transition, the editor's interface and a bake that keeps the terrain's shapes are next.
 
 ## Run it
 

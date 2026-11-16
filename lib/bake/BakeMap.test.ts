@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { createBakedQuery, readVoxelZoneVolume } from "@/lib/engine/baked-terrain";
 import { createVoxelWorldQuery } from "@/lib/engine/world-query";
 import { createBlankMapDefinition, createLoadedMapState, createMapDefinitionFromWorld, type MapDefinition } from "@/lib/maps/map-definition";
-import { readMapIndex, writeMap } from "@/lib/maps/map-store";
+import { writeMap } from "@/lib/maps/map-store";
 import { createDefaultZone } from "@/lib/maps/zone-authoring";
 import { BLOCK_IDS } from "@/lib/world/block-registry";
 import { bakeMap } from "./bake-map";
@@ -139,11 +139,5 @@ describe("bake store", () => {
     writeMap({ ...map, name: "Changed" }, { root });
     expect(getBakeStatus("bake-test", root).state).toBe("stale");
     expect(listFreshBakes(root)).toEqual({});
-  });
-});
-
-describe("repository maps", () => {
-  it("has a current bake for the default map (run pnpm bake after changing it)", () => {
-    expect(getBakeStatus(readMapIndex().defaultMapId).state).toBe("fresh");
   });
 });

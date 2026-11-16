@@ -1,6 +1,7 @@
 import { createLoadedMapState, type MapDefinition } from "@/lib/maps/map-definition";
 import { buildSurfaceChunkMesh } from "@/lib/terrain/surface-mesher";
 import { getChunkCounts, type WorldConfig } from "@/lib/world/world-config";
+import { packTerrainChunk, terrainChunkTransferables, type TerrainChunkBuffers } from "./terrain-chunk";
 
 /**
  * Builds a map's voxel world and its chunk meshes off the main thread, so the
@@ -11,14 +12,9 @@ import { getChunkCounts, type WorldConfig } from "@/lib/world/world-config";
  */
 export type WorldBuildRequest = { type: "build"; definition: MapDefinition };
 
-export type WorldBuildChunk = {
+export type WorldBuildChunk = TerrainChunkBuffers & {
   type: "chunk";
   id: string;
-  positions: Float32Array;
-  normals: Float32Array;
-  /** Linear-space vertex colours. */
-  colors: Float32Array;
-  indices: Uint16Array | Uint32Array;
   done: number;
   total: number;
 };
@@ -29,7 +25,6 @@ export type WorldBuildMessage =
   | { type: "done" }
   | { type: "error"; message: string };
 
-const srgbToLinear = (value: number) => (value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4));
 // Typed by hand: the project compiles against the DOM library, not the worker one.
 const scope = self as unknown as {
   onmessage: ((event: MessageEvent<WorldBuildRequest>) => void) | null;
@@ -56,14 +51,12 @@ scope.onmessage = (event: MessageEvent<WorldBuildRequest>) => {
     let done = 0;
     for (let chunkZ = 0; chunkZ < counts.z; chunkZ += 1) {
       for (let chunkX = 0; chunkX < counts.x; chunkX += 1) {
-        const data = buildSurfaceChunkMesh(world, chunkX, chunkZ, { renderOnly: true });
+        const data = buildSurfaceChunkMesh(world, chunkX, chunkZ, { skipMappings: true, packed: true });
         done += 1;
-        if (data.indices.length === 0) continue;
-        const colors = new Float32Array(data.colors.length);
-        for (let index = 0; index < colors.length; index += 1) colors[index] = srgbToLinear(data.colors[index]);
-        const indices = data.positions.length / 3 > 65535 ? data.indices : new Uint16Array(data.indices);
-        const message: WorldBuildChunk = { type: "chunk", id: data.id, positions: data.positions, normals: data.normals, colors, indices, done, total };
-        scope.postMessage(message, [message.positions.buffer, message.normals.buffer, message.colors.buffer, message.indices.buffer]);
+        const buffers = packTerrainChunk(data);
+        if (!buffers) continue;
+        const message: WorldBuildChunk = { type: "chunk", id: data.id, ...buffers, done, total };
+        scope.postMessage(message, terrainChunkTransferables(buffers));
       }
     }
     scope.postMessage({ type: "done" } satisfies WorldBuildMessage);

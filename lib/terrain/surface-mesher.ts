@@ -58,6 +58,12 @@ export type SurfaceChunkMeshData = {
     max: WorldPosition;
   };
   buildMs: number;
+  /**
+   * Present with the `packed` option. Per vertex, `tex`: texture kind,
+   * variant, rotation (0-3) plus 4 when mirrored, variation x 255; `reveal`:
+   * the cell's centre and its reveal delay, negative for the loader platform.
+   */
+  packed?: { tex: Uint8Array; reveal: Float32Array };
 };
 
 const SURFACE_BLOCK_SIZE = 1.01;
@@ -123,6 +129,14 @@ export type SurfaceMeshOptions = {
    * the rest roughly halves the cost of a chunk rebuild.
    */
   renderOnly?: boolean;
+  /** Leaves out the face-to-cell mappings (`faceMappings`, `triangleToCell`), which only picking against the mesh needs. */
+  skipMappings?: boolean;
+  /**
+   * Writes the texture and reveal parameters straight into the two packed
+   * vectors the terrain material reads (`packed`), instead of eight separate
+   * arrays. Used by everything that renders; the separate arrays stay empty.
+   */
+  packed?: boolean;
 };
 
 const faceUvCache = new WeakMap<ShapeFace, Array<[number, number]>>();
@@ -159,6 +173,9 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
   const indices: number[] = [];
   const faceMappings: SurfaceFaceMapping[] = [];
   const triangleCells: number[] = [];
+  const packedTex: number[] = [];
+  const packedReveal: number[] = [];
+  const packed = options.packed === true;
   let quadCount = 0;
 
   // The loop visits every cell of the chunk, so it reads the world's arrays directly.
@@ -229,7 +246,16 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
             if (revealDelay < 0) revealDelay = computeExpansionDelay(world, x, y, z);
             const centerFlag = isLoaderPlatformCell ? 1 : 0;
 
-            for (let cornerIndex = 0; cornerIndex < face.corners.length; cornerIndex += 1) {
+            if (packed) {
+              const turn = textureVariation.rotation + (textureVariation.mirror > 0 ? 4 : 0);
+              const variationByte = Math.round(variation * 255);
+              const delay = isLoaderPlatformCell ? -1 : revealDelay;
+              for (let cornerIndex = 0; cornerIndex < face.corners.length; cornerIndex += 1) {
+                uvs.push(faceUvs[cornerIndex][0], faceUvs[cornerIndex][1]);
+                packedTex.push(textureKind, textureVariation.variant, turn, variationByte);
+                packedReveal.push(worldPosition.x, worldPosition.y, worldPosition.z, delay);
+              }
+            } else for (let cornerIndex = 0; cornerIndex < face.corners.length; cornerIndex += 1) {
               uvs.push(faceUvs[cornerIndex][0], faceUvs[cornerIndex][1]);
               textureKinds.push(textureKind);
               textureVariants.push(textureVariation.variant);
@@ -243,8 +269,10 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
               cellOrigins.push(worldPosition.x, worldPosition.y, worldPosition.z);
               centerFlags.push(centerFlag);
             }
-            faceMappings.push({ cellIndex, direction: face.direction });
-            triangleCells.push(cellIndex, cellIndex);
+            if (!options.skipMappings) {
+              faceMappings.push({ cellIndex, direction: face.direction });
+              triangleCells.push(cellIndex, cellIndex);
+            }
           }
           quadCount += 1;
 
@@ -286,6 +314,7 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
       max: world.gridToWorld(maxGridX, getWorldMaxY(world.config), maxGridZ),
     },
     buildMs: Number((now() - startedAt).toFixed(3)),
+    packed: packed ? { tex: new Uint8Array(packedTex), reveal: new Float32Array(packedReveal) } : undefined,
   };
 }
 
