@@ -1,19 +1,22 @@
-import { getBakeStatus, listFreshBakes, readBakedFile } from "@/lib/bake/bake-records";
+import { getBakeStatus, readBakedFile } from "@/lib/bake/bake-records";
 
 /**
  * Serves a map's baked world at /world-data/<mapId>/<hash>.bin. The hash is
- * the file's own, so the response never changes and can be cached forever.
- * Responses are generated at build time for every map with a current bake;
- * other addresses are answered on request (a map baked after the build, or 404).
+ * the file's own, so a response never changes: it is marked immutable and
+ * the CDN and the browser keep it.
+ *
+ * Deliberately a plain request-time handler. Generating the responses at
+ * build time (generateStaticParams) made the development server fail the
+ * first parallel requests to this route.
  */
-
-export function generateStaticParams() {
-  return Object.entries(listFreshBakes()).map(([mapId, hash]) => ({ mapId, file: `${hash}.bin` }));
-}
-
 export async function GET(_request: Request, { params }: { params: Promise<{ mapId: string; file: string }> }) {
   const { mapId, file } = await params;
-  const status = getBakeStatus(mapId);
+  let status: ReturnType<typeof getBakeStatus>;
+  try {
+    status = getBakeStatus(mapId);
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
   if (status.state !== "fresh" || file !== `${status.record.hash}.bin`) {
     return new Response("Not found", { status: 404 });
   }
