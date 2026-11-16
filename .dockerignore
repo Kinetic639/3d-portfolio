@@ -1,0 +1,13 @@
+reference/
+.git/
+**/node_modules/
+**/.next/
+**/dist/
+**/.turbo/
+artifacts/
+.agents/
+.codex/
+.claude/
+.cursor/
+**/.env*
+.tmp-*

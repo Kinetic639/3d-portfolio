@@ -1,0 +1,7 @@
+reference/
+artifacts/
+.agents/
+.codex/
+.claude/
+.cursor/
+.tmp-*

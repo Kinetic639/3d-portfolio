@@ -1,0 +1,6 @@
+{
+  "worldRoots": ["worlds"],
+  "assetRoots": ["assets/source"],
+  "assetCatalog": "assets/catalog",
+  "outputRoot": "artifacts"
+}

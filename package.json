@@ -1,0 +1,42 @@
+{
+  "name": "portfolio-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=24.18.0 <25"
+  },
+  "scripts": {
+    "dev": "turbo run build --filter=./packages/* && turbo run dev --concurrency=12",
+    "dev:portfolio": "turbo run build --filter=\"@portfolio/portfolio^...\" && turbo run dev --concurrency=12 --filter=@portfolio/portfolio...",
+    "dev:editor": "turbo run build --filter=\"@portfolio/editor^...\" && turbo run dev --concurrency=12 --filter=@portfolio/editor...",
+    "build": "pnpm check:boundaries && turbo run build --concurrency=1 && node tools/checks/artifacts.mjs",
+    "build:portfolio": "pnpm check:boundaries && turbo run build --concurrency=1 --filter=@portfolio/portfolio... && node tools/checks/artifacts.mjs portfolio",
+    "build:editor": "pnpm check:boundaries && turbo run build --concurrency=1 --filter=@portfolio/editor... && node tools/checks/artifacts.mjs editor",
+    "lint": "eslint tools && turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "pnpm test:architecture && turbo run test",
+    "test:architecture": "node --test tools/checks/*.test.mjs",
+    "check:boundaries": "node tools/checks/boundaries.mjs && depcruise --config .dependency-cruiser.cjs --output-type err apps/portfolio/src apps/editor/src packages",
+    "check:artifacts": "node tools/checks/artifacts.mjs",
+    "check:no-empty-tests": "node tools/checks/no-empty-tests.mjs",
+    "format:check": "prettier --check .",
+    "format": "prettier --write .",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm check:no-empty-tests && pnpm build && pnpm test:smoke",
+    "test:smoke": "node tools/checks/smoke.mjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@gltf-transform/cli": "4.5.0",
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.10.0",
+    "dependency-cruiser": "18.2.0",
+    "eslint": "9.39.5",
+    "prettier": "3.9.6",
+    "spectorjs": "0.9.30",
+    "turbo": "2.10.12",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
+    "vitest": "5.0.0"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@portfolio/editor",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "typecheck": "next typegen && tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vitest run --config ../../tools/config/vitest.mjs"
+  },
+  "dependencies": {
+    "next": "16.3.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "@portfolio/contracts": "workspace:*",
+    "@portfolio/world-authoring": "workspace:*",
+    "@portfolio/world-build": "workspace:*",
+    "@portfolio/runtime": "workspace:*",
+    "@portfolio/experience-ui": "workspace:*",
+    "@portfolio/portfolio-content": "workspace:*",
+    "@portfolio/diagnostics": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "5.0.0",
+    "eslint": "9.39.5",
+    "prettier": "3.9.6",
+    "eslint-config-next": "16.3.4",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "@types/node": "24.10.0"
+  }
+}

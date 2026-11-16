@@ -1,0 +1,17 @@
+packages:
+  - apps/portfolio
+  - apps/editor
+  - packages/contracts
+  - packages/world-authoring
+  - packages/world-build
+  - packages/runtime
+  - packages/experience-ui
+  - packages/portfolio-content
+  - packages/diagnostics
+
+# No reference, asset or world directory is a workspace package.
+strictDepBuilds: true
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true

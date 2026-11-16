@@ -1,0 +1,31 @@
+{
+  "name": "@portfolio/diagnostics",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint src",
+    "test": "vitest run --config ../../tools/config/vitest.mjs"
+  },
+  "dependencies": {
+    "@portfolio/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "5.0.0",
+    "eslint": "9.39.5",
+    "prettier": "3.9.6"
+  }
+}
