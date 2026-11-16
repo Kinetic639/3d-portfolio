@@ -1,0 +1,73 @@
+/* The original's FPS badge: bottom left, small, monospace. It opens into the details. */
+.hud {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1;
+}
+
+.badge,
+.details {
+  border: 1px solid rgba(24, 34, 31, 0.16);
+  border-radius: 8px;
+  color: #15201c;
+  background: rgba(247, 249, 246, 0.86);
+  box-shadow: 0 12px 32px rgba(24, 34, 31, 0.15);
+}
+
+.badge {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.badge strong {
+  min-width: 2.2em;
+  color: #24785e;
+  font-size: 15px;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.badge span:last-child {
+  min-width: 5.5em;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.badge:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 7px 16px;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.details div {
+  display: contents;
+}
+
+.details dt {
+  color: #56635e;
+}
+
+.details dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+

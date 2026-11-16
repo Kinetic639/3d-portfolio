@@ -135,6 +135,12 @@ View options (grid lines and their colour, hiding terrain materials, hiding obje
 
 The engine handles picking, the outline, remeshing, the burst, the camera, the HUD and Escape; a game needs none of it. A game that must add cells, not only remove them, needs a matching `placeBlock` in `MinigameTerrain` and `MinigameHost`.
 
+## Measure performance
+
+- In the world, click the **FPS** badge (bottom left) for frame times, engine CPU, draw calls, triangles and the UI's cost. "idle" means nothing is being drawn, which is how a still world should read.
+- A new component in the world UI that reads the bridge calls `useUiWork()` (`lib/perf/ui-work.ts`) as its first hook, so its updates count in "UI".
+- Something the engine animates must still show up as frames in the badge only while it moves; if it reads a number while nothing moves, it is asking for frames it does not need.
+
 ## Add an engine system (wind, weather, time of day)
 
 1. Put shared values in `Environment.uniforms` (`lib/engine/environment.ts`) and update them in `Environment.update` or a setter.

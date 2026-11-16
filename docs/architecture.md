@@ -298,6 +298,23 @@ Measured in Chromium with a real GPU (RTX 2060), 1440×900. "Before" is commit `
 | Unit test suite | 57 s, 1–3 flaky timeouts | 6 s, 124 tests, stable |
 | `pnpm lint` | 5 errors, 41 warnings | 0 errors, 0 warnings |
 
+### Built-in measurement: the perf badge
+
+The world shows the original's FPS badge at the bottom left (`components/world/PerfHud.tsx`); a click opens the details. It is there in production too, as in the original.
+
+| Field | What it is | Source |
+|---|---|---|
+| FPS | Frames the engine drew in the last second. Rendering is on demand, so a still world reads **idle**, not 60 | `FrameRecorder` (`lib/perf/frame-recorder.ts`), filled by the engine every frame |
+| Median / p95 / worst frame | Intervals between consecutive frames in the last second: what the visitor sees | same |
+| Engine CPU | Mean / worst time of the engine's update + render inside a frame | same |
+| Draw calls, triangles | Of the last frame drawn | `renderer.info` |
+| UI (5 s), UI worst | Updates of the world's React UI in the last 5 s, their total time from render to committed DOM, and the slowest | `useUiWork()` (`lib/perf/ui-work.ts`) in every component that reads the bridge |
+
+- **Cost.** Recording a frame is three typed-array writes. The badge reads twice a second on a timer (0.015 ms per read) and writes text into the DOM without React; it never asks the engine for a frame (tested: 0 frames drawn while it refreshes over an idle world).
+- **Bridge rule 3 holds.** Per-frame data never enters the bridge's state; the engine puts its recorder in `bridge.diagnostics`, a plain slot that readers poll.
+- **UI time** is measured from the start of a component's render to its layout effect, which works in production builds (React's Profiler does not). The browser's own style and layout work afterwards is not included.
+- The Next.js development indicator moved to the bottom right to make room.
+
 ### Landing page and entry (stage 3, production build)
 
 | Measure | Result |
@@ -422,3 +439,9 @@ The first bake smoothed the terrain (density, blur, Surface Nets, simplification
 - Mini-game framework: `MinigameDefinition` + registry (`lib/minigames/`), engine host (`lib/engine/minigame-host.ts`), HUD in `WorldLayer.tsx`, `leave-minigame` command.
 - One game, Dig ("Mine", zone 11 on the default map): click a block to break it; stone sometimes hides ore. Works on voxels and on the bake (the zone stays voxels there).
 - Tests: unit tests for the game and registry; e2e for entering from the icon, digging, Escape and the Leave button, on voxels and on the bake.
+
+### Restoration, step 6b: the perf badge
+
+- The original's bottom-left FPS badge, now with details: frame time median / p95 / worst, engine CPU per frame, draw calls, triangles, and the cost of the world's React UI.
+- Engine `FrameRecorder` (ring buffer) and `useUiWork()` meter (`lib/perf/`); readers poll `bridge.diagnostics`.
+- Tests: unit tests for the recorder and the meter; e2e for idle, panning and the details.

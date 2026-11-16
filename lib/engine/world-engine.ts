@@ -19,6 +19,7 @@ import { getTerrainAtlas, REVEAL_COMPLETE } from "./terrain-material";
 import { buildBakedTerrain, buildWorldForMap, type TerrainSource } from "./terrain-meshes";
 import { buildSurfaceChunkMesh } from "@/lib/terrain/surface-mesher";
 import { createVoxelWorldQuery, type WorldQuery } from "./world-query";
+import { FrameRecorder } from "@/lib/perf/frame-recorder";
 
 /**
  * The 3D runtime. Plain TypeScript on three.js: no React anywhere in this
@@ -107,6 +108,8 @@ const nextFrame = () => new Promise<number>((resolve) => requestAnimationFrame(r
 
 export class WorldEngine {
   readonly stats: EngineStats = { frames: 0, loaderFrames: 0, picks: 0, frameCpuMs: 0, frameIntervalMs: 0, worstFrameIntervalMs: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, programs: 0 };
+  /** The last few seconds of world frames (not warm-up or loader frames), for the perf HUD. */
+  readonly frames = new FrameRecorder();
   warmUpReport: WarmUpReport | null = null;
   private readonly canvas: HTMLCanvasElement;
   private readonly bridge: WorldBridge;
@@ -178,6 +181,7 @@ export class WorldEngine {
       onTap: (clientX, clientY) => this.handleTap(clientX, clientY),
     });
     this.rig.setEnabled(false);
+    bridge.diagnostics.engine = { frames: this.frames, stats: this.stats };
 
     this.beacon.group.traverse((object) => object.layers.enable(LOADER_LAYER));
     this.scene.add(this.beacon.group);
@@ -655,6 +659,7 @@ export class WorldEngine {
 
   dispose() {
     this.disposed = true;
+    if (this.bridge.diagnostics.engine?.frames === this.frames) this.bridge.diagnostics.engine = null;
     cancelAnimationFrame(this.frameHandle);
     cancelAnimationFrame(this.pickHandle);
     window.clearTimeout(this.leaveTimer);
@@ -921,6 +926,7 @@ export class WorldEngine {
     this.stats.geometries = info.memory.geometries;
     this.stats.textures = info.memory.textures;
     this.stats.programs = info.programs?.length ?? 0;
+    this.frames.record(now, this.stats.frameIntervalMs, this.stats.frameCpuMs);
     this.lastFrameAt = cameraMoving || animating ? now : 0;
 
     if (this.entering && !this.entry) {

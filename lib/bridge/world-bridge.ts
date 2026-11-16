@@ -1,5 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { MapContentReference } from "@/lib/maps/map-definition";
+import type { FrameRecorder } from "@/lib/perf/frame-recorder";
 
 /**
  * The only channel between the 3D engine and the React UI.
@@ -96,6 +97,13 @@ class Channel<T> {
   }
 }
 
+/** What the engine lets diagnostics read. Not reactive: readers poll it (the perf HUD, twice a second). */
+export type EngineDiagnostics = {
+  frames: FrameRecorder;
+  /** Renderer counters of the last frame drawn. */
+  stats: { readonly drawCalls: number; readonly triangles: number; readonly geometries: number; readonly textures: number; readonly programs: number; readonly picks: number };
+};
+
 export type WorldBridge = {
   store: StoreApi<WorldBridgeState>;
   commands: Channel<WorldCommand>;
@@ -104,6 +112,8 @@ export type WorldBridge = {
   set: (patch: Partial<WorldBridgeState>) => void;
   /** Back to the initial state, bypassing transition rules. For engine teardown only. */
   reset: () => void;
+  /** Per-frame data for diagnostics (rule 3): set by the engine while it exists. */
+  diagnostics: { engine: EngineDiagnostics | null };
 };
 
 const INITIAL_STATE: WorldBridgeState = {
@@ -149,7 +159,7 @@ export function createWorldBridge(): WorldBridge {
 
   const reset = () => store.setState({ ...INITIAL_STATE }, true);
 
-  return { store, commands: new Channel<WorldCommand>(), events: new Channel<WorldEvent>(), set, reset };
+  return { store, commands: new Channel<WorldCommand>(), events: new Channel<WorldEvent>(), set, reset, diagnostics: { engine: null } };
 }
 
 function isEqual(left: unknown, right: unknown) {
