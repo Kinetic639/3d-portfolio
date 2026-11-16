@@ -83,7 +83,8 @@ import { BLOCK_IDS, RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type Block
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
 import { getShapeDefinition, getShapePitch, getShapeStateValue, setShapePitch, TERRAIN_PALETTE_SHAPE_DEFINITIONS, type ShapeCategory } from "@/lib/voxel-shapes/shape-registry";
 import { SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
-import type { MapEnvironment, MapWind, ModelWindSettings } from "@/lib/maps/map-definition";
+import type { MapEnvironment, MapLighting, MapShadows, MapSurfaceStyle, MapWind, ModelStyleSettings, ModelWindSettings } from "@/lib/maps/map-definition";
+import { EdgesSection, LightingSection, ModelStyleSection, SurfaceSection } from "./StylePanels";
 import type { WindDebugView } from "@/lib/editor/wind-debug";
 import { ModelSection, WindSection, type SelectedModelInfo } from "./WindPanels";
 
@@ -143,6 +144,10 @@ export type EditorInspectorState = {
   onModelDebugViewChange: (view: WindDebugView) => void;
   /** Changes this map's settings for the selected model; null resets them to the model's defaults. */
   onModelWindChange: (patch: ModelWindSettings | null) => void;
+  onModelStyleChange: (patch: ModelStyleSettings | null) => void;
+  onLightingChange: (patch: Partial<MapLighting>) => void;
+  onShadowsChange: (patch: Partial<MapShadows>) => void;
+  onSurfaceStyleChange: (patch: Partial<MapSurfaceStyle>) => void;
   zoneId: number;
   zoneEditMode: ZoneEditMode;
   zoneSelectionMode: ZoneSelectionMode;
@@ -945,6 +950,9 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
           <ActionButton icon="preview" className={props.renderMode === "baked" ? "active" : ""} onClick={() => props.onRenderModeChange(props.renderMode === "baked" ? "voxels" : "baked")}>{props.renderMode === "baked" ? "Show Voxels" : "Show Baked"}</ActionButton>
         </Section>
         <WindSection wind={props.environment.wind} onChange={props.onWindChange} onGroup={props.onEditGroup} />
+        <LightingSection lighting={props.environment.lighting} onChange={props.onLightingChange} onGroup={props.onEditGroup} />
+        <SurfaceSection style={props.environment.style} onChange={props.onSurfaceStyleChange} onGroup={props.onEditGroup} />
+        <EdgesSection style={props.environment.style} shadows={props.environment.shadows} onStyleChange={props.onSurfaceStyleChange} onShadowsChange={props.onShadowsChange} onGroup={props.onEditGroup} />
       </Panel>
     );
   }
@@ -1442,7 +1450,10 @@ function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspa
           </div>
         </Section>
         {props.selectedModel ? (
-          <ModelSection model={props.selectedModel} debugView={props.modelDebugView} onWindChange={props.onModelWindChange} onDebugViewChange={props.onModelDebugViewChange} onGroup={props.onEditGroup} />
+          <>
+            <ModelStyleSection name={props.selectedModel.name} style={props.selectedModel.style} overridden={props.selectedModel.styleOverridden} hasOutlineData={props.selectedModel.hasOutlineData} onChange={props.onModelStyleChange} onGroup={props.onEditGroup} />
+            <ModelSection model={props.selectedModel} debugView={props.modelDebugView} onWindChange={props.onModelWindChange} onDebugViewChange={props.onModelDebugViewChange} onGroup={props.onEditGroup} />
+          </>
         ) : null}
       </Panel>
     );

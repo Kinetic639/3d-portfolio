@@ -1,4 +1,4 @@
-import type { ModelWindSettings } from "@/lib/maps/map-definition";
+import type { ModelStyleSettings, ModelWindSettings } from "@/lib/maps/map-definition";
 import type { CollisionMode } from "@/lib/maps/map-entities";
 import type { PrefabCategory } from "@/lib/prefabs/prefab-types";
 
@@ -68,10 +68,15 @@ export type AssetMetadata = {
   maxTextureSize?: number;
   /** Present when the model sways in the wind: its default response, which a map can override per model. */
   wind?: ModelWindSettings;
+  /**
+   * How the model is drawn by default (a map can override it per model).
+   * `outline: true` also makes the pipeline compute the model's outline normals.
+   */
+  style?: ModelStyleSettings;
 };
 
 export type AssetManifestEntry = Required<Pick<AssetMetadata, "name" | "category" | "scale" | "rotationY" | "anchor" | "collision">> &
-  Pick<AssetMetadata, "description" | "animation" | "wind"> & {
+  Pick<AssetMetadata, "description" | "animation" | "wind" | "style"> & {
     id: string;
     variants: AssetVariant[];
     replacesPrefabs: string[];
@@ -148,6 +153,17 @@ export function validateAssetMetadata(input: unknown): string[] {
       if (wind.weightSource !== undefined && !(typeof wind.weightSource === "string" && /^(height|(color_1|uv|uv1|uv2)-[rgbaxy])$/.test(wind.weightSource))) {
         errors.push('wind.weightSource must be "height" or like "color_1-r", "uv-y".');
       }
+    }
+  }
+  if (input.style !== undefined) {
+    const style = input.style;
+    if (!isRecord(style)) errors.push("style must be an object.");
+    else {
+      if (style.shading !== undefined && style.shading !== "toon" && style.shading !== "standard") errors.push('style.shading must be "toon" or "standard".');
+      for (const key of ["outline", "contactShadow", "castShadow"]) {
+        if (style[key] !== undefined && typeof style[key] !== "boolean") errors.push(`style.${key} must be true or false.`);
+      }
+      if (style.outlineScale !== undefined && !(typeof style.outlineScale === "number" && style.outlineScale >= 0 && style.outlineScale <= 5)) errors.push("style.outlineScale must be a number from 0 to 5.");
     }
   }
   if (input.rootMotionNode !== undefined && typeof input.rootMotionNode !== "string") errors.push("rootMotionNode must be a node name.");

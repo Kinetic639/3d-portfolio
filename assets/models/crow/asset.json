@@ -5,8 +5,25 @@
   "scale": 0.015,
   "collision": "none",
   "animation": "ANIM_Crow_IdleLookAround",
-  "animations": ["ANIM_Crow_IdleLookAround", "ANIM_Crow_Walk", "ANIM_Crow_Run", "ANIM_Crow_TakeOff", "ANIM_Crow_Fly"],
+  "animations": [
+    "ANIM_Crow_IdleLookAround",
+    "ANIM_Crow_Walk",
+    "ANIM_Crow_Run",
+    "ANIM_Crow_TakeOff",
+    "ANIM_Crow_Fly"
+  ],
   "rootMotionNode": "root",
   "alpha": "cutout",
-  "tags": ["creature", "bird", "animated"]
+  "tags": [
+    "creature",
+    "bird",
+    "animated"
+  ],
+  "style": {
+    "shading": "toon",
+    "outline": true,
+    "outlineScale": 0.25,
+    "contactShadow": false,
+    "castShadow": true
+  }
 }

@@ -87,6 +87,8 @@ function createTerrainSource(world: VoxelWorld | null, editorView = false) {
     mesh.name = id;
     // Vertices are already in world space; skip per-frame matrix work.
     mesh.matrixAutoUpdate = false;
+    // Terrain shows the shadows of objects; it casts none (the second pass over every tile would cost more than it shows).
+    mesh.receiveShadow = true;
     meshes.set(id, mesh);
     group.add(mesh);
   };

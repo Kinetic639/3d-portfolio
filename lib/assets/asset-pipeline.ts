@@ -7,6 +7,7 @@ import { dedup, getBounds, meshopt, prune, resample, weld } from "@gltf-transfor
 import { MeshoptDecoder, MeshoptEncoder } from "meshoptimizer";
 import sharp from "sharp";
 import { getPrefabDefinition } from "@/lib/prefabs/prefab-library";
+import { addOutlineNormals } from "./outline-normals";
 import { BASE_VERTEX_ATTRIBUTES, isAssetId, validateAssetMetadata, type AssetManifest, type AssetManifestEntry, type AssetMetadata } from "./asset-types";
 
 /**
@@ -26,8 +27,8 @@ import { BASE_VERTEX_ATTRIBUTES, isAssetId, validateAssetMetadata, type AssetMan
  * Work is skipped for models whose source and metadata have not changed.
  */
 /** Raise when the optimisation steps change, so every output is rebuilt. */
-// 4: prune keeps the attributes prepareDocument chose (it dropped COLOR_1 before).
-const PIPELINE_VERSION = 4;
+// 4: prune keeps the attributes prepareDocument chose (it dropped COLOR_1 before). 5: outline normals.
+const PIPELINE_VERSION = 5;
 
 /** Largest texture side kept unless asset.json says otherwise. */
 export const DEFAULT_MAX_TEXTURE_SIZE = 2048;
@@ -223,6 +224,7 @@ export async function processAssets(options: { root?: string; force?: boolean } 
           fail(problem);
           continue;
         }
+        if (metadata.style?.outline) addOutlineNormals(document);
         await document.transform(dedup(), prune({ keepAttributes: true }), resample(), weld(), meshopt({ encoder: MeshoptEncoder, level: "medium" }));
         await compressTextures(document, metadata.maxTextureSize ?? DEFAULT_MAX_TEXTURE_SIZE);
       } catch (error) {
@@ -255,6 +257,7 @@ export async function processAssets(options: { root?: string; force?: boolean } 
         collision: metadata.collision ?? "blocking",
         animation: metadata.animation,
         wind: metadata.wind,
+        style: metadata.style,
         variants: metadata.variants ?? [],
         replacesPrefabs: metadata.replacesPrefabs ?? [],
         tags: metadata.tags ?? [],

@@ -6,6 +6,7 @@ import { buildEntityLayer, type EntityLayer } from "@/lib/engine/entity-meshes";
 import { POP_COMPLETE } from "@/lib/engine/entry-sequence";
 import { Environment } from "@/lib/engine/environment";
 import { ModelWindRegistry } from "@/lib/engine/model-wind";
+import { ModelStyleRegistry } from "@/lib/engine/model-style";
 import { createWindDebugMaterial, type WindDebugView } from "./wind-debug";
 import type { ModelLibrary } from "@/lib/engine/model-library";
 import type { TerrainSource } from "@/lib/engine/terrain-meshes";
@@ -186,6 +187,9 @@ export class EditorViewport {
   private readonly environment: Environment;
   /** Per-model wind bindings; live values for the response, rebuild on a new weight source. */
   private readonly windModels: ModelWindRegistry;
+  /** Per-model look (toon, outline, contact patch, shadows) and the map's surface style uniforms. */
+  private readonly modelStyles: ModelStyleRegistry;
+  private readonly shadowFocus = new THREE.Vector3();
   private readonly frustum = new THREE.Frustum();
   private readonly viewProjection = new THREE.Matrix4();
   /** A model shown in a debug view instead of its material (wind weights, vertex colours, UV sets). */
@@ -267,7 +271,9 @@ export class EditorViewport {
 
     this.environment.apply(session.getMeta().environment);
     this.windModels = new ModelWindRegistry(models, this.environment.wind, session.getMeta().modelSettings);
-    this.entities = buildEntityLayer(session.getEntities(), models, { wind: this.windModels.options() });
+    this.modelStyles = new ModelStyleRegistry(models, session.getMeta().modelSettings, session.getMeta().environment.style);
+    this.applyShadowAvailability();
+    this.entities = buildEntityLayer(session.getEntities(), models, { wind: this.windModels.options(), style: this.modelStyles.options() });
     this.scene.add(terrain.group, this.entities.group, this.helpers, this.overlays);
 
     // Surface plates: depth test off, so a plate is never hidden by the block it sits on.
@@ -585,7 +591,7 @@ export class EditorViewport {
       this.entitiesDirty = false;
       this.scene.remove(this.entities.group);
       this.entities.dispose();
-      this.entities = buildEntityLayer(this.session.getEntities(), this.models, { wind: this.windModels.options() });
+      this.entities = buildEntityLayer(this.session.getEntities(), this.models, { wind: this.windModels.options(), style: this.modelStyles.options() });
       this.entities.group.visible = !this.view.hidden.has("entities");
       this.scene.add(this.entities.group);
       this.applyDebugView();
@@ -610,6 +616,10 @@ export class EditorViewport {
       if (this.entities.windInView(this.frustum)) animating = true;
     }
     this.environment.update(this.lastTickAt / 1000, delta);
+    if (this.renderer.shadowMap.enabled) {
+      const view = this.rig.getView();
+      this.environment.followView(this.shadowFocus.set(view.x, 0, view.z), view.distance);
+    }
     if (this.popClock !== null) {
       this.popClock += delta;
       const done = this.popClock > this.entities.popDuration + 0.1;
@@ -642,7 +652,20 @@ export class EditorViewport {
     if (width === 0 || height === 0) return;
     this.renderer.setSize(width, height, false);
     this.rig.setAspect(width / height);
+    this.modelStyles?.surface.setViewport(this.camera.fov, height);
     this.invalidate();
+  }
+
+  /** Shadow maps follow the map's setting; switching them recompiles the lit materials (editor only). */
+  private applyShadowAvailability() {
+    const enabled = this.environment.shadowsEnabled;
+    if (this.renderer.shadowMap.enabled === enabled) return;
+    this.renderer.shadowMap.enabled = enabled;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.scene.traverse((object) => {
+      const material = (object as THREE.Mesh).material;
+      for (const item of Array.isArray(material) ? material : material ? [material] : []) item.needsUpdate = true;
+    });
   }
 
   private onSessionChange(change: SessionChange) {
@@ -711,6 +734,10 @@ export class EditorViewport {
     this.environment.apply(meta.environment);
     // Response values are uniforms; a new weight source is a new shader.
     if (this.windModels.update(meta.modelSettings)) this.entitiesDirty = true;
+    // Surface values are uniforms; a model's shading, outline, patch or shadow casting are batches.
+    this.modelStyles?.applySurface(meta.environment.style);
+    if (this.modelStyles?.update(meta.modelSettings)) this.entitiesDirty = true;
+    this.applyShadowAvailability();
     this.environment.background.set(this.view?.background ?? "#edf1ed");
     for (const zone of meta.zones) {
       const materials = this.zoneMaterials.get(zone.numericId);

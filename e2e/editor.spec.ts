@@ -18,7 +18,7 @@ type EditorProbe = {
     getMeta: () => {
       name: string;
       zones: Array<{ numericId: number; label: string; kind?: string; minigame?: { gameId: string } }>;
-      environment: { wind: { strength: number } & Record<string, unknown> };
+      environment: { wind: { strength: number } & Record<string, unknown>; lighting?: Record<string, unknown>; style?: Record<string, unknown> };
       modelSettings?: Record<string, unknown>;
     };
     undoLabel: string | null;
@@ -474,6 +474,42 @@ test("wind: presets and values in the Map workspace, a model's response and debu
   await response.getByRole("button", { name: "Reset to model defaults" }).click();
   expect(await page.evaluate(() => window.__editor!.session.getMeta().modelSettings)).toBeUndefined();
   // Every shader compiled: a GLSL error would be logged here.
+  await page.waitForTimeout(300);
+  expect(errors).toEqual([]);
+});
+
+test("style: lighting, surface, edges and shadows in the Map workspace, a model's style in the inspector", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openEditor(page);
+  await workspace(page, "Objects");
+  await leftDock(page).getByRole("combobox", { name: "Category" }).selectOption("nature");
+  await leftDock(page).getByRole("option", { name: /Land Rock \(small\)/ }).click();
+  const spot = await columnTop(page, 22, 22);
+  await page.mouse.click(spot.x, spot.y);
+  const rock = (await entities(page)).find((entity) => (entity as { assetReference?: string }).assetReference === "rock-land-small")!;
+
+  await workspace(page, "Map");
+  const environment = () => page.evaluate(() => window.__editor!.session.getMeta().environment);
+  await page.locator("details[aria-label='Lighting']").getByRole("button", { name: "Style lab" }).click();
+  expect((await environment()).lighting).toMatchObject({ sunIntensity: 2.4, sunColor: "#fff0d3" });
+  const edges = page.locator("details[aria-label='Edges and depth']");
+  await edges.getByRole("checkbox", { name: "Shadows" }).check();
+  expect(await page.evaluate(() => (window.__editor!.viewport as unknown as { renderer: { shadowMap: { enabled: boolean } } }).renderer.shadowMap.enabled)).toBe(true);
+  await page.locator("details[aria-label='Surface']").getByRole("slider", { name: "Hatch power" }).fill("0.6");
+  await edges.getByRole("button", { name: "World units" }).click();
+  expect((await environment()).style).toMatchObject({ hatchStrength: 0.6, outlineMode: "world", outlineThickness: 0.012 });
+  await page.keyboard.press("Control+z");
+  expect((await environment()).style).toMatchObject({ hatchStrength: 0.6 });
+  expect((await environment()).style?.outlineMode).not.toBe("world");
+
+  await page.evaluate((id) => window.__editor!.store.setState({ selection: [id] }), rock.id);
+  const modelStyle = page.locator("details[aria-label='Model style']");
+  await expect(modelStyle).toContainText("Land Rock (small)");
+  await modelStyle.getByRole("button", { name: "Model's own" }).click();
+  await modelStyle.getByRole("checkbox", { name: "Contact AO patch" }).uncheck();
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().modelSettings)).toEqual({ "rock-land-small": { style: { shading: "standard", contactShadow: false } } });
+  await modelStyle.getByRole("button", { name: "Reset to model defaults" }).click();
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().modelSettings)).toBeUndefined();
   await page.waitForTimeout(300);
   expect(errors).toEqual([]);
 });

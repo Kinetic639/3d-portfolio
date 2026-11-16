@@ -169,10 +169,53 @@ export type MapWind = {
   turbulence?: number;
 };
 
+/** Light on models (the terrain keeps the original's own light). Omitted fields: the original look. */
+export type MapLighting = {
+  sunIntensity?: number;
+  sunColor?: string;
+  /** Where the sun is, relative to what it lights; only the direction matters. */
+  sunPosition?: { x: number; y: number; z: number };
+  /** Sky light: colour from above, ground colour from below. */
+  skyIntensity?: number;
+  skyColor?: string;
+  groundColor?: string;
+};
+
+export type MapShadows = {
+  /** Models and prefabs cast shadows on the terrain and on each other. Default off. */
+  enabled?: boolean;
+  /** How dark a shadow makes the terrain, 0-1. */
+  strength?: number;
+  bias?: number;
+  normalBias?: number;
+  /** Shadow map side in pixels. */
+  mapSize?: 1024 | 2048 | 4096;
+};
+
+/** The style lab's surface look for models drawn with toon shading. */
+export type MapSurfaceStyle = {
+  /** Light steps, 2-6. */
+  toonBands?: number;
+  /** Cross-hatching in the shade, 0-1. */
+  hatchStrength?: number;
+  hatchScale?: number;
+  /** "uv": the hatching sticks to the surface; "screen": to the screen. */
+  hatchMode?: "uv" | "screen";
+  /** Edge thickness: pixels in "screen" mode, world units in "world" mode (the lab's). */
+  outlineThickness?: number;
+  outlineMode?: "screen" | "world";
+  outlineColor?: string;
+  /** Darkness of the soft contact patch under models that use it, 0-1. */
+  contactShadow?: number;
+};
+
 export type MapEnvironment = {
   /** Hours, 0-24. */
   timeOfDay: number;
   wind: MapWind;
+  lighting?: MapLighting;
+  shadows?: MapShadows;
+  style?: MapSurfaceStyle;
 };
 
 /** How a wind-reactive model moves; omitted fields use the model's defaults from asset.json. */
@@ -188,9 +231,24 @@ export type ModelWindSettings = {
   weightSource?: string;
 };
 
+/** How a model is drawn; omitted fields use the model's defaults from asset.json. */
+export type ModelStyleSettings = {
+  /** "toon": the style lab's banded, hatched shading; "standard": the model's own material. */
+  shading?: "toon" | "standard";
+  /** Draw the edge (needs the outline data the pipeline computes for models with an outline by default). */
+  outline?: boolean;
+  /** Multiplies the map's outline thickness for this model. */
+  outlineScale?: number;
+  /** A soft dark patch on the ground under each instance. */
+  contactShadow?: boolean;
+  /** Casts a shadow when the map has shadows on. */
+  castShadow?: boolean;
+};
+
 /** Per-model settings for this map, by model id. They apply to every placed instance of the model. */
 export type ModelSettings = {
   wind?: ModelWindSettings;
+  style?: ModelStyleSettings;
 };
 
 export type MapDefinition = {
@@ -736,6 +794,7 @@ export function validateMapDefinition(input: unknown, options: MapValidationOpti
     }
   }
   errors.push(...validateModelSettings(map.modelSettings));
+  if (isRecord(environment)) errors.push(...validateLook(environment));
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true, map: cloneMapDefinition(map) };
 }
@@ -1005,15 +1064,64 @@ function cloneCameraPreset(preset: MapCameraPreset): MapCameraPreset {
 }
 
 function cloneEnvironment(environment: MapEnvironment): MapEnvironment {
-  return { timeOfDay: environment.timeOfDay, wind: { ...environment.wind } };
+  return {
+    timeOfDay: environment.timeOfDay,
+    wind: { ...environment.wind },
+    ...(environment.lighting ? { lighting: { ...environment.lighting, ...(environment.lighting.sunPosition ? { sunPosition: { ...environment.lighting.sunPosition } } : {}) } } : {}),
+    ...(environment.shadows ? { shadows: { ...environment.shadows } } : {}),
+    ...(environment.style ? { style: { ...environment.style } } : {}),
+  };
 }
 
 function cloneModelSettings(settings: Record<string, ModelSettings> | undefined): Record<string, ModelSettings> | undefined {
   if (!settings) return undefined;
-  return Object.fromEntries(Object.entries(settings).map(([id, value]) => [id, { ...value, wind: value.wind ? { ...value.wind } : undefined }]));
+  return Object.fromEntries(Object.entries(settings).map(([id, value]) => [id, { ...value, wind: value.wind ? { ...value.wind } : undefined, style: value.style ? { ...value.style } : undefined }]));
 }
 
 const WIND_RESPONSE_LIMITS = { sway: 3, branches: 3, leaves: 3, stiffness: 5 } as const;
+
+const isColor = (value: unknown) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
+
+/** Lighting, shadows and surface style of an environment. */
+function validateLook(environment: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const check = (group: string, value: unknown, rules: Record<string, (field: unknown) => boolean>) => {
+    if (value === undefined) return;
+    if (!isRecord(value)) {
+      errors.push(`Environment ${group} must be an object.`);
+      return;
+    }
+    for (const [key, valid] of Object.entries(rules)) {
+      if (value[key] !== undefined && !valid(value[key])) errors.push(`Environment ${group}.${key} is not valid.`);
+    }
+  };
+  const range = (min: number, max: number) => (field: unknown) => isFiniteInRange(field, min, max);
+  check("lighting", environment.lighting, {
+    sunIntensity: range(0, 10), sunColor: isColor, skyIntensity: range(0, 10), skyColor: isColor, groundColor: isColor,
+    sunPosition: (field) => isRecord(field) && ["x", "y", "z"].every((axis) => isFiniteInRange(field[axis], -1000, 1000)) && (field.y as number) > 0,
+  });
+  check("shadows", environment.shadows, {
+    enabled: (field) => typeof field === "boolean", strength: range(0, 1), bias: range(-0.01, 0.01), normalBias: range(0, 0.5),
+    mapSize: (field) => field === 1024 || field === 2048 || field === 4096,
+  });
+  check("style", environment.style, {
+    toonBands: (field) => Number.isInteger(field) && isFiniteInRange(field, 2, 6), hatchStrength: range(0, 1), hatchScale: range(0.1, 10),
+    hatchMode: (field) => field === "uv" || field === "screen", outlineThickness: range(0, 10), outlineMode: (field) => field === "screen" || field === "world",
+    outlineColor: isColor, contactShadow: range(0, 1),
+  });
+  return errors;
+}
+
+function validateModelStyle(id: string, style: unknown): string[] {
+  if (!isRecord(style)) return [`modelSettings.${id}.style must be an object.`];
+  const errors: string[] = [];
+  if (style.shading !== undefined && style.shading !== "toon" && style.shading !== "standard") errors.push(`modelSettings.${id}.style.shading must be "toon" or "standard".`);
+  for (const key of ["outline", "contactShadow", "castShadow"]) {
+    if (style[key] !== undefined && typeof style[key] !== "boolean") errors.push(`modelSettings.${id}.style.${key} must be true or false.`);
+  }
+  if (style.outlineScale !== undefined && !isFiniteInRange(style.outlineScale, 0, 5)) errors.push(`modelSettings.${id}.style.outlineScale is out of range.`);
+  return errors;
+}
 
 function validateModelSettings(settings: unknown): string[] {
   if (settings === undefined) return [];
@@ -1024,6 +1132,7 @@ function validateModelSettings(settings: unknown): string[] {
       errors.push(`modelSettings.${id} must be settings for a model id.`);
       continue;
     }
+    if (value.style !== undefined) errors.push(...validateModelStyle(id, value.style));
     if (value.wind === undefined) continue;
     if (!isRecord(value.wind)) {
       errors.push(`modelSettings.${id}.wind must be an object.`);

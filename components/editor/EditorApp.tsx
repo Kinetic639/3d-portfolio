@@ -16,6 +16,7 @@ import { getTerrainAtlas } from "@/lib/engine/terrain-material";
 import { buildWorldForMap } from "@/lib/engine/terrain-meshes";
 import { migrateMapDefinition, type MapDefinition, type ModelSettings } from "@/lib/maps/map-definition";
 import { resolveWindResponse, windWeightSources } from "@/lib/engine/wind";
+import { resolveModelStyle } from "@/lib/engine/surface-style";
 import { windDebugViews, type WindDebugView } from "@/lib/editor/wind-debug";
 import type { SelectedModelInfo } from "./WindPanels";
 import { BUILT_IN_PREFABS } from "@/lib/prefabs/prefab-library";
@@ -339,10 +340,25 @@ function ConnectedToolbar({ onLayoutChange }: { onLayoutChange: (layout: EditorV
       materials: entry.materials, textures: entry.textures, bytes: entry.bytes, animations: entry.animations, bounds: entry.bounds,
       wind, windOverridden: overrides !== undefined && Object.keys(overrides).length > 0, windSources: sources,
       debugViews: windDebugViews(attributes, Boolean(entry.wind)),
+      style: resolveModelStyle(entry.style, meta.modelSettings?.[entry.id]?.style),
+      styleOverridden: Object.keys(meta.modelSettings?.[entry.id]?.style ?? {}).length > 0,
+      hasOutlineData: attributes.includes("_OUTLINE_NORMAL"),
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- meta is read fresh from the session; metaRevision says when it changed.
   }, [selectedEntity, models, state.metaRevision]);
   const debugView: WindDebugView = debug && selectedModel && debug.modelId === selectedModel.id ? debug.view : "normal";
+  /** Patches this map's settings for the selected model; null removes that group (back to the model's defaults). */
+  const changeModelSettings = <K extends "wind" | "style">(key: K, patch: ModelSettings[K] | null) => {
+    if (!selectedModel) return;
+    const next: Record<string, ModelSettings> = { ...(meta.modelSettings ?? {}) };
+    const current: ModelSettings = { ...(next[selectedModel.id] ?? {}) };
+    if (patch === null) delete current[key];
+    else current[key] = { ...current[key], ...patch } as ModelSettings[K];
+    if (Object.keys(current).length > 0) next[selectedModel.id] = current;
+    else delete next[selectedModel.id];
+    const label = patch === null ? `Reset model ${key}` : `Model ${key}`;
+    session.updateMeta(label, { modelSettings: Object.keys(next).length > 0 ? next : undefined });
+  };
   useEffect(() => {
     viewport.setModelDebugView(selectedModel && debugView !== "normal" ? selectedModel.id : null, debugView);
   }, [viewport, selectedModel, debugView]);
@@ -628,20 +644,11 @@ function ConnectedToolbar({ onLayoutChange }: { onLayoutChange: (layout: EditorV
     selectedModel,
     modelDebugView: debugView,
     onModelDebugViewChange: (view) => setDebug(selectedModel ? { modelId: selectedModel.id, view } : null),
-    onModelWindChange: (patch) => {
-      if (!selectedModel) return;
-      const next: Record<string, ModelSettings> = { ...(meta.modelSettings ?? {}) };
-      const current = next[selectedModel.id] ?? {};
-      if (patch === null) {
-        const rest = { ...current };
-        delete rest.wind;
-        if (Object.keys(rest).length > 0) next[selectedModel.id] = rest;
-        else delete next[selectedModel.id];
-      } else {
-        next[selectedModel.id] = { ...current, wind: { ...current.wind, ...patch } };
-      }
-      session.updateMeta(patch === null ? "Reset model wind" : "Model wind", { modelSettings: Object.keys(next).length > 0 ? next : undefined });
-    },
+    onModelWindChange: (patch) => changeModelSettings("wind", patch),
+    onModelStyleChange: (patch) => changeModelSettings("style", patch),
+    onLightingChange: (patch) => session.updateMeta("Change lighting", { environment: { ...meta.environment, lighting: { ...meta.environment.lighting, ...patch } } }),
+    onShadowsChange: (patch) => session.updateMeta("Change shadows", { environment: { ...meta.environment, shadows: { ...meta.environment.shadows, ...patch } } }),
+    onSurfaceStyleChange: (patch) => session.updateMeta("Change surface style", { environment: { ...meta.environment, style: { ...meta.environment.style, ...patch } } }),
     onEntityContentChange: (key) => {
       const reference = parseContentKey(key);
       session.updateEntities(reference ? "Assign content" : "Clear content", state.selection, (entity) => {

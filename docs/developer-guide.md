@@ -172,6 +172,23 @@ The wind itself is a map setting: **Map** workspace, **Weather · Wind**: preset
 
 Wind costs almost no CPU (the motion is in the vertex shader), but it needs continuous frames: the world redraws every frame while the wind blows and a wind-reactive model is in view, and is still otherwise. Visitors who prefer reduced motion see no wind.
 
+## Style a model (toon, outline, contact patch, shadows)
+
+1. In its `asset.json`, set how it is drawn by default:
+
+   ```json
+   "style": { "shading": "toon", "outline": true, "outlineScale": 0.55, "contactShadow": true, "castShadow": true }
+   ```
+
+   `shading` `"toon"` is the style lab's banded, hatched look; `"standard"` keeps the model's own material. `outline: true` makes `pnpm assets` compute the model's outline normals (about 8 KB); without them a model cannot get an outline. `outlineScale` multiplies the map's outline thickness for this model.
+2. In the editor, select an instance: **Style · all <model>** overrides these for this map (shading, outline, outline scale, contact patch, shadow casting); **Reset to model defaults** removes the override.
+3. The map's look is in the **Map** workspace:
+   - **Lighting**: sun strength, colour and position (only the direction matters), sky light with sky and ground colours; presets **Original** and **Style lab**. Lights models; the terrain keeps its own light.
+   - **Surface**: toon bands, hatch power and scale, hatching on the surface (UV) or the screen.
+   - **Edges and depth**: outline thickness in pixels (default) or world units (the lab's), edge colour, contact patch darkness, and shadows: on/off, strength, bias, normal bias, map size.
+
+Shadows are off by default (a map turns them on), follow the view, and are off for visitors on the lowest quality; the contact patch is the cheap stand-in. With 60 trees and rocks in view (RTX 2060), shadows cost about 0.3-0.5 ms of CPU per frame; the frame stays at 16.7 ms.
+
 ## Add an engine system (wind, weather, time of day)
 
 1. Put shared values in `Environment.uniforms` (`lib/engine/environment.ts`) and update them in `Environment.update` or a setter.

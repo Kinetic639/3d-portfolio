@@ -4,6 +4,7 @@ import type { PlacedMapEntity, PrimitiveType, SerializableTransform } from "@/li
 import { resolvePrefabInstance } from "@/lib/prefabs/prefab-resolver";
 import { POP_COMPLETE, POP_DROP, POP_SECONDS, POP_TILT_X, POP_TILT_Z, popDelay, samplePop } from "./entry-sequence";
 import type { LoadedModel, ModelLibrary } from "./model-library";
+import { createDepthMaterial, createOutlineMaterial, createToonMaterial, type ModelStyle, type SurfaceStyle } from "./surface-style";
 import { windVertexChunk, type WindResponseUniforms, type WindUniforms } from "./wind";
 
 /**
@@ -53,6 +54,19 @@ export type ModelWindBinding = {
   attributes: readonly string[];
 };
 
+/** How one model is drawn in this map, and the uniform that scales its outline (shared by its batches). */
+export type ModelStyleBinding = {
+  style: ModelStyle;
+  outlineScale: { value: number };
+};
+
+export type EntityStyleOptions = {
+  surface: SurfaceStyle;
+  forModel: (modelId: string) => ModelStyleBinding;
+  /** Contact patches under models that use them; shares the map's darkness value. */
+  contactOpacity: { value: number };
+};
+
 export type EntityWindOptions = {
   global: WindUniforms;
   /** The binding for a model, or null when it does not react to wind. */
@@ -66,6 +80,12 @@ type Batch = {
   items: Array<{ entityId: string; matrix: THREE.Matrix4 }>;
   modelId?: string;
   wind?: ModelWindBinding | null;
+  /** Shadow casting for this batch; outlines and contact patches never cast. */
+  castShadow?: boolean;
+  /** Toon and prefab materials receive shadows; contact patches and outlines do not. */
+  receiveShadow?: boolean;
+  /** Material that draws this batch into the shadow map, when its shape or cut-outs differ from a plain depth pass. */
+  depthMaterial?: THREE.Material;
 };
 
 export type EntityLayerOptions = {
@@ -73,6 +93,7 @@ export type EntityLayerOptions = {
   popOrigin?: { x: number; z: number };
   popRadius?: number;
   wind?: EntityWindOptions;
+  style?: EntityStyleOptions;
 };
 
 /** The original's: half the diagonal of its 64 x 64 map. */
@@ -138,9 +159,69 @@ const POP_VERTEX = /* glsl */ `
  * keeps the material opaque (no sorting, no extra pass) while letting the
  * scene behind show through.
  */
+/** The lab's contact patch: dark in the middle, fading to nothing at the edge. Drawn with the instance effects, so it pops with its object. */
+function createContactMaterial(opacity: { value: number }) {
+  return new THREE.ShaderMaterial({
+    name: "contact-patch",
+    transparent: true,
+    depthWrite: false,
+    uniforms: { uContactColor: { value: new THREE.Color("#26342d") }, uContactOpacity: opacity },
+    vertexShader: /* glsl */ `
+      #include <common>
+      varying vec2 vPatchUv;
+      void main() {
+        vPatchUv = uv;
+        #include <begin_vertex>
+        #include <project_vertex>
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      #include <common>
+      uniform vec3 uContactColor;
+      uniform float uContactOpacity;
+      varying vec2 vPatchUv;
+      void main() {
+        #include <clipping_planes_fragment>
+        float radius = length(vPatchUv - vec2(0.5)) * 2.0;
+        gl_FragColor = vec4(uContactColor, (1.0 - smoothstep(0.08, 1.0, radius)) * uContactOpacity);
+      }
+    `,
+  });
+}
+
+/** Toon materials and skinned outlines for an animated model's clone. */
+function styleAnimatedModel(instance: THREE.Object3D, binding: ModelStyleBinding, surface: SurfaceStyle, disposables: Array<{ dispose: () => void }>) {
+  const meshes: THREE.SkinnedMesh[] = [];
+  instance.traverse((object) => {
+    const mesh = object as THREE.SkinnedMesh;
+    if (mesh.isMesh) meshes.push(mesh);
+  });
+  for (const mesh of meshes) {
+    const source = mesh.material as THREE.Material;
+    mesh.castShadow = binding.style.castShadow;
+    mesh.receiveShadow = true;
+    if (binding.style.shading === "toon") {
+      const toon = createToonMaterial(source, surface);
+      mesh.material = toon;
+      disposables.push(toon);
+    }
+    if (binding.style.outline && mesh.isSkinnedMesh && mesh.geometry.getAttribute("_outline_normal")) {
+      const outline = new THREE.SkinnedMesh(mesh.geometry, createOutlineMaterial(surface, binding.outlineScale, source));
+      outline.name = `${mesh.name}-outline`;
+      outline.bind(mesh.skeleton, mesh.bindMatrix);
+      outline.frustumCulled = false;
+      mesh.parent?.add(outline);
+      disposables.push(outline.material as THREE.Material);
+    }
+  }
+}
+
 function addInstanceEffects(material: THREE.Material, popTime: { value: number }, wind?: { global: WindUniforms; binding: ModelWindBinding }) {
   const windChunk = wind ? windVertexChunk(wind.binding.weightSource, wind.binding.attributes) : "";
-  material.onBeforeCompile = (shader) => {
+  const previous = material.onBeforeCompile;
+  const previousKey = material.customProgramCacheKey();
+  material.onBeforeCompile = (shader, renderer) => {
+    previous.call(material, shader, renderer);
     shader.uniforms.uPopTime = popTime;
     if (wind) Object.assign(shader.uniforms, wind.global, wind.binding.uniforms);
     shader.vertexShader = shader.vertexShader
@@ -160,9 +241,10 @@ function addInstanceEffects(material: THREE.Material, popTime: { value: number }
         }`,
       );
   };
-  // three.js caches programs by the hook's source text, which is the same with and without wind:
-  // wind materials get their own key, per weight source.
-  if (wind) material.customProgramCacheKey = () => `entity-wind|${wind.binding.weightSource}|${wind.binding.attributes.includes("COLOR_1") ? "c1" : ""}`;
+  // three.js caches programs by the hook's source text, which is the same with and without wind and
+  // whatever hook ran before: key by all of it (the earlier hook's key, then the weight source).
+  const windKey = wind ? `wind|${wind.binding.weightSource}|${wind.binding.attributes.includes("COLOR_1") ? "c1" : ""}` : "still";
+  material.customProgramCacheKey = () => `${previousKey}|instance-fx|${windKey}`;
 }
 
 /** A geometry that draws another geometry's buffers, so per-layer attributes can be added without touching the original. */
@@ -206,7 +288,7 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
     else bounds.set(entityId, box.clone());
   };
 
-  const addToBatch = (key: string, entityId: string, matrix: THREE.Matrix4, create: () => Pick<Batch, "geometry" | "material" | "modelId" | "wind">) => {
+  const addToBatch = (key: string, entityId: string, matrix: THREE.Matrix4, create: () => Omit<Batch, "items">) => {
     let batch = batches.get(key);
     if (!batch) {
       batch = { ...create(), items: [] };
@@ -218,21 +300,58 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
   const addPrimitive = (entityId: string, primitive: PrimitiveType, color: string, transform: SerializableTransform) => {
     addToBatch(`${primitive}|${color.toLowerCase()}`, entityId, composeMatrix(transform), () => ({
       geometry: createPrimitiveGeometry(primitive),
-      // Unlit flat colour, as the placeholders have always been drawn.
+      // Unlit flat colour, as the placeholders have always been drawn. They cast shadows when the map has them.
       material: new THREE.MeshBasicMaterial({ color }),
+      castShadow: true,
     }));
+  };
+
+  /** A soft dark patch under an instance (the lab's "contact AO"): one batch for the whole map. */
+  const contactGeometry = new THREE.CircleGeometry(0.5, 32).rotateX(-Math.PI / 2);
+  const addContactPatch = (entity: PlacedMapEntity, model: LoadedModel, scale: number) => {
+    const style = options.style;
+    if (!style) return;
+    const { position: p, rotation, scale: s } = entity.transform;
+    // About the model's footprint: a little wider than its base, as the lab's patch under the rock.
+    const width = model.size.x * s.x * scale * 1.15;
+    const depth = model.size.z * s.z * scale * 1.15;
+    const matrix = new THREE.Matrix4().compose(
+      scratchPosition.set(p.x, p.y + 0.02, p.z),
+      scratchQuaternion.setFromEuler(scratchEuler.set(0, rotation.y, 0)),
+      scratchScale.set(width, 1, depth),
+    );
+    addToBatch("contact-patch", entity.id, matrix, () => ({ geometry: contactGeometry.clone(), material: createContactMaterial(style.contactOpacity), castShadow: false, receiveShadow: false }));
   };
 
   const addStaticModel = (entity: PlacedMapEntity, model: LoadedModel, scale: number, tint: string | undefined) => {
     const entityMatrix = composeMatrix(entity.transform, scale);
+    const binding = options.style?.forModel(model.entry.id) ?? null;
+    const style = binding?.style;
+    const wind = options.wind?.forModel(model.entry.id) ?? null;
     model.parts.forEach((part, index) => {
-      addToBatch(`model|${model.entry.id}|${index}|${tint ?? ""}`, entity.id, new THREE.Matrix4().multiplyMatrices(entityMatrix, part.matrix), () => {
-        const material = part.material.clone();
+      const matrix = new THREE.Matrix4().multiplyMatrices(entityMatrix, part.matrix);
+      const toon = style?.shading === "toon";
+      addToBatch(`model|${model.entry.id}|${index}|${tint ?? ""}|${toon ? "toon" : "own"}`, entity.id, matrix, () => {
+        const material = toon && options.style ? createToonMaterial(part.material, options.style.surface) : part.material.clone();
         const colored = material as THREE.MeshStandardMaterial;
         if (tint && colored.color) colored.color.multiply(new THREE.Color(tint));
-        return { geometry: borrowGeometry(part.geometry), material, modelId: model.entry.id, wind: options.wind?.forModel(model.entry.id) ?? null };
+        // A plain depth pass would cast the rest pose and solid leaf quads.
+        const needsDepth = wind !== null || part.material.alphaTest > 0;
+        return {
+          geometry: borrowGeometry(part.geometry), material, modelId: model.entry.id, wind,
+          castShadow: style?.castShadow ?? true, receiveShadow: !(material instanceof THREE.MeshBasicMaterial),
+          depthMaterial: needsDepth ? createDepthMaterial(part.material) : undefined,
+        };
       });
+      if (binding && style?.outline && part.geometry.getAttribute("_outline_normal")) {
+        addToBatch(`outline|${model.entry.id}|${index}`, entity.id, matrix, () => ({
+          geometry: borrowGeometry(part.geometry),
+          material: createOutlineMaterial(options.style!.surface, binding.outlineScale, part.material),
+          modelId: model.entry.id, wind, castShadow: false, receiveShadow: false,
+        }));
+      }
     });
+    if (style?.contactShadow) addContactPatch(entity, model, scale);
   };
 
   const addAnimatedModel = (entity: PlacedMapEntity, model: LoadedModel, scale: number) => {
@@ -250,6 +369,9 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
       const skinned = object as THREE.SkinnedMesh;
       if (skinned.isSkinnedMesh) disposables.push(skinned.skeleton);
     });
+    const binding = options.style?.forModel(model.entry.id) ?? null;
+    if (binding && options.style) styleAnimatedModel(instance, binding, options.style.surface, disposables);
+    if (binding?.style.contactShadow) addContactPatch(entity, model, scale);
     const mixer = new THREE.AnimationMixer(instance);
     mixer.clipAction(model.clip!).play();
     // Pose the first frame now, so the model is not in its bind pose until the first update.
@@ -320,9 +442,17 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
       pop.set([pivot.x, pivot.y, pivot.z, delays.get(item.entityId) ?? 0], index * 4);
     });
     geometry.setAttribute("aPop", new THREE.InstancedBufferAttribute(pop, 4));
-    addInstanceEffects(material, popTime, batch.wind && options.wind ? { global: options.wind.global, binding: batch.wind } : undefined);
+    const windEffects = batch.wind && options.wind ? { global: options.wind.global, binding: batch.wind } : undefined;
+    addInstanceEffects(material, popTime, windEffects);
     const mesh = new THREE.InstancedMesh(geometry, material, items.length);
     mesh.name = `entities:${key}`;
+    mesh.castShadow = batch.castShadow ?? false;
+    mesh.receiveShadow = batch.receiveShadow ?? false;
+    if (batch.depthMaterial) {
+      addInstanceEffects(batch.depthMaterial, popTime, windEffects);
+      mesh.customDepthMaterial = batch.depthMaterial;
+      disposables.push(batch.depthMaterial);
+    }
     if (batch.wind) windMeshes.push(mesh);
     if (batch.modelId) {
       const list = meshesByModel.get(batch.modelId);

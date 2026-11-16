@@ -1765,3 +1765,17 @@
   width: 1rem;
   min-height: 1rem;
 }
+
+.editor-color-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--editor-muted);
+}
+
+.editor-color-row input[type="color"] {
+  width: 2.3rem;
+  min-height: 1.6rem;
+  padding: 0.1rem;
+}

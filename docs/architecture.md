@@ -248,6 +248,19 @@ Ported from the style-lab branch (`environment-controller.ts`, `tree-wind.ts`) w
 - **Measured** (production, RTX 2060, 60 pines in view while panning): frame p95 16.8 ms with and without wind, engine CPU 1.4-1.6 ms per frame either way, no extra draw calls; 60 frames per second when idle with trees in view and wind, 0 without wind.
 - **Editor**: Weather · Wind in the Map workspace; Wind response, Model data and Debug view (weight, height, vertex colours, UV sets) in the inspector of a selected model. The lab's mask and detail texture views are not ported: those textures are not part of the model.
 
+### Style: toon shading, outlines, lighting, shadows (from the style lab)
+
+Ported from the style-lab branch (`stylized-rock-material.ts` and the lab's Lighting, Surface and "Edges and depth" panels), fitted to the engine:
+
+- **Toon + hatching** (`lib/engine/surface-style.ts`): three.js's toon material with the lab's procedural crosshatch in the shade. Bands, hatch power, scale and mode are shared uniforms and one 6-texel gradient whose data changes with the band count: changing them never compiles anything. The material's hook is chained with the instance effects (pop, fade, wind) and keyed by both, since three.js keys programs by the hook's text.
+- **Outlines**: the lab's inverted hull, as an instanced batch next to each model batch (one draw call per model part), with the same pop, fade and wind, and with the skeleton for animated models. The smoothed outline normals are computed by the model pipeline (`lib/assets/outline-normals.ts`, attribute `_OUTLINE_NORMAL`), not in the browser. Thickness is in screen pixels by default (the lab's 0.012 world units is under a pixel from the visitor's camera); "world" mode is the lab's.
+- **Contact patch** (the lab's "contact AO"): a soft disc under each instance of models that use it, all in one batch.
+- **Lighting** (`Environment`): sun intensity, colour and direction; a hemisphere sky light replaces the ambient light (white over white is identical). Defaults are the original look; the "Style lab" preset is the lab's. The terrain keeps the original's own light.
+- **Shadows**: three.js shadow maps (PCF), cast by models and prefabs, received by the terrain (its shader includes three.js's shadow chunks) and by lit models. The shadow camera follows the view, sized to the view distance, and moves in whole texels so shadows do not shimmer. Off by default and on the lowest quality tier; decided before warm-up so its programs compile there (`warmUpReport.newResourcesDuringTest` stays 0).
+- **Per model**: asset.json `style` defaults, map `modelSettings[id].style` overrides; outline scale is a shared uniform (live), the rest decides batches (the editor rebuilds).
+- **Measured** (production, 45 pines and 15 rocks in view while panning): frame p95 16.7 ms in both looks; engine CPU 1.4-1.5 ms per frame with toon and outlines, 1.7-2.0 ms with shadows and wind; 64 / 76 draw calls.
+- Perf test: on-demand scenarios run with the wind held still; a wind scenario records `wind.*` when something sways at the arrival view.
+
 ## Editor
 
 The editor is at `/editor` (`/editor?map=<id>`) and exists only in development.
@@ -501,3 +514,8 @@ The first bake smoothed the terrain (density, blur, Surface Nets, simplification
 
 - Global wind with presets in the map, per-model response in `asset.json` and the map, GPU sway on instanced batches, frames only while wind blows in view, reduced motion respected. Editor panels for all of it, debug views included.
 - The model pipeline now keeps the attributes asset.json asks for: gltf-transform's `prune` dropped `COLOR_1` before.
+
+### Style-lab port, point 3: toon, outlines, lighting, shadows
+
+- Toon shading with hatching, pipeline-computed outlines (pixels or world units, scale per model), contact patches, sun and sky light with the lab preset, view-following shadow maps received by the terrain. Every lab control in the editor, plus shadow on/off, strength and map size.
+- The perf test holds the wind still for its on-demand checks and measures wind separately.

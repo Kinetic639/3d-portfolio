@@ -3,6 +3,7 @@
 import type { MapWind, ModelWindSettings } from "@/lib/maps/map-definition";
 import { matchWindPreset, resolveWind, WIND_PRESET_LABELS, WIND_PRESETS, type WindPreset, type WindResponse } from "@/lib/engine/wind";
 import type { WindDebugView } from "@/lib/editor/wind-debug";
+import type { ModelStyle } from "@/lib/engine/surface-style";
 
 /**
  * The style lab's environment and tree controls, in the editor:
@@ -31,11 +32,14 @@ export type SelectedModelInfo = {
   windOverridden: boolean;
   windSources: string[];
   debugViews: WindDebugView[];
+  style: ModelStyle;
+  styleOverridden: boolean;
+  hasOutlineData: boolean;
 };
 
-type GroupHandler = (label: string | null) => void;
+export type GroupHandler = (label: string | null) => void;
 
-function Slider({ label, value, min, max, step, digits = 2, unit = "", onChange, onGroup, groupLabel }: {
+export function Slider({ label, value, min, max, step, digits = 2, unit = "", onChange, onGroup, groupLabel }: {
   label: string; value: number; min: number; max: number; step: number; digits?: number; unit?: string;
   onChange: (value: number) => void; onGroup: GroupHandler; groupLabel: string;
 }) {

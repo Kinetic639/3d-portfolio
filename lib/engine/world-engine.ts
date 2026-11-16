@@ -21,6 +21,7 @@ import { buildSurfaceChunkMesh } from "@/lib/terrain/surface-mesher";
 import { createVoxelWorldQuery, type WorldQuery } from "./world-query";
 import { FrameRecorder } from "@/lib/perf/frame-recorder";
 import { ModelWindRegistry } from "./model-wind";
+import { ModelStyleRegistry } from "./model-style";
 
 /**
  * The 3D runtime. Plain TypeScript on three.js: no React anywhere in this
@@ -113,6 +114,8 @@ export class WorldEngine {
   readonly frames = new FrameRecorder();
   private readonly frustum = new THREE.Frustum();
   private readonly viewProjection = new THREE.Matrix4();
+  private modelStyles: ModelStyleRegistry | null = null;
+  private readonly shadowFocus = new THREE.Vector3();
   warmUpReport: WarmUpReport | null = null;
   private readonly canvas: HTMLCanvasElement;
   private readonly bridge: WorldBridge;
@@ -316,8 +319,12 @@ export class WorldEngine {
       this.scene.add(this.minigames.group);
     }
     this.environment.apply(definition.environment);
+    // Shadows are decided before warm-up, so their programs are compiled with everything else.
+    this.applyShadowAvailability(false);
     const wind = new ModelWindRegistry(models, this.environment.wind, definition.modelSettings);
-    this.entities = buildEntityLayer(definition.entities, models, { wind: wind.options() });
+    this.modelStyles = new ModelStyleRegistry(models, definition.modelSettings, definition.environment.style);
+    this.syncOutlineScale();
+    this.entities = buildEntityLayer(definition.entities, models, { wind: wind.options(), style: this.modelStyles.options() });
     this.interaction = new InteractionLayer({
       map: definition,
       query,
@@ -713,6 +720,8 @@ export class WorldEngine {
       this.entities.dispose();
       this.entities = null;
     }
+    this.modelStyles?.dispose();
+    this.modelStyles = null;
     this.viewBeforeFocus = null;
     this.bridge.set({ hovered: null });
   }
@@ -727,6 +736,7 @@ export class WorldEngine {
         break;
       case "set-quality":
         this.bridge.set({ quality: command.quality });
+        this.applyShadowAvailability(true);
         this.resize();
         break;
       case "focus-content":
@@ -919,6 +929,10 @@ export class WorldEngine {
     const windy = this.environment.wind.active && this.windInView();
     const animating = (this.entities?.update(delta) ?? false) || waving || bursting || windy;
     this.environment.update(this.elapsedSeconds, delta);
+    if (this.renderer.shadowMap.enabled) {
+      const view = this.rig.getView();
+      this.environment.followView(this.shadowFocus.set(view.x, 0, view.z), view.distance);
+    }
     if (this.terrain?.uniforms) this.terrain.uniforms.uTime.value = this.elapsedSeconds;
     // While the camera leaves the loader, the page is still fading out underneath: no sky yet,
     // so the canvas covers the whole viewport at once without a visible edge.
@@ -1022,7 +1036,32 @@ export class WorldEngine {
     this.rig.setAspect(width / height);
     this.loaderCamera.aspect = width / height;
     this.loaderCamera.updateProjectionMatrix();
+    this.syncOutlineScale();
     this.invalidate();
+  }
+
+  /** Screen-space outlines need the size of a pixel at distance 1. */
+  private syncOutlineScale() {
+    this.modelStyles?.surface.setViewport(this.rig.camera.fov, this.canvas.clientHeight || 1);
+  }
+
+  /**
+   * Shadow maps on when the map has shadows and the quality tier is not low.
+   * Turning them on or off changes every lit program, so a change after
+   * warm-up (a quality switch) recompiles them: `recompile`.
+   */
+  private applyShadowAvailability(recompile: boolean) {
+    const enabled = this.environment.shadowsEnabled && this.bridge.store.getState().quality !== "low";
+    if (this.renderer.shadowMap.enabled === enabled) return;
+    this.renderer.shadowMap.enabled = enabled;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.environment.sun.castShadow = enabled;
+    if (recompile) {
+      this.scene.traverse((object) => {
+        const material = (object as THREE.Mesh).material;
+        for (const item of Array.isArray(material) ? material : material ? [material] : []) item.needsUpdate = true;
+      });
+    }
   }
 }
 

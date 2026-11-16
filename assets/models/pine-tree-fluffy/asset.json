@@ -22,5 +22,12 @@
     "leaves": 0.32,
     "stiffness": 1,
     "weightSource": "color_1-r"
+  },
+  "style": {
+    "shading": "toon",
+    "outline": true,
+    "outlineScale": 0.55,
+    "contactShadow": true,
+    "castShadow": true
   }
 }
