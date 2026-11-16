@@ -63,6 +63,8 @@ export type AssetMetadata = {
   animations?: string[];
   /** Node whose translation is removed from every clip, so the model moves only where the game moves it. */
   rootMotionNode?: string;
+  /** Largest texture side, in pixels; larger textures are scaled down. Default 2048. */
+  maxTextureSize?: number;
 };
 
 export type AssetManifestEntry = Required<Pick<AssetMetadata, "name" | "category" | "scale" | "rotationY" | "anchor" | "collision">> &
@@ -132,6 +134,7 @@ export function validateAssetMetadata(input: unknown): string[] {
   }
   if (input.alpha !== undefined && input.alpha !== "cutout" && input.alpha !== "opaque") errors.push('alpha must be "cutout" or "opaque".');
   if (input.alphaCutoff !== undefined && !(typeof input.alphaCutoff === "number" && input.alphaCutoff > 0 && input.alphaCutoff < 1)) errors.push("alphaCutoff must be between 0 and 1.");
+  if (input.maxTextureSize !== undefined && !(Number.isInteger(input.maxTextureSize) && (input.maxTextureSize as number) >= 16)) errors.push("maxTextureSize must be a whole number of pixels, at least 16.");
   if (input.rootMotionNode !== undefined && typeof input.rootMotionNode !== "string") errors.push("rootMotionNode must be a node name.");
   for (const key of ["replacesPrefabs", "tags", "animations"] as const) {
     if (input[key] !== undefined && !(Array.isArray(input[key]) && input[key].every((item) => typeof item === "string"))) errors.push(`${key} must be an array of strings.`);

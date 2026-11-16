@@ -2,9 +2,10 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { Logger, NodeIO, type Document } from "@gltf-transform/core";
-import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
+import { ALL_EXTENSIONS, EXTTextureWebP } from "@gltf-transform/extensions";
 import { dedup, getBounds, meshopt, prune, resample, weld } from "@gltf-transform/functions";
 import { MeshoptDecoder, MeshoptEncoder } from "meshoptimizer";
+import sharp from "sharp";
 import { getPrefabDefinition } from "@/lib/prefabs/prefab-library";
 import { BASE_VERTEX_ATTRIBUTES, isAssetId, validateAssetMetadata, type AssetManifest, type AssetManifestEntry, type AssetMetadata } from "./asset-types";
 
@@ -19,12 +20,17 @@ import { BASE_VERTEX_ATTRIBUTES, isAssetId, validateAssetMetadata, type AssetMan
  * materials merged, unused data removed, animation keyframes resampled
  * (redundant keys dropped), vertices welded, then meshopt compression
  * (smaller files, decoded on the GPU-friendly path by the loader). Textures
- * are copied as they are.
+ * are re-encoded as WebP (quality 90, alpha lossless, so cut-out edges stay
+ * exact) and capped at `maxTextureSize`.
  *
  * Work is skipped for models whose source and metadata have not changed.
  */
 /** Raise when the optimisation steps change, so every output is rebuilt. */
-const PIPELINE_VERSION = 2;
+const PIPELINE_VERSION = 3;
+
+/** Largest texture side kept unless asset.json says otherwise. */
+export const DEFAULT_MAX_TEXTURE_SIZE = 2048;
+const TEXTURE_QUALITY = 90;
 
 /** Sizes above these are reported as warnings; they do not fail the run. */
 export const ASSET_BUDGET = { bytes: 1_500_000, triangles: 60_000 };
@@ -124,6 +130,31 @@ export function prepareDocument(document: Document, metadata: AssetMetadata): st
   return null;
 }
 
+/**
+ * Every texture as WebP, no larger than maxSize on either side, with sharp
+ * directly so alpha is kept lossless (cut-out edges stay exact). three.js's
+ * GLTFLoader reads EXT_texture_webp. The sharp devDependency must be the
+ * version @gltf-transform/functions loads (through ndarray-pixels): two
+ * copies of libvips in one process fail with "colourspace: parameter space
+ * not set".
+ */
+export async function compressTextures(document: Document, maxSize: number) {
+  const textures = document.getRoot().listTextures();
+  if (textures.length === 0) return;
+  for (const texture of textures) {
+    const image = texture.getImage();
+    if (!image) continue;
+    const encoded = await sharp(Buffer.from(image))
+      .resize({ width: maxSize, height: maxSize, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: TEXTURE_QUALITY, alphaQuality: 100, effort: 6 })
+      .toBuffer();
+    texture.setImage(new Uint8Array(encoded)).setMimeType("image/webp");
+    const uri = texture.getURI();
+    if (uri) texture.setURI(uri.replace(/\.(png|jpe?g)$/i, ".webp"));
+  }
+  document.createExtension(EXTTextureWebP).setRequired(true);
+}
+
 export async function processAssets(options: { root?: string; force?: boolean } = {}): Promise<AssetReport> {
   const sourceRoot = getAssetSourceRoot(options.root);
   const outputRoot = getAssetOutputRoot(options.root);
@@ -192,6 +223,7 @@ export async function processAssets(options: { root?: string; force?: boolean } 
           continue;
         }
         await document.transform(dedup(), prune(), resample(), weld(), meshopt({ encoder: MeshoptEncoder, level: "medium" }));
+        await compressTextures(document, metadata.maxTextureSize ?? DEFAULT_MAX_TEXTURE_SIZE);
       } catch (error) {
         fail(`could not be read or optimised (${error instanceof Error ? error.message : String(error)}).`);
         continue;

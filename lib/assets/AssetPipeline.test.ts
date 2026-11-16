@@ -153,3 +153,21 @@ describe("per-model preparation", () => {
     ]);
   });
 });
+
+describe("texture compression", () => {
+  it("re-encodes textures as WebP within the size limit and keeps their alpha", async () => {
+    const { Document } = await import("@gltf-transform/core");
+    const sharp = (await import("sharp")).default;
+    const { compressTextures } = await import("./asset-pipeline");
+    const png = await sharp({ create: { width: 64, height: 32, channels: 4, background: { r: 40, g: 120, b: 40, alpha: 0.4 } } }).png().toBuffer();
+    const document = new Document();
+    const texture = document.createTexture("leaf").setImage(new Uint8Array(png)).setMimeType("image/png").setURI("leaf.png");
+    document.createMaterial("leaf").setBaseColorTexture(texture);
+    await compressTextures(document, 16);
+    expect(texture.getMimeType()).toBe("image/webp");
+    expect(texture.getURI()).toBe("leaf.webp");
+    const meta = await sharp(Buffer.from(texture.getImage()!)).metadata();
+    expect([meta.format, meta.width, meta.height, meta.hasAlpha]).toEqual(["webp", 16, 8, true]);
+    expect(document.getRoot().listExtensionsUsed().map((extension) => extension.extensionName)).toContain("EXT_texture_webp");
+  });
+});
