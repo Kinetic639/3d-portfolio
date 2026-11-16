@@ -3,7 +3,7 @@ import type { QualityTier, WorldBridge, WorldCommand } from "@/lib/bridge/world-
 import { decodeBakedWorld, type RuntimeMap } from "@/lib/bake/baked-format";
 import type { MapContentReference, MapDefinition } from "@/lib/maps/map-definition";
 import { createBakedQuery, createBakedTerrain } from "./baked-terrain";
-import { CameraRig } from "./camera-rig";
+import { CameraRig, VISITOR_CAMERA } from "./camera-rig";
 import { buildEntityLayer, type EntityLayer } from "./entity-meshes";
 import { Environment } from "./environment";
 import { InteractionLayer, type Interactable } from "./interactables";
@@ -100,7 +100,7 @@ export class WorldEngine {
   private frameHandle = 0;
   private pickHandle = 0;
   private pointer: { x: number; y: number } | null = null;
-  private viewBeforeFocus: { x: number; z: number; distance: number } | null = null;
+  private viewBeforeFocus: ReturnType<CameraRig["getGoal"]> | null = null;
   private lastFrameAt = 0;
   private lastTickAt = 0;
   private elapsedSeconds = 0;
@@ -117,6 +117,7 @@ export class WorldEngine {
     this.renderer = new THREE.WebGLRenderer({ canvas, context, antialias: true, alpha: false });
     this.environment = new Environment(this.scene);
     this.rig = new CameraRig(canvas, {
+      ...VISITOR_CAMERA,
       onChange: () => this.invalidate(),
       onTap: (clientX, clientY) => this.handleTap(clientX, clientY),
     });

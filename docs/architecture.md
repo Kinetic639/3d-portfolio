@@ -74,7 +74,7 @@ Objects are instanced per (shape, colour) in `entity-meshes.ts`; each instance m
 
 Rendering is **on demand**: `engine.invalidate()` schedules one frame, and the loop continues only while the camera is moving or an animation runs. An idle world draws nothing.
 
-The camera (`camera-rig.ts`) has a fixed 55° pitch and no rotation. Mouse drag, touch drag, pinch, wheel, arrow/WASD and +/- move a goal that is clamped to the playable bounds and a zoom range; the camera eases towards it.
+The camera (`camera-rig.ts`) orbits a point on the ground. For visitors it starts as the original did: looking across the terrain from 14° above the horizon, 23 units away, from the south-east (`VISITOR_CAMERA`), free to turn, tilting between 8° and 70°, zooming between 22 and 98 units. Mouse: drag pans, wheel zooms, Ctrl + right drag turns and tilts. Touch: one finger pans, two fingers zoom and turn. Keys: arrows or WASD pan, + and - zoom, Q and E turn. All input moves a goal that is clamped to the playable bounds and the limits; the camera eases towards it, and frames are drawn only while it moves. The editor uses the same rig with wider limits and exact panning.
 
 `Environment` (`environment.ts`) owns sun, ambient light, fog and shared uniforms (`uTime`, `uWind`, `uDaylight`). Time of day and wind change light parameters and uniform values only, never shader variants, so they cannot trigger a shader compile mid-session.
 
@@ -383,4 +383,5 @@ Remaining known costs:
 - Visitors get voxels again; the smoothing bake is no longer used live and its committed output is gone.
 - The editor shows the same textured terrain; the main-thread mesher is warmed while the editor is idle so the first stroke does not hitch.
 - Environment: lights and background are fixed to the original look; time of day only drives a uniform for now.
-- Checked against the original running from `main`: the same textures and shading at the same zoom. Still different: the camera (the original looked across the terrain from a low angle and could rotate), the zone legend, the animated character and water.
+- Checked against the original running from `main`: the same textures and shading at the same zoom. Still different: the zone legend, the animated character and water.
+- The visitor's camera is the original's again: low angle, close, free to turn and tilt (see Engine). Heaviest view (lowest angle, farthest): 98 draw calls, 99 000 triangles, no frame over 16.8 ms while turning in the measured run.

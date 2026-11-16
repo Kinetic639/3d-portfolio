@@ -43,8 +43,9 @@ test("drag pans, wheel zooms and both stay inside limits", async ({ page }) => {
   await page.mouse.up();
   await settle(page);
   const panned = await view(page);
+  // The camera looks north-west, so dragging the ground right and down moves the view west and a little south.
   expect(panned.x).toBeLessThan(start.x);
-  expect(panned.z).toBeLessThan(start.z);
+  expect(panned.z).toBeGreaterThan(start.z);
   // A drag is not a click: nothing opened.
   expect(new URL(page.url()).pathname).toBe("/");
 
@@ -52,7 +53,7 @@ test("drag pans, wheel zooms and both stay inside limits", async ({ page }) => {
   await settle(page);
   const zoomedOut = await view(page);
   expect(zoomedOut.distance).toBeGreaterThan(start.distance);
-  expect(zoomedOut.distance).toBeLessThanOrEqual(82);
+  expect(zoomedOut.distance).toBeLessThanOrEqual(98);
 
   for (let pass = 0; pass < 12; pass += 1) {
     await page.mouse.move(200, 200);
@@ -65,6 +66,50 @@ test("drag pans, wheel zooms and both stay inside limits", async ({ page }) => {
   // The playable area is 64 cells wide; the camera target must stay within it.
   expect(Math.abs(edge.x)).toBeLessThanOrEqual(32);
   expect(Math.abs(edge.z)).toBeLessThanOrEqual(32);
+});
+
+test("the camera turns and tilts within its limits", async ({ page }) => {
+  await openWorld(page);
+  const start = await view(page);
+  // As in the original: a low angle, looking across the terrain.
+  expect(start.pitchDegrees).toBeCloseTo(14.4, 1);
+  expect(start.yawDegrees).toBeCloseTo(45, 1);
+
+  const turn = async (fromX: number, fromY: number, toX: number, toY: number) => {
+    await page.keyboard.down("Control");
+    await page.mouse.move(fromX, fromY);
+    await page.mouse.down({ button: "right" });
+    await page.mouse.move(toX, toY, { steps: 10 });
+    await page.mouse.up({ button: "right" });
+    await page.keyboard.up("Control");
+    await settle(page);
+  };
+
+  await turn(640, 360, 840, 360);
+  const turned = await view(page);
+  expect(turned.yawDegrees).toBeLessThan(start.yawDegrees - 10);
+  expect(turned.pitchDegrees).toBeCloseTo(start.pitchDegrees, 1);
+  // Turning happens around the point being looked at.
+  expect(turned.x).toBeCloseTo(start.x, 3);
+  expect(turned.z).toBeCloseTo(start.z, 3);
+
+  await turn(640, 100, 640, 700);
+  expect((await view(page)).pitchDegrees).toBeCloseTo(70, 1);
+  await turn(640, 700, 640, 20);
+  await turn(640, 700, 640, 20);
+  expect((await view(page)).pitchDegrees).toBeCloseTo(8, 1);
+
+  // A right drag without Ctrl pans, and a right click opens nothing.
+  await page.mouse.click(640, 360, { button: "right" });
+  expect(new URL(page.url()).pathname).toBe("/");
+
+  await page.locator("canvas").focus();
+  const before = await view(page);
+  await page.keyboard.down("KeyQ");
+  await page.waitForTimeout(300);
+  await page.keyboard.up("KeyQ");
+  await settle(page);
+  expect((await view(page)).yawDegrees).toBeGreaterThan(before.yawDegrees + 5);
 });
 
 test("keyboard moves and zooms the camera", async ({ page }) => {
@@ -103,7 +148,8 @@ test("hovering an object signals it and clicking opens its content at its own UR
   await expect(page).toHaveURL(new RegExp(`${PROJECT_PATH}$`));
   await expect(panel.getByRole("heading", { name: "Project Placeholder One" })).toBeFocused();
 
-  await expect.poll(async () => (await view(page)).distance).toBeLessThan(start.distance - 10);
+  // The camera travels to the object.
+  await expect.poll(async () => Math.hypot((await view(page)).x - start.x, (await view(page)).z - start.z)).toBeGreaterThan(3);
 
   // Escape returns to the world, restores the camera and the URL.
   await page.keyboard.press("Escape");
@@ -142,11 +188,15 @@ test("the close button and browser Back both return to the world", async ({ page
 
 test("clicking terrain inside a content zone opens that zone's content", async ({ page }) => {
   await openWorld(page);
-  const icon = await iconPosition(page, "zone:zone-5");
-  // Below the icon is the zone's own ground.
-  await page.mouse.move(icon.x, icon.y + 60);
+  // The opening view is close; step back until the zone is in the picture.
+  await page.mouse.move(640, 360);
+  for (let step = 0; step < 40; step += 1) await page.mouse.wheel(0, 400);
+  await settle(page);
+  // A zone's icon floats three units above its ground.
+  const ground = await iconPosition(page, "zone:zone-5", 3);
+  await page.mouse.move(ground.x, ground.y);
   await expect(page.getByText("Click to open")).toBeVisible();
-  await page.mouse.click(icon.x, icon.y + 60);
+  await page.mouse.click(ground.x, ground.y);
   await expect(page.getByRole("dialog").getByRole("heading", { name: "About" })).toBeVisible();
   await expect(page).toHaveURL(/\/about$/);
 });

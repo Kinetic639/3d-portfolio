@@ -6,7 +6,7 @@ export type EngineProbe = {
   stats: { frames: number; picks: number; drawCalls: number; triangles: number; worstFrameIntervalMs: number };
   warmUpReport: null | { ok: boolean; maxFrameMs: number; newResourcesDuringTest: number; programs: number; geometries: number; testFrames: number };
   renderer: { info: { programs: unknown[]; memory: { geometries: number; textures: number } } };
-  rig: { camera: unknown; getView: () => { x: number; z: number; distance: number } };
+  rig: { camera: unknown; getView: () => { x: number; z: number; distance: number; yawDegrees: number; pitchDegrees: number } };
   interaction: { items: Array<{ id: string; label: string; anchor: Vec3 }> };
 };
 
@@ -59,15 +59,17 @@ export async function settle(page: Page) {
 export const view = (page: Page) => page.evaluate(() => window.__worldEngine!.rig.getView());
 export const frames = (page: Page) => page.evaluate(() => window.__worldEngine!.stats.frames);
 
-/** Screen position of an interactable's icon. */
-export async function iconPosition(page: Page, id: string) {
-  return page.evaluate((targetId) => {
+/** Screen position of an interactable's icon, or of the point `below` world units under it. */
+export async function iconPosition(page: Page, id: string, below = 0) {
+  return page.evaluate(([targetId, drop]) => {
     const engine = window.__worldEngine!;
     const item = engine.interaction.items.find((candidate) => candidate.id === targetId)!;
-    const ndc = item.anchor.clone().project(engine.rig.camera);
+    const point = item.anchor.clone();
+    point.y -= drop;
+    const ndc = point.project(engine.rig.camera);
     const rect = document.querySelector("canvas")!.getBoundingClientRect();
     return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
-  }, id);
+  }, [id, below] as const);
 }
 
 export const gpuResources = (page: Page) => page.evaluate(() => {

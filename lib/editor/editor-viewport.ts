@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { decodeBakedWorld } from "@/lib/bake/baked-format";
 import { createBakedTerrain } from "@/lib/engine/baked-terrain";
-import { CameraRig } from "@/lib/engine/camera-rig";
+import { CameraRig, VISITOR_CAMERA } from "@/lib/engine/camera-rig";
 import { buildEntityLayer, type EntityLayer } from "@/lib/engine/entity-meshes";
 import { Environment } from "@/lib/engine/environment";
 import type { ModelLibrary } from "@/lib/engine/model-library";
@@ -74,8 +74,9 @@ export const MAX_BRUSH_SIZE = 31;
 const PREVIEW_CAPACITY = MAX_BRUSH_SIZE * MAX_BRUSH_SIZE;
 const DRAG_SLOP_PX = 4;
 const MOVE_SNAP = 0.5;
-const EDITOR_ZOOM = { minDistance: 6, maxDistance: 380 };
-const VISITOR_ZOOM = { minDistance: 16, maxDistance: 82 };
+/** How the camera behaves while editing: any distance, any angle up to straight overhead, exact panning. */
+const EDITOR_CAMERA = { panButtons: [1, 2], minDistance: 6, maxDistance: 380, minPitchDegrees: 8, maxPitchDegrees: 89, targetHeight: 0, panSpeed: 1, rotateKeys: false };
+const EDITOR_ZOOM = EDITOR_CAMERA;
 
 type Stroke =
   | {
@@ -124,7 +125,7 @@ export class EditorViewport {
   private preview = false;
   /** The baked terrain, while the baked view is on. Editing is off in that view. */
   private baked: TerrainSource | null = null;
-  private viewBeforePreview: { x: number; z: number; distance: number } | null = null;
+  private viewBeforePreview: ReturnType<CameraRig["getGoal"]> | null = null;
   private zonesVisible = true;
   private pointer: { x: number; y: number } | null = null;
   private hoverKey = "";
@@ -150,7 +151,7 @@ export class EditorViewport {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.environment = new Environment(this.scene);
 
-    this.rig = new CameraRig(canvas, { onChange: () => this.invalidate(), panButtons: [1, 2], ...EDITOR_ZOOM, initialDistance: 90 });
+    this.rig = new CameraRig(canvas, { onChange: () => this.invalidate(), ...EDITOR_CAMERA, initialDistance: 90 });
     this.camera = this.rig.camera;
 
     this.entities = buildEntityLayer(session.getEntities(), models);
@@ -233,10 +234,12 @@ export class EditorViewport {
     if (preview) {
       this.viewBeforePreview = this.rig.getGoal();
       const bounds = this.playableWorldBounds();
-      this.rig.lookAt((bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2, 62, true);
+      this.rig.setOrientation(VISITOR_CAMERA.yawDegrees, VISITOR_CAMERA.pitchDegrees, true);
+      this.rig.lookAt((bounds.minX + bounds.maxX) / 2, (bounds.minZ + bounds.maxZ) / 2, VISITOR_CAMERA.initialDistance, true);
       this.setPreviewCells([], false);
     } else if (this.viewBeforePreview) {
-      const { x, z, distance } = this.viewBeforePreview;
+      const { x, z, distance, yawDegrees, pitchDegrees } = this.viewBeforePreview;
+      this.rig.setOrientation(yawDegrees, pitchDegrees, true);
       this.rig.lookAt(x, z, distance, true);
     }
     this.invalidate();
@@ -421,10 +424,11 @@ export class EditorViewport {
   private applyCameraMode() {
     const { width, depth } = this.session.world.config;
     if (this.preview) {
-      this.rig.configure({ panButtons: [0], ...VISITOR_ZOOM });
+      const { panButtons, minDistance, maxDistance, minPitchDegrees, maxPitchDegrees, targetHeight, panSpeed } = VISITOR_CAMERA;
+      this.rig.configure({ panButtons, minDistance, maxDistance, minPitchDegrees, maxPitchDegrees, targetHeight, panSpeed, rotateKeys: true });
       this.rig.setBounds(this.playableWorldBounds());
     } else {
-      this.rig.configure({ panButtons: [1, 2], ...EDITOR_ZOOM });
+      this.rig.configure(EDITOR_CAMERA);
       this.rig.setBounds({ minX: -width / 2, maxX: width / 2, minZ: -depth / 2, maxZ: depth / 2 });
     }
   }
