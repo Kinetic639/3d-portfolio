@@ -1,5 +1,5 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
-import type { MapContentReference } from "@/lib/maps/map-definition";
+import type { MapContentReference, MapContentType } from "@/lib/maps/map-definition";
 import type { FrameRecorder } from "@/lib/perf/frame-recorder";
 
 /**
@@ -58,6 +58,17 @@ export type ActorHud = {
   following: boolean;
 };
 
+/** A zone the visitor can go to: a section of the site, or a mini-game. */
+export type ZoneInfo = {
+  id: string;
+  /** Its name: the section's when it stands for one, else the zone's own. */
+  label: string;
+  color: string;
+  /** The content section it stands for, or null. */
+  kind: MapContentType | null;
+  minigame: boolean;
+};
+
 export type MinigameHud = {
   gameId: string;
   zoneId: string;
@@ -77,6 +88,10 @@ export type WorldBridgeState = {
   actor: ActorHud | null;
   /** The visitor locked the camera's tilt (the original's angle lock). */
   angleLocked: boolean;
+  /** The map's zones that are places to go, set once per map. */
+  zones: ZoneInfo[];
+  /** Id of the zone the camera is looking at, or null. Changes only when the camera crosses a zone's edge. */
+  place: string | null;
   error: string | null;
 };
 
@@ -90,12 +105,16 @@ export type WorldCommand =
   | { type: "release-actor" }
   | { type: "set-angle-lock"; locked: boolean }
   | { type: "reset-view" }
+  /** Flies the camera to frame a whole zone. `inset`: screen space a panel takes, so the zone is framed in what is left. */
+  | { type: "fly-to-zone"; zoneId: string; inset?: { right?: number; bottom?: number }; reducedMotion?: boolean }
   | { type: "follow-actor" }
   | { type: "set-actor-movement"; movement: ActorHud["movement"] };
 
 export type WorldEvent =
   | { type: "content-activated"; content: MapContentReference; interactableId: string }
   | { type: "entered" }
+  /** A zone's name on the terrain was clicked. */
+  | { type: "zone-activated"; zoneId: string }
   | { type: "exited" };
 
 type Listener<T> = (message: T) => void;
@@ -143,6 +162,8 @@ const INITIAL_STATE: WorldBridgeState = {
   minigame: null,
   actor: null,
   angleLocked: false,
+  zones: [],
+  place: null,
   error: null,
 };
 

@@ -498,3 +498,62 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* Where the visitor is: the zone under the camera, top centre. */
+.place {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 4px 4px 14px;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.placeLead {
+  color: var(--muted);
+}
+
+.placeName {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.placeName:hover {
+  color: var(--accent);
+}
+
+.placeName:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.placeDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+@media (max-width: 720px) {
+  /* Under the menu and view buttons on a phone. */
+  .place {
+    top: 64px;
+  }
+}

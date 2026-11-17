@@ -4,9 +4,11 @@ import { LockKeyhole, RotateCcw, UnlockKeyhole } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import ContentArticle from "@/components/content/ContentArticle";
+import SectionArticle from "@/components/content/SectionArticle";
 import { PORTFOLIO_CONTENT } from "@/content/portfolio";
 import { useWorldBridge } from "@/lib/bridge/use-world-bridge";
-import { worldBridge, type WorldPhase } from "@/lib/bridge/world-bridge";
+import { worldBridge, type WorldPhase, type ZoneInfo } from "@/lib/bridge/world-bridge";
+import { getSectionPath, sectionByKind } from "@/lib/content/places";
 import {
   CONTENT_SECTIONS,
   findContentByPath,
@@ -65,8 +67,11 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
   const startLoading = useWorldBoot(mapId, canvasRef, bakes[mapId], serveBakes);
   const phase = useWorldBridge((state) => state.phase);
   const shown = phase === "entering" || phase === "world" || phase === "leaving";
-  const { item, open, close } = useContentRoute(worldPath);
+  const { item, section, open, openPath, close } = useContentRoute(worldPath);
   const openItem = shown ? item : null;
+  const openSection = shown && !item ? section : null;
+  const panelOpen = openItem !== null || openSection !== null;
+  const zones = useWorldBridge((state) => state.zones);
   const headingId = useId();
   const panelRef = useRef<HTMLElement>(null);
 
@@ -127,51 +132,70 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
   // Keyboard focus follows the visitor between page and world.
   const previousPhase = useRef(phase);
   useEffect(() => {
-    if (phase === "world" && previousPhase.current === "entering" && !openItem) {
+    if (phase === "world" && previousPhase.current === "entering" && !panelOpen) {
       canvasRef.current?.focus({ preventScroll: true });
     }
     if (phase === "ready" && previousPhase.current === "leaving") {
       enterButtonRef.current?.focus({ preventScroll: true });
     }
     previousPhase.current = phase;
-  }, [phase, openItem]);
+  }, [phase, panelOpen]);
 
-  // World -> UI: a clicked interactable opens its content.
+  // World -> UI: a clicked interactable opens its content; a clicked zone name opens its section.
+  const goToZone = useCallback((zone: ZoneInfo) => {
+    const target = zone.kind ? sectionByKind(zone.kind) : null;
+    if (!target) {
+      // A zone that is no section of the site (a mini-game): just go there.
+      worldBridge.commands.emit({ type: "fly-to-zone", zoneId: zone.id, reducedMotion: prefersReducedMotion() });
+      return;
+    }
+    const single = target.singleton ? listContentByKind(PORTFOLIO_CONTENT, target.kind)[0] : null;
+    openPath(single ? getContentPath(single) : getSectionPath(target));
+  }, [openPath]);
   useEffect(() => worldBridge.events.subscribe((event) => {
-    if (event.type !== "content-activated") return;
-    const target = resolveContentReference(PORTFOLIO_CONTENT, event.content);
-    if (target) open(target);
-  }), [open]);
+    if (event.type === "content-activated") {
+      const target = resolveContentReference(PORTFOLIO_CONTENT, event.content);
+      if (target) open(target);
+    } else if (event.type === "zone-activated") {
+      const zone = worldBridge.store.getState().zones.find((candidate) => candidate.id === event.zoneId);
+      if (zone) goToZone(zone);
+    }
+  }), [open, goToZone]);
 
-  // UI -> world: whatever the URL says is open is what the camera looks at.
+  // UI -> world: whatever the URL says is open is what the camera looks at:
+  // an item's object, or the whole zone of a section.
+  const sectionZone = section ? zones.find((zone) => zone.kind === section.kind) ?? null : null;
   useEffect(() => {
     if (phase !== "world") return;
     if (item) {
       worldBridge.commands.emit({ type: "focus-content", content: toContentReference(item), inset: panelInset() });
+    } else if (sectionZone) {
+      worldBridge.commands.emit({ type: "fly-to-zone", zoneId: sectionZone.id, inset: panelInset(), reducedMotion: prefersReducedMotion() });
     } else {
       worldBridge.commands.emit({ type: "clear-focus" });
     }
-  }, [item, phase]);
+  }, [item, sectionZone, phase]);
 
   useEffect(() => {
-    if (!openItem) return;
+    if (!panelOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [openItem, close]);
+  }, [panelOpen, close]);
 
   // Move keyboard focus with the panel: into its heading on open, back to the world on close.
   const hadPanel = useRef(false);
+  const panelKey = openItem ? `${openItem.kind}:${openItem.id}` : openSection?.kind ?? null;
   useEffect(() => {
-    if (openItem) {
+    if (panelKey) {
       panelRef.current?.querySelector<HTMLElement>(`[id="${headingId}"]`)?.focus({ preventScroll: true });
     } else if (hadPanel.current && worldBridge.store.getState().phase === "world") {
       canvasRef.current?.focus({ preventScroll: true });
     }
-    hadPanel.current = openItem !== null;
-  }, [openItem, headingId]);
+    hadPanel.current = panelKey !== null;
+  }, [panelKey, headingId]);
 
   const onNavigate = useCallback((event: React.MouseEvent<HTMLAnchorElement>, target: ContentItem) => {
     // Modified clicks keep their browser meaning (new tab, download...).
@@ -180,6 +204,12 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
     open(target);
     event.currentTarget.closest("details")?.removeAttribute("open");
   }, [open]);
+  const onNavigatePath = useCallback((event: React.MouseEvent<HTMLAnchorElement>, path: string) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    event.preventDefault();
+    openPath(path);
+    event.currentTarget.closest("details")?.removeAttribute("open");
+  }, [openPath]);
 
   return (
     <>
@@ -200,11 +230,21 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
           <details className={styles.menu}>
             <summary>Menu</summary>
             <nav aria-label="Portfolio sections">
-              {CONTENT_SECTIONS.map((section) => (
-                <section key={section.kind}>
-                  <h2>{section.label}</h2>
+              {CONTENT_SECTIONS.map((entrySection) => (
+                <section key={entrySection.kind}>
+                  <h2>
+                    {entrySection.singleton ? entrySection.label : (
+                      <a
+                        href={getSectionPath(entrySection)}
+                        aria-current={openSection?.kind === entrySection.kind ? "page" : undefined}
+                        onClick={(event) => onNavigatePath(event, getSectionPath(entrySection))}
+                      >
+                        {entrySection.label}
+                      </a>
+                    )}
+                  </h2>
                   <ul>
-                    {listContentByKind(PORTFOLIO_CONTENT, section.kind).map((entry) => (
+                    {listContentByKind(PORTFOLIO_CONTENT, entrySection.kind).map((entry) => (
                       <li key={entry.id}>
                         <a
                           href={getContentPath(entry)}
@@ -223,7 +263,8 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
           <button type="button" className={styles.exit} onClick={exit}>Back to page</button>
         </div>
 
-        <ViewButtons hidden={openItem !== null} />
+        <ViewButtons hidden={panelOpen} />
+        <PlaceIndicator onGo={goToZone} hidden={panelOpen} />
         <HoverLabel />
         <MinigameHud />
         <ActorHud />
@@ -233,6 +274,16 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
           <div className={styles.panel} aria-hidden="true">
             <div className={styles.panelBody}><ContentArticle item={PORTFOLIO_CONTENT.items[0]} headingId={`${headingId}-warm`} /></div>
           </div>
+        ) : null}
+        {openSection && !openItem ? (
+          <aside ref={panelRef} className={styles.panel} role="dialog" aria-modal="false" aria-labelledby={headingId}>
+            <button type="button" className={styles.close} onClick={close} aria-label="Close and return to the world">
+              Close
+            </button>
+            <div className={styles.panelBody}>
+              <SectionArticle section={openSection} items={listContentByKind(PORTFOLIO_CONTENT, openSection.kind)} headingId={headingId} onOpen={onNavigate} />
+            </div>
+          </aside>
         ) : null}
         {openItem ? (
           <aside ref={panelRef} className={styles.panel} role="dialog" aria-modal="false" aria-labelledby={headingId}>
@@ -248,6 +299,29 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
 
       <EnterPrompt buttonRef={enterButtonRef} onEnter={enter} onLoad={startLoading} />
     </>
+  );
+}
+
+/**
+ * Where the visitor is: the zone under the camera, top centre. A zone that
+ * is a section of the site is a button to it. Re-renders only when the
+ * camera crosses a zone's edge.
+ */
+function PlaceIndicator({ onGo, hidden }: { onGo: (zone: ZoneInfo) => void; hidden: boolean }) {
+  useUiWork();
+  const place = useWorldBridge((state) => state.place);
+  const zones = useWorldBridge((state) => state.zones);
+  const playing = useWorldBridge((state) => state.minigame !== null);
+  const zone = zones.find((candidate) => candidate.id === place) ?? null;
+  if (hidden || playing || !zone) return null;
+  return (
+    <p className={styles.place} aria-live="polite">
+      <span className={styles.placeLead}>You are in</span>
+      <button type="button" className={styles.placeName} onClick={() => onGo(zone)}>
+        <span className={styles.placeDot} style={{ background: zone.color }} aria-hidden="true" />
+        {zone.label}
+      </button>
+    </p>
   );
 }
 

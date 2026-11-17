@@ -208,3 +208,15 @@ test("the landing page is navigable by keyboard", async ({ page }) => {
   await page.keyboard.press("Enter");
   await waitForPhase(page, "world");
 });
+
+test("each list section has its own page, which is also its zone's address", async ({ page }) => {
+  const response = await page.goto("/projects");
+  expect(response?.status()).toBe(200);
+  await expect(page.getByRole("heading", { level: 1, name: "Projects" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Project Placeholder One" }).first()).toBeVisible();
+  // The landing page's section headings lead to these pages.
+  await page.goto("/");
+  await page.getByRole("heading", { level: 2, name: "Experience" }).getByRole("link").click();
+  await expect(page).toHaveURL(/\/experience$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Experience" })).toBeVisible();
+});

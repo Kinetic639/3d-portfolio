@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { PORTFOLIO_CONTENT } from "@/content/portfolio";
 import { findContentByPath, getContentPath, type ContentItem } from "@/lib/content/content";
+import { findSectionByPath } from "@/lib/content/places";
 
 /**
  * History entries created while the visitor is inside the world carry this
@@ -21,7 +22,8 @@ export function isWorldHistoryEntry() {
 }
 
 /**
- * The URL is the source of truth for which content item is open.
+ * The URL is the source of truth for which content item (or section: the
+ * list at /projects, which is also the flight to the projects zone) is open.
  *
  * Opening pushes the item's canonical URL with the native History API, which
  * the Next.js router observes without navigating, so the world stays mounted.
@@ -32,37 +34,39 @@ export function isWorldHistoryEntry() {
 export function useContentRoute(worldPath: string) {
   const pathname = usePathname();
   const item = useMemo(() => findContentByPath(PORTFOLIO_CONTENT, pathname), [pathname]);
-  /** True while the current history entry is one this hook pushed. */
-  const ownsEntry = useRef(false);
+  const section = useMemo(() => findSectionByPath(pathname), [pathname]);
+  /** How many of the entries up to the current one this hook pushed: a section, then an item opened from it, is two. */
+  const ownedDepth = useRef(0);
 
   useEffect(() => {
-    // Any back/forward move lands on an entry we can no longer vouch for.
+    // Back leaves one of our entries. (Forward is counted as Back too: at worst, closing then pushes the world's URL.)
     const onPopState = () => {
-      ownsEntry.current = false;
+      ownedDepth.current = Math.max(0, ownedDepth.current - 1);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  const open = useCallback((next: ContentItem) => {
-    const path = getContentPath(next);
+  const openPath = useCallback((path: string) => {
     if (path === window.location.pathname) return;
-    if (ownsEntry.current) {
-      // Switching items while the panel is open keeps a single entry, so one Back always returns to the world.
+    if (ownedDepth.current > 0 && !findSectionByPath(window.location.pathname)) {
+      // Switching items while the panel is open keeps a single entry, so one Back returns to where the panel was opened from.
       window.history.replaceState(worldHistoryState(), "", path);
     } else {
+      // From the world, or from a section's list (Back returns to the list, as on a website).
       window.history.pushState(worldHistoryState(), "", path);
-      ownsEntry.current = true;
+      ownedDepth.current += 1;
     }
   }, []);
+  const open = useCallback((next: ContentItem) => openPath(getContentPath(next)), [openPath]);
 
   const close = useCallback(() => {
-    if (ownsEntry.current) {
+    if (ownedDepth.current > 0) {
       window.history.back();
     } else {
       window.history.pushState(worldHistoryState(), "", worldPath);
     }
   }, [worldPath]);
 
-  return { item, open, close };
+  return { item, section, open, openPath, close };
 }

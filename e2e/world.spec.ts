@@ -335,3 +335,69 @@ test("the original's view buttons: the angle lock keeps the tilt, Reset view ret
   // Reset lifts the lock.
   await expect(page.getByRole("button", { name: "Lock camera angle" })).toHaveAttribute("aria-pressed", "false");
 });
+
+type PlacesProbe = {
+  places: Map<number, { info: { id: string; label: string }; area: { minX: number; maxX: number; minZ: number; maxZ: number } }>;
+  zoneLabels: { group: { children: Array<{ userData: { zoneId: string }; position: { clone: () => { project: (camera: unknown) => { x: number; y: number } } } }> } };
+  rig: { camera: unknown };
+};
+
+/** Bounds of a zone the engine treats as a place, by its label. */
+const zoneArea = (page: import("@playwright/test").Page, label: string) => page.evaluate((name) => {
+  const engine = window.__worldEngine as unknown as PlacesProbe;
+  return [...engine.places.values()].find((place) => place.info.label === name)!.area;
+}, label);
+
+test("a section's URL is its zone: the camera flies to frame it and the panel lists the section", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openWorld(page);
+  await page.getByText("Menu").click();
+  await page.getByRole("navigation", { name: "Portfolio sections" }).getByRole("link", { name: "Projects", exact: true }).click();
+  await expect(page).toHaveURL(/\/projects$/);
+  const panel = page.getByRole("dialog");
+  await expect(panel.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(panel.getByRole("link", { name: "Project Placeholder One" })).toBeVisible();
+  await settle(page);
+  const area = await zoneArea(page, "Projects");
+  const framed = await view(page);
+  // The target sits beside the zone's middle (shifted for the panel), and the camera is on the zoom curve.
+  expect(Math.hypot(framed.x - (area.minX + area.maxX) / 2, framed.z - (area.minZ + area.maxZ) / 2)).toBeLessThan(10);
+  expect(framed.distance).toBeGreaterThanOrEqual(14);
+
+  // An item from the section's list opens in the same panel, at its own URL.
+  await panel.getByRole("link", { name: "Project Placeholder One" }).click();
+  await expect(page).toHaveURL(new RegExp(`${PROJECT_PATH}$`));
+  await page.goBack();
+  await expect(page).toHaveURL(/\/projects$/);
+
+  await page.getByRole("dialog").getByRole("button", { name: /close/i }).click();
+  await expect(page).toHaveURL(/\/$/);
+  // The zone the camera is over is named, and naming it is the way back to its section.
+  await expect(page.getByText("You are in")).toBeVisible();
+  await page.getByRole("button", { name: "Projects" }).click();
+  await expect(page).toHaveURL(/\/projects$/);
+  expect(errors).toEqual([]);
+});
+
+test("zone names show when zoomed out, and a click on one goes to its section", async ({ page }) => {
+  await openWorld(page);
+  await page.mouse.move(640, 360);
+  const labelAt = () => page.evaluate(() => {
+    const engine = window.__worldEngine as unknown as PlacesProbe & { zoneLabels: { visible: boolean } };
+    const sprite = engine.zoneLabels.group.children.find((child) => child.userData.zoneId === "zone-4")!;
+    const ndc = sprite.position.clone().project(engine.rig.camera);
+    const rect = document.querySelector("canvas")!.getBoundingClientRect();
+    return { visible: engine.zoneLabels.visible, x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
+  });
+  // Close up the names are hidden.
+  expect((await labelAt()).visible).toBe(false);
+  for (let step = 0; step < 6; step += 1) await page.mouse.wheel(0, 400);
+  await settle(page);
+  const label = await labelAt();
+  expect(label.visible).toBe(true);
+  await page.mouse.move(label.x, label.y);
+  await expect(page.getByText("Click to open")).toBeVisible();
+  await page.mouse.click(label.x, label.y);
+  await expect(page).toHaveURL(/\/experience$/);
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Experience" })).toBeVisible();
+});
