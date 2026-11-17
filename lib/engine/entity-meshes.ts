@@ -50,6 +50,12 @@ export type EntityLayer = {
   windInView: (frustum: THREE.Frustum) => boolean;
   /** Batches of a model, by model id: for the editor's debug views. */
   modelMeshes: (modelId: string) => THREE.InstancedMesh[];
+  /**
+   * Recolours the unlit placeholder shapes (buildings, signs) for day and
+   * night: they ignore lights, so the sky's terrain tint is applied to their
+   * colour directly. A uniform change only; nothing recompiles.
+   */
+  setUnlitTint: (tint: THREE.Color) => void;
   dispose: () => void;
 };
 
@@ -324,13 +330,15 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
     batch.items.push({ entityId, matrix });
   };
 
+  /** Unlit placeholder materials with their own colour, for setUnlitTint. */
+  const unlit: Array<{ material: THREE.MeshBasicMaterial; base: THREE.Color }> = [];
   const addPrimitive = (entityId: string, primitive: PrimitiveType, color: string, transform: SerializableTransform) => {
-    addToBatch(`${primitive}|${color.toLowerCase()}`, entityId, composeMatrix(transform), () => ({
-      geometry: createPrimitiveGeometry(primitive),
+    addToBatch(`${primitive}|${color.toLowerCase()}`, entityId, composeMatrix(transform), () => {
       // Unlit flat colour, as the placeholders have always been drawn. They cast shadows when the map has them.
-      material: new THREE.MeshBasicMaterial({ color }),
-      castShadow: true,
-    }));
+      const material = new THREE.MeshBasicMaterial({ color });
+      unlit.push({ material, base: material.color.clone() });
+      return { geometry: createPrimitiveGeometry(primitive), material, castShadow: true };
+    });
   };
 
   /** A soft dark patch under an instance (the lab's "contact AO"): one batch for the whole map. */
@@ -546,6 +554,9 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
     },
     modelMeshes(modelId) {
       return meshesByModel.get(modelId) ?? [];
+    },
+    setUnlitTint(tint) {
+      for (const { material, base } of unlit) material.color.copy(base).multiply(tint);
     },
     setFaded(next) {
       let changed = false;

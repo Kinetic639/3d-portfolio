@@ -244,6 +244,7 @@ async function measureWorld(page: Page) {
   record("hover.longTasks", (await longTasks(page, hoverFrom, await now(page))).count);
 
   await measurePanel(page);
+  await measureDayNight(page);
   await measureWind(page);
   await measureMine(page);
 }
@@ -275,6 +276,30 @@ async function measurePanel(page: Page) {
   record("panel.maxFrameMs", frames.maxFrameMs);
   record("panel.longTasks", tasks.count);
   await page.getByRole("button", { name: /close and return to the world/i }).click();
+  await settle(page);
+}
+
+/**
+ * The theme switch in the world: the sun sets and the moon rises over 2 s,
+ * the page's colours ease over with it. Only uniform values change, so
+ * nothing may compile; frames run at the display rate. Back to day after.
+ */
+async function measureDayNight(page: Page) {
+  const programs = () => page.evaluate(() => (window.__worldEngine as unknown as { renderer: { info: { programs: unknown[] } } }).renderer.info.programs.length);
+  const toggle = page.locator("[class*=minimapBar]").getByRole("switch");
+  const programsBefore = await programs();
+  await startFrames(page);
+  const from = await now(page);
+  await toggle.click();
+  await page.waitForTimeout(2800);
+  const to = await now(page);
+  const frames = calculateFrameSummary(await stopFrames(page));
+  record("dayNight.p95FrameMs", frames.p95FrameMs);
+  record("dayNight.maxFrameMs", frames.maxFrameMs);
+  record("dayNight.longTasks", (await longTasks(page, from, to)).count);
+  record("dayNight.programsCompiled", (await programs()) - programsBefore);
+  await toggle.click();
+  await page.waitForTimeout(2800);
   await settle(page);
 }
 

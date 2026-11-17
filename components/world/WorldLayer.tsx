@@ -22,6 +22,7 @@ import { isWorldHistoryEntry, useContentRoute, worldHistoryState } from "./use-c
 import { useWorldBoot } from "./use-world-boot";
 import PerfHud from "./PerfHud";
 import WorldMinimap from "./WorldMinimap";
+import SkySwitch from "./SkySwitch";
 import type { MinimapData } from "@/lib/minimap/minimap";
 import { useUiWork } from "@/lib/perf/ui-work";
 import styles from "./WorldLayer.module.css";
@@ -276,6 +277,7 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
         <HoverLabel />
         <MinigameHud />
         <ActorHud />
+        <SkySwitch />
         <PerfHud active={phase === "world"} />
         {minimaps[mapId] ? (
           <WorldMinimap

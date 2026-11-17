@@ -28,6 +28,7 @@ import type { ActorHud, ZoneInfo } from "@/lib/bridge/world-bridge";
 import { zoneSection } from "@/lib/content/places";
 import { FOCUS_DIRECTION_YAW, frameZone, measureZones, planFlight, sampleFlight, type Flight, type ZoneArea } from "./zones";
 import { LABEL_FADE_FAR, LABEL_FADE_NEAR, ZoneLabels } from "./zone-labels";
+import { SkyDiscs } from "./sky-discs";
 
 /**
  * The 3D runtime. Plain TypeScript on three.js: no React anywhere in this
@@ -141,6 +142,10 @@ export class WorldEngine {
   /** Zones that are places to go, by numeric id. */
   private places = new Map<number, { info: ZoneInfo; area: ZoneArea; yaw: number | null }>();
   private zoneLabels: ZoneLabels | null = null;
+  /** The environment's sky version last copied to the terrain. */
+  private terrainSky = -1;
+  /** The sun and the moon, low over the horizon beyond the map. */
+  private readonly skyDiscs = new SkyDiscs();
   /** A flight to a zone in progress; `goal` is where it put the rig last frame, so input that moves the goal ends it. */
   private flight: { plan: Flight; elapsed: number; goal: ReturnType<CameraRig["getGoal"]> | null } | null = null;
   /** The last frame was drawn only because of the wind: draw at WIND_FRAME_MS. */
@@ -211,6 +216,7 @@ export class WorldEngine {
     this.renderer = new THREE.WebGLRenderer({ canvas, context, antialias: true, alpha: true });
     this.environment = new Environment(this.scene);
     this.sky = this.scene.background;
+    this.scene.add(this.skyDiscs.group);
     this.rig = new CameraRig(canvas, {
       ...VISITOR_CAMERA,
       // Input wants full-rate frames at once, even when only the wind was moving before.
@@ -376,6 +382,8 @@ export class WorldEngine {
     });
     this.scene.add(terrain.group, this.entities.group, this.interaction.group);
     this.installPlaces(definition, query);
+    this.terrainSky = -1;
+    this.syncTerrainSky();
 
     // The camera may only centre on the playable area; backdrop scenery stays out of reach.
     const min = query.cellToWorld(definition.playableBounds.minX, 0, definition.playableBounds.minZ);
@@ -518,6 +526,7 @@ export class WorldEngine {
   private drawLoader() {
     const width = this.canvas.clientWidth;
     if (width === 0 || !this.landing) return;
+    this.syncTerrainSky();
     const renderer = this.renderer;
     const scissorWas = renderer.getScissorTest();
     const scissor = renderer.getScissor(new THREE.Vector4());
@@ -822,6 +831,17 @@ export class WorldEngine {
       case "reset-view":
         this.resetView();
         break;
+      case "set-night": {
+        // Only the world shown animates; on the landing page the loader changes at once.
+        const immediate = command.immediate === true || !this.isInteractive();
+        this.environment.setNight(command.night, immediate);
+        this.syncTerrainSky();
+        if (immediate) {
+          this.drawLoader();
+          if (this.active) this.invalidate();
+        } else this.invalidate();
+        break;
+      }
       case "fly-to-zone":
         this.flyToZone(command.zoneId, command.inset, command.reducedMotion === true);
         break;
@@ -1058,7 +1078,8 @@ export class WorldEngine {
     // Wind needs frames only while it blows and something it moves is in view.
     this.updateFrustum();
     const windy = this.environment.wind.active && (this.entities?.windInView(this.frustum) ?? false);
-    const othersAnimating = (this.entities?.update(delta, this.frustum) ?? false) || waving || bursting;
+    const skyChanging = this.environment.changingSky;
+    const othersAnimating = (this.entities?.update(delta, this.frustum) ?? false) || waving || bursting || skyChanging;
     const animating = othersAnimating || windy;
     this.windOnly = windy && !othersAnimating && !cameraMoving && this.entry === null;
     if (this.chosenActor) {
@@ -1073,6 +1094,7 @@ export class WorldEngine {
       if (status.state !== this.bridge.store.getState().actor?.state) this.publishActor();
     }
     this.environment.update(this.elapsedSeconds, delta);
+    this.syncTerrainSky();
     if (this.renderer.shadowMap.enabled) {
       const view = this.rig.getView();
       this.environment.followView(this.shadowFocus.set(view.x, 0, view.z), view.distance);
@@ -1087,6 +1109,7 @@ export class WorldEngine {
       this.rig.camera.updateMatrixWorld();
       this.interaction.updateOccluders(this.rig.camera);
     }
+    this.skyDiscs.update(this.rig.camera, this.environment.skyState);
     this.renderer.render(this.scene, this.rig.camera);
 
     const info = this.renderer.info;
@@ -1183,6 +1206,16 @@ export class WorldEngine {
     this.rig.setOrientation(view.yawDegrees, view.pitchDegrees);
     this.rig.lookAt(view.x, view.z, view.distance);
     this.invalidate();
+  }
+
+  /** Day or night on the terrain: its shader keeps its own light, recoloured by the environment's sky. */
+  private syncTerrainSky() {
+    const uniforms = this.terrain?.uniforms;
+    if (!uniforms || this.terrainSky === this.environment.skyVersion) return;
+    this.terrainSky = this.environment.skyVersion;
+    uniforms.uLightTint.value.copy(this.environment.skyState.terrainTint);
+    uniforms.uLightGlow.value.copy(this.environment.skyState.terrainGlow);
+    this.entities?.setUnlitTint(this.environment.skyState.terrainTint);
   }
 
   /** Zones that are places (a section of the site, or a mini-game): their areas, names on the terrain, and the list the UI shows. */

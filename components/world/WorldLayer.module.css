@@ -36,6 +36,11 @@
   opacity: 0.01;
 }
 
+/* Light text over a dark page shows even at 1 %; at night they keep about one level of 255. */
+:global(html[data-theme="dark"]) .layer[data-view="loader"] > :not(canvas) {
+  opacity: 0.004;
+}
+
 .layer[data-view="world"] {
   visibility: visible;
   opacity: 1;
@@ -484,8 +489,8 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--foreground);
-  background: rgba(247, 249, 246, 0.76);
-  box-shadow: 0 8px 22px rgba(24, 34, 31, 0.12);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
 }
 
@@ -597,4 +602,11 @@
     width: 124px;
     bottom: 64px;
   }
+}
+
+/* Day and night beside the map's own button. */
+.minimapBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }

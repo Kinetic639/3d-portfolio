@@ -2,6 +2,8 @@ import * as THREE from "three";
 import type { MapEnvironment } from "@/lib/maps/map-definition";
 import { resolveLighting, resolveShadows, type LightingState, type ShadowState } from "./surface-style";
 import { Wind } from "./wind";
+import { createSkyState, DAY_NIGHT_SECONDS, sampleSky, type SkyPath } from "./day-night";
+import { easeInOutCinematic } from "./entry-sequence";
 
 /**
  * Global environment state: time of day, wind and (later) weather.
@@ -40,6 +42,16 @@ export class Environment {
   private readonly lightUp = new THREE.Vector3();
   /** The map's wind; see wind.ts. */
   readonly wind = new Wind();
+  /** What day or night looks like right now (see day-night.ts); the terrain reads it through the engine. */
+  readonly skyState = createSkyState();
+  /** Bumped whenever skyState changes, so the engine copies it to the terrain only then. */
+  skyVersion = 0;
+  private readonly dayBackground = new THREE.Color(ORIGINAL_BACKGROUND);
+  /** 0 day, 1 night, and a switch in progress between them. */
+  private night = 0;
+  private dayNight: { from: number; to: number; elapsed: number } | null = null;
+  /** Which way time runs through the current or last switch: the sun sets in the west and rises in the east. */
+  private path: SkyPath = "dusk";
 
   constructor(scene: THREE.Scene) {
     scene.add(this.sun, this.sun.target, this.sky);
@@ -67,13 +79,47 @@ export class Environment {
 
   private applyLighting(lighting: LightingState) {
     this.lighting = lighting;
-    this.sun.intensity = lighting.sunIntensity;
-    this.sun.color.set(lighting.sunColor);
-    this.sunDirection.set(lighting.sunPosition.x, lighting.sunPosition.y, lighting.sunPosition.z).normalize();
-    this.sky.intensity = lighting.skyIntensity;
-    this.sky.color.set(lighting.skyColor);
-    this.sky.groundColor.set(lighting.groundColor);
-    this.placeSun(this.shadowFocus, 0);
+    this.applySky();
+  }
+
+  /** Lights, background and shadow strength from the map's day lighting and where day or night is. */
+  private applySky() {
+    const sky = sampleSky(this.night, this.lighting, this.dayBackground, this.skyState, this.path);
+    this.sun.intensity = sky.lightIntensity;
+    this.sun.color.copy(sky.lightColor);
+    this.sunDirection.copy(sky.lightDirection);
+    this.sky.intensity = sky.skyIntensity;
+    this.sky.color.copy(sky.skyColor);
+    this.sky.groundColor.copy(sky.groundColor);
+    this.background.copy(sky.background);
+    this.sun.shadow.intensity = this.shadows.strength * sky.shadowFactor;
+    this.placeSun(this.shadowFocus, this.viewDistance);
+    this.skyVersion += 1;
+  }
+
+  /**
+   * Day or night: at once (on load, with reduced motion, or while the world
+   * is not shown), or as a `DAY_NIGHT_SECONDS` switch that `update` plays.
+   */
+  setNight(night: boolean, immediate: boolean) {
+    const to = night ? 1 : 0;
+    if (immediate) {
+      this.dayNight = null;
+      if (this.night !== to) {
+        this.night = to;
+        this.applySky();
+      }
+      return;
+    }
+    if (this.night === to && !this.dayNight) return;
+    // A new switch from rest picks the way time runs; one reversed halfway goes back along the same path.
+    if (!this.dayNight) this.path = to === 1 ? "dusk" : "dawn";
+    this.dayNight = { from: this.night, to, elapsed: 0 };
+  }
+
+  /** True while a switch between day and night is playing. */
+  get changingSky() {
+    return this.dayNight !== null;
   }
 
   private applyShadows(shadows: ShadowState) {
@@ -82,7 +128,7 @@ export class Environment {
     this.sun.castShadow = shadows.enabled;
     this.sun.shadow.bias = shadows.bias;
     this.sun.shadow.normalBias = shadows.normalBias;
-    this.sun.shadow.intensity = shadows.strength;
+    this.sun.shadow.intensity = shadows.strength * this.skyState.shadowFactor;
     this.sun.shadow.mapSize.set(shadows.mapSize, shadows.mapSize);
     if (resized && this.sun.shadow.map) {
       this.sun.shadow.map.dispose();
@@ -96,8 +142,11 @@ export class Environment {
    * moves in whole shadow-map texels, so shadows do not shimmer while panning.
    */
   followView(focus: THREE.Vector3, viewDistance: number) {
+    this.viewDistance = viewDistance;
     this.placeSun(focus, viewDistance);
   }
+
+  private viewDistance = 0;
 
   private placeSun(focus: THREE.Vector3, viewDistance: number) {
     const camera = this.sun.shadow.camera;
@@ -141,5 +190,13 @@ export class Environment {
   update(elapsedSeconds: number, deltaSeconds = 0) {
     this.uniforms.uTime.value = elapsedSeconds;
     this.wind.update(deltaSeconds);
+    const change = this.dayNight;
+    if (change) {
+      change.elapsed += deltaSeconds;
+      const progress = Math.min(1, change.elapsed / (DAY_NIGHT_SECONDS * Math.max(0.2, Math.abs(change.to - change.from))));
+      this.night = THREE.MathUtils.lerp(change.from, change.to, easeInOutCinematic(progress));
+      if (progress >= 1) this.dayNight = null;
+      this.applySky();
+    }
   }
 }

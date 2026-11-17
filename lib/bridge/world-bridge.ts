@@ -105,6 +105,8 @@ export type WorldCommand =
   | { type: "release-actor" }
   | { type: "set-angle-lock"; locked: boolean }
   | { type: "reset-view" }
+  /** The site's theme: day or night. Animated while the world is shown, unless `immediate`. */
+  | { type: "set-night"; night: boolean; immediate?: boolean }
   /** Flies the camera to frame a whole zone. `inset`: screen space a panel takes, so the zone is framed in what is left. */
   | { type: "fly-to-zone"; zoneId: string; inset?: { right?: number; bottom?: number }; reducedMotion?: boolean }
   | { type: "follow-actor" }
