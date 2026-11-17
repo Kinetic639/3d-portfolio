@@ -134,8 +134,13 @@ export class InteractionLayer {
     return true;
   }
 
-  /** What is under a pointer, given a ray from the camera. */
-  pick(camera: THREE.Camera, ndcX: number, ndcY: number): Interactable | null {
+  /**
+   * What is under a pointer, given a ray from the camera. `beforeZones` runs
+   * after icons and objects and before zones picked through the terrain:
+   * returning true stops there (something drawn over the ground, such as a
+   * zone's name, wins).
+   */
+  pick(camera: THREE.Camera, ndcX: number, ndcY: number, beforeZones?: () => boolean): Interactable | null {
     this.ray.origin.setFromMatrixPosition(camera.matrixWorld);
     this.ray.direction.set(ndcX, ndcY, 0.5).unproject(camera).sub(this.ray.origin).normalize();
 
@@ -168,6 +173,7 @@ export class InteractionLayer {
       }
     }
     if (best) return best;
+    if (beforeZones?.()) return null;
 
     if (terrain && isInsidePlayableBounds(this.map, terrain.x, terrain.z)) {
       return this.zoneItems.get(this.query.columnZone(terrain.x, terrain.z)) ?? null;

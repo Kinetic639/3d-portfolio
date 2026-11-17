@@ -176,7 +176,7 @@ test("without WebGL the landing page works and no entry element appears", async 
   await page.goto("/");
   await waitForPhase(page, "unavailable");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Project Placeholder One" })).toBeVisible();
+  await expect(page.locator("#projects").getByRole("link", { name: "Project Placeholder One" })).toBeVisible();
   await expect(enterButton(page)).toHaveCount(0);
   // Missing WebGL is not the visitor's problem: no warning, no broken control.
   await expect(page.getByText(/unavailable|failed|not supported/i)).toHaveCount(0);
@@ -207,4 +207,34 @@ test("the landing page is navigable by keyboard", async ({ page }) => {
   await expect(enterButton(page)).toBeFocused();
   await page.keyboard.press("Enter");
   await waitForPhase(page, "world");
+});
+
+test("each list section has its own page, which is also its zone's address", async ({ page }) => {
+  const response = await page.goto("/projects");
+  expect(response?.status()).toBe(200);
+  await expect(page.getByRole("heading", { level: 1, name: "Projects" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Project Placeholder One" }).first()).toBeVisible();
+  // The landing page's section headings lead to these pages.
+  await page.goto("/");
+  await page.getByRole("heading", { level: 2, name: "Experience" }).getByRole("link").click();
+  await expect(page).toHaveURL(/\/experience$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Experience" })).toBeVisible();
+});
+
+test("the map is site navigation: zones lead to their sections and pins to their items, with no world needed", async ({ page, request }) => {
+  // In the server's HTML: no script, WebGL or world is needed to use it.
+  const html = await (await request.get("/")).text();
+  for (const href of ["/projects", "/experience", "/skills", "/about", "/contact", PROJECT_PATH]) {
+    expect(html).toContain(`href="${href}"`);
+  }
+  await page.goto("/");
+  const map = page.getByRole("group", { name: "Map of the portfolio" });
+  await expect(map.getByRole("link", { name: "Projects" })).toBeVisible();
+  await expect(map.getByRole("link", { name: "Project Placeholder One" })).toBeVisible();
+  // A zone's name is the easiest target, also for thin zones.
+  await page.locator('#map svg a[tabindex="-1"][href="/experience"]').click();
+  await expect(page).toHaveURL(/\/experience$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Experience" })).toBeVisible();
+  // The section shown is marked on its page's map.
+  await expect(page.getByRole("group", { name: "Map of the portfolio" }).getByRole("link", { name: "Experience" })).toHaveAttribute("aria-current", "location");
 });

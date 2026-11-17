@@ -6,14 +6,15 @@ import * as THREE from "three";
  * 1. Landing: the camera looks down at the loader platform from far away and
  *    above, so the platform and its floating crystal sit at the bottom of the
  *    screen, under the page.
- * 2. Focus: a click glides the camera down to a high three-quarter view of the
- *    platform.
+ * 2. Focus: a click glides the camera to a high view of the platform from
+ *    above: the far end of the visitor's zoom curve.
  * 3. Expand: the terrain grows out of the platform in a wave while the camera
- *    swings out wide and then settles low over the ground. When the wave has
- *    covered the original 64-cell area, the placed objects pop up, nearest
- *    first.
+ *    comes down the same zoom curve the visitor's wheel uses (distance and
+ *    tilt together), turning gently to the resting direction. When the wave
+ *    has covered the original 64-cell area, the placed objects pop up,
+ *    nearest first.
  *
- * Every position is in the original's coordinates, relative to the loader
+ * Loader positions are in the original's coordinates, relative to the loader
  * platform (whose top was at y 2.5). The end of the path is wherever the
  * visitor's camera rests, so the hand-over to free movement has no jump.
  *
@@ -37,13 +38,9 @@ export const POP_START_WAVE = 1;
 const ORIGINAL_PLATFORM_TOP = 2.5;
 const LOADER_POSITION = new THREE.Vector3(-18, 20, 54);
 const LOADER_TARGET = new THREE.Vector3(0, 17, 0);
-const FOCUS_POSITION = new THREE.Vector3(43, 32, 43);
-const SWING_CONTROL = new THREE.Vector3(51, 43, 62);
-const SWING_POSITION = new THREE.Vector3(58, 31, 58);
-const SETTLE_CONTROL = new THREE.Vector3(48, 14, 55);
 const PLATFORM_TARGET = new THREE.Vector3(0, 2.8, 0);
-/** Share of the expand move spent swinging out; the rest settles. */
-const SWING_SHARE = 0.2;
+/** The camera comes down the curve turning this much (radians) towards its resting direction. */
+const TURN = THREE.MathUtils.degToRad(35);
 
 export type EntryPlan = {
   /** Centre of the loader platform, x and z in world space. */
@@ -51,9 +48,14 @@ export type EntryPlan = {
   platformZ: number;
   /** World height of the platform's top. */
   platformTop: number;
-  /** Where the visitor's camera rests when the entry is over. */
-  finalPosition: THREE.Vector3;
+  /** Where the visitor's camera rests when the entry is over: its target, and the pose around it. */
   finalTarget: THREE.Vector3;
+  finalYaw: number;
+  finalDistance: number;
+  /** Where the descent starts: the far end of the zoom curve. */
+  farDistance: number;
+  /** The zoom curve: tilt (radians) at a distance. */
+  pitchAt: (distance: number) => number;
 };
 
 export type EntrySample = {
@@ -70,14 +72,12 @@ export function easeInOutCinematic(progress: number) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-function bezier(out: THREE.Vector3, start: THREE.Vector3, control: THREE.Vector3, end: THREE.Vector3, progress: number) {
-  const t = THREE.MathUtils.clamp(progress, 0, 1);
-  const u = 1 - t;
-  return out.set(
-    u * u * start.x + 2 * u * t * control.x + t * t * end.x,
-    u * u * start.y + 2 * u * t * control.y + t * t * end.y,
-    u * u * start.z + 2 * u * t * control.z + t * t * end.z,
-  );
+const direction = new THREE.Vector3();
+/** Camera on the zoom curve: `distance` from `target`, turned by `yaw`. */
+function onCurve(plan: EntryPlan, target: THREE.Vector3, distance: number, yaw: number, out: THREE.Vector3) {
+  const pitch = plan.pitchAt(distance);
+  direction.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+  return out.copy(target).addScaledVector(direction, distance);
 }
 
 function shifted(plan: EntryPlan, point: THREE.Vector3, out: THREE.Vector3) {
@@ -104,22 +104,18 @@ export function sampleEntry(plan: EntryPlan, seconds: number, position: THREE.Ve
   if (seconds < FOCUS_SECONDS) {
     const eased = easeInOutCinematic(seconds / FOCUS_SECONDS);
     loaderView(plan, s1, s2);
-    position.lerpVectors(s1, shifted(plan, FOCUS_POSITION, s3), eased);
+    position.lerpVectors(s1, onCurve(plan, platformTarget, plan.farDistance, plan.finalYaw + TURN, s3), eased);
     target.lerpVectors(s2, platformTarget, eased);
     return { wave: 0, popSeconds: -1, done: false };
   }
 
   const expandSeconds = seconds - FOCUS_SECONDS;
   const progress = Math.min(1, expandSeconds / EXPAND_SECONDS);
-  if (progress < SWING_SHARE) {
-    const eased = easeInOutCinematic(progress / SWING_SHARE);
-    bezier(position, shifted(plan, FOCUS_POSITION, s1), shifted(plan, SWING_CONTROL, s2), shifted(plan, SWING_POSITION, s3), eased);
-    target.copy(platformTarget);
-  } else {
-    const eased = easeInOutCinematic((progress - SWING_SHARE) / (1 - SWING_SHARE));
-    bezier(position, shifted(plan, SWING_POSITION, s1), shifted(plan, SETTLE_CONTROL, s2), plan.finalPosition, eased);
-    target.lerpVectors(platformTarget, plan.finalTarget, eased);
-  }
+  // Down the zoom curve: even steps in log distance, as the wheel takes them.
+  const eased = easeInOutCinematic(progress);
+  const distance = Math.exp(THREE.MathUtils.lerp(Math.log(plan.farDistance), Math.log(plan.finalDistance), eased));
+  target.lerpVectors(platformTarget, plan.finalTarget, eased);
+  onCurve(plan, target, distance, plan.finalYaw + TURN * (1 - eased), position);
   const wave = expandSeconds * WAVE_UNITS_PER_SECOND;
   return { wave, popSeconds: (wave - POP_START_WAVE) / WAVE_UNITS_PER_SECOND, done: progress >= 1 };
 }

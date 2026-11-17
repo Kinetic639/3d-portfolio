@@ -24,7 +24,10 @@ import { ModelWindRegistry } from "./model-wind";
 import { ModelStyleRegistry } from "./model-style";
 import { resolveActor, type ActorMovement } from "./actor";
 import type { PlacedActor } from "./entity-meshes";
-import type { ActorHud } from "@/lib/bridge/world-bridge";
+import type { ActorHud, ZoneInfo } from "@/lib/bridge/world-bridge";
+import { zoneSection } from "@/lib/content/places";
+import { FOCUS_DIRECTION_YAW, frameZone, measureZones, planFlight, sampleFlight, type Flight, type ZoneArea } from "./zones";
+import { LABEL_FADE_FAR, LABEL_FADE_NEAR, ZoneLabels } from "./zone-labels";
 
 /**
  * The 3D runtime. Plain TypeScript on three.js: no React anywhere in this
@@ -94,9 +97,13 @@ export type WarmUpReport = {
 const PIXEL_RATIO_CAP: Record<QualityTier, number> = { low: 1, medium: 1.25, high: 1.5 };
 const LOWER_QUALITY: Record<QualityTier, QualityTier | null> = { high: "medium", medium: "low", low: null };
 const FOCUS_DISTANCE = 38;
-/** How close the camera comes to a mini-game zone, and how steeply it looks down on it, so nothing around the zone stands in front of the blocks. */
-const MINIGAME_DISTANCE = 26;
-const MINIGAME_PITCH = 52;
+/**
+ * A game's view: a step out along the zoom curve, so the camera looks down
+ * on the zone and nothing around it stands in front of the blocks. The pitch
+ * applies only with the angle lock on (off the curve).
+ */
+const MINIGAME_DISTANCE = 38;
+const MINIGAME_PITCH = 44;
 const LEAVE_MS = 450;
 /** The box at the bottom centre of the canvas where the loader is drawn on the landing page, in CSS pixels. */
 export const LOADER_VIEWPORT = { width: 260, height: 200 } as const;
@@ -131,6 +138,11 @@ export class WorldEngine {
   /** Where the entry left the camera: Reset view returns there. */
   private startView: ReturnType<CameraRig["getGoal"]> | null = null;
   private readonly shadowFocus = new THREE.Vector3();
+  /** Zones that are places to go, by numeric id. */
+  private places = new Map<number, { info: ZoneInfo; area: ZoneArea; yaw: number | null }>();
+  private zoneLabels: ZoneLabels | null = null;
+  /** A flight to a zone in progress; `goal` is where it put the rig last frame, so input that moves the goal ends it. */
+  private flight: { plan: Flight; elapsed: number; goal: ReturnType<CameraRig["getGoal"]> | null } | null = null;
   /** The last frame was drawn only because of the wind: draw at WIND_FRAME_MS. */
   private windOnly = false;
   private lastWindFrameAt = 0;
@@ -210,7 +222,7 @@ export class WorldEngine {
       onUserPan: () => this.stopFollowing(),
     });
     this.rig.setEnabled(false);
-    bridge.diagnostics.engine = { frames: this.frames, stats: this.stats };
+    bridge.diagnostics.engine = { frames: this.frames, stats: this.stats, view: () => this.rig.getView() };
 
     this.beacon.group.traverse((object) => object.layers.enable(LOADER_LAYER));
     this.scene.add(this.beacon.group);
@@ -363,6 +375,7 @@ export class WorldEngine {
       describeContent: options.describeContent ?? (() => null),
     });
     this.scene.add(terrain.group, this.entities.group, this.interaction.group);
+    this.installPlaces(definition, query);
 
     // The camera may only centre on the playable area; backdrop scenery stays out of reach.
     const min = query.cellToWorld(definition.playableBounds.minX, 0, definition.playableBounds.minZ);
@@ -409,12 +422,20 @@ export class WorldEngine {
     const platformTop = count > 0 ? top : 0;
     this.beacon.place(platformX, platformTop, platformZ);
 
-    // The path ends where the visitor's camera rests at the spawn.
+    // The path ends where the visitor's camera rests at the spawn, and comes
+    // down the visitor's own zoom curve (scaled for this screen).
     this.rig.setOrientation(VISITOR_CAMERA.yawDegrees, VISITOR_CAMERA.pitchDegrees, true);
-    this.rig.lookAt(this.spawn.x, this.spawn.z, VISITOR_CAMERA.initialDistance, true);
-    const finalPosition = this.rig.camera.position.clone();
+    this.rig.lookAt(this.spawn.x, this.spawn.z, this.rig.curveDistance(VISITOR_CAMERA.initialDistance), true);
+    const rest = this.rig.getGoal();
     const finalTarget = new THREE.Vector3(this.spawn.x, VISITOR_CAMERA.targetHeight, this.spawn.z);
-    this.entryPlan = { platformX, platformZ, platformTop, finalPosition, finalTarget };
+    const curve = VISITOR_CAMERA.zoomCurve;
+    this.entryPlan = {
+      platformX, platformZ, platformTop, finalTarget,
+      finalYaw: THREE.MathUtils.degToRad(rest.yawDegrees),
+      finalDistance: rest.distance,
+      farDistance: this.rig.curveDistance(curve[curve.length - 1].distance),
+      pitchAt: (distance) => THREE.MathUtils.degToRad(this.rig.pitchForDistance(distance) ?? rest.pitchDegrees),
+    };
     loaderView(this.entryPlan, this.loaderCamera.position, this.entryTarget);
     this.loaderCamera.lookAt(this.entryTarget);
     this.loaderCamera.updateMatrixWorld();
@@ -433,7 +454,7 @@ export class WorldEngine {
     this.entities?.setPopTime(-1);
     if (this.interaction) this.interaction.group.visible = false;
     this.rig.setOrientation(VISITOR_CAMERA.yawDegrees, VISITOR_CAMERA.pitchDegrees, true);
-    this.rig.lookAt(this.spawn.x, this.spawn.z, VISITOR_CAMERA.initialDistance, true);
+    this.rig.lookAt(this.spawn.x, this.spawn.z, this.rig.curveDistance(VISITOR_CAMERA.initialDistance), true);
     if (this.loaderReady) this.startLanding();
   }
 
@@ -558,9 +579,11 @@ export class WorldEngine {
     if (interactionGroup) interactionGroup.visible = true;
     this.beacon.forceVisible();
     this.minigames?.showForWarmUp(true);
+    this.zoneLabels?.showForWarmUp(true);
     const restore = () => {
       if (interactionGroup) interactionGroup.visible = false;
       this.minigames?.showForWarmUp(false);
+      this.zoneLabels?.showForWarmUp(false);
       if (this.bridge.store.getState().phase === "ready") this.beacon.show();
       else this.beacon.hide();
       if (this.terrain?.uniforms) this.terrain.uniforms.uExpansionProgress.value = 0;
@@ -605,6 +628,7 @@ export class WorldEngine {
       ...(this.entities?.group.children ?? []),
       ...(this.interaction?.group.children ?? []),
       ...(this.minigames?.group.children ?? []),
+      ...(this.zoneLabels?.group.children ?? []),
     ];
     const culling = objects.map((object) => object.frustumCulled);
     objects.forEach((object) => {
@@ -746,6 +770,14 @@ export class WorldEngine {
     }
     this.viewBeforeMinigame = null;
     this.bridge.set({ minigame: null });
+    if (this.zoneLabels) {
+      this.scene.remove(this.zoneLabels.group);
+      this.zoneLabels.dispose();
+      this.zoneLabels = null;
+    }
+    this.places.clear();
+    this.flight = null;
+    this.bridge.set({ zones: [], place: null });
     if (this.entities) {
       this.scene.remove(this.entities.group);
       this.entities.dispose();
@@ -790,6 +822,9 @@ export class WorldEngine {
       case "reset-view":
         this.resetView();
         break;
+      case "fly-to-zone":
+        this.flyToZone(command.zoneId, command.inset, command.reducedMotion === true);
+        break;
       case "follow-actor":
         this.followingActor = this.chosenActor !== null;
         this.publishActor();
@@ -813,6 +848,7 @@ export class WorldEngine {
   }
 
   private focusContent(content: MapContentReference, inset?: { right?: number; bottom?: number }) {
+    this.flight = null;
     const item = this.interaction?.findByContent(content) ?? null;
     if (!item) {
       // Content with no place on this map: the panel still opens, the camera stays put.
@@ -822,7 +858,7 @@ export class WorldEngine {
     // Remember where the visitor was only for the first focus in a row.
     this.viewBeforeFocus ??= this.rig.getGoal();
     this.interaction?.setFocused(item.id);
-    this.rig.focusOn(item.focus.x, item.focus.z, Math.min(this.rig.getGoal().distance, FOCUS_DISTANCE), inset);
+    this.rig.focusOn(item.focus.x, item.focus.z, Math.min(this.rig.getGoal().distance, this.rig.curveDistance(FOCUS_DISTANCE)), inset);
   }
 
   private enter(command: Extract<WorldCommand, { type: "enter" }>) {
@@ -848,6 +884,7 @@ export class WorldEngine {
     this.entering = false;
     this.entry = null;
     this.wave = null;
+    this.flight = null;
     if (this.minigames?.playing) this.leaveMinigame(false);
     this.rig.setEnabled(false);
     this.interaction?.setHovered(null);
@@ -871,16 +908,20 @@ export class WorldEngine {
     return this.active && this.bridge.store.getState().phase === "world" && this.interaction !== null;
   }
 
-  private pickAt(clientX: number, clientY: number): Interactable | null {
-    if (!this.interaction) return null;
+  /** The interactable under a point, or the zone whose name is there: icons and objects win over names, names over the ground. */
+  private pickAt(clientX: number, clientY: number): { item: Interactable | null; label: string | null } {
+    let label: string | null = null;
+    if (!this.interaction) return { item: null, label };
     const rect = this.canvas.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return null;
+    if (rect.width === 0 || rect.height === 0) return { item: null, label };
     this.stats.picks += 1;
-    return this.interaction.pick(
+    const item = this.interaction.pick(
       this.rig.camera,
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -((clientY - rect.top) / rect.height) * 2 + 1,
+      () => (label = this.labelAt(clientX, clientY)) !== null,
     );
+    return { item, label };
   }
 
   /** Coalesces pointer moves: at most one pick per animation frame, and no render unless the result changed. */
@@ -902,8 +943,20 @@ export class WorldEngine {
       if (changed) this.invalidate();
       return;
     }
-    const item = canHover ? this.pickAt(this.pointer!.x, this.pointer!.y) : null;
-    if (!this.interaction.setHovered(item?.id ?? null)) return;
+    const { item, label: zoneId } = canHover ? this.pickAt(this.pointer!.x, this.pointer!.y) : { item: null, label: null };
+    if (zoneId) {
+      const changed = this.interaction.setHovered(null);
+      const id = `zone-label:${zoneId}`;
+      if (this.bridge.store.getState().hovered?.id !== id) {
+        const place = [...this.places.values()].find((candidate) => candidate.info.id === zoneId);
+        this.canvas.style.cursor = "pointer";
+        this.bridge.set({ hovered: { id, label: place?.info.label ?? zoneId, content: null, action: "open" } });
+        this.invalidate();
+      } else if (changed) this.invalidate();
+      return;
+    }
+    const leftLabel = this.bridge.store.getState().hovered?.id.startsWith("zone-label:") === true;
+    if (!this.interaction.setHovered(item?.id ?? null) && !leftLabel) return;
     this.canvas.style.cursor = item ? "pointer" : "";
     this.bridge.set({ hovered: item ? { id: item.id, label: item.label, content: item.content, action: item.minigame ? "play" : "open" } : null });
     this.invalidate();
@@ -930,8 +983,10 @@ export class WorldEngine {
       this.chooseActor(actor);
       return;
     }
-    const item = this.pickAt(clientX, clientY);
-    if (item?.minigame && item.zoneNumericId !== null) {
+    const { item, label: zoneId } = this.pickAt(clientX, clientY);
+    if (zoneId) {
+      this.bridge.events.emit({ type: "zone-activated", zoneId });
+    } else if (item?.minigame && item.zoneNumericId !== null) {
       this.startMinigame(item);
     } else if (item?.content) {
       this.bridge.events.emit({ type: "content-activated", content: item.content, interactableId: item.id });
@@ -952,11 +1007,13 @@ export class WorldEngine {
   private startMinigame(item: Interactable) {
     const hud = this.minigames?.start(item.zoneNumericId!);
     if (!hud) return;
+    this.flight = null;
     this.viewBeforeMinigame = this.rig.getGoal();
     this.interaction?.setHovered(null);
     this.interaction?.setFocused(item.id);
+    // On the curve the distance sets the tilt; with the angle locked the tilt stays.
     this.rig.setOrientation(undefined, MINIGAME_PITCH);
-    this.rig.focusOn(item.focus.x, item.focus.z, MINIGAME_DISTANCE);
+    this.rig.focusOn(item.focus.x, item.focus.z, this.rig.curveDistance(MINIGAME_DISTANCE));
     this.bridge.set({ minigame: hud, hovered: null });
     this.schedulePick();
     this.invalidate();
@@ -993,7 +1050,8 @@ export class WorldEngine {
     const delta = this.lastTickAt > 0 ? Math.min((now - this.lastTickAt) / 1000, 0.1) : 1 / 60;
     this.lastTickAt = now;
     this.elapsedSeconds += delta;
-    const cameraMoving = this.entry ? this.advanceEntry(delta) : this.rig.update(delta);
+    const cameraMoving = this.entry ? this.advanceEntry(delta) : this.flight ? this.advanceFlight(delta) : this.rig.update(delta);
+    this.updatePlaces();
     const waving = this.advanceWave(delta);
     // Animated models need a frame every frame for as long as the world is shown.
     const bursting = this.minigames?.update(delta) ?? false;
@@ -1104,9 +1162,10 @@ export class WorldEngine {
     return true;
   }
 
-  /** The original's angle lock: keeps the current tilt; turning and zooming stay free. */
+  /** The original's angle lock: keeps the current tilt (off the zoom curve); turning and zooming stay free. */
   private setAngleLock(locked: boolean) {
     const pitch = this.rig.getGoal().pitchDegrees;
+    this.rig.setCurveEnabled(!locked);
     this.rig.configure(locked
       ? { minPitchDegrees: pitch, maxPitchDegrees: pitch }
       : { minPitchDegrees: VISITOR_CAMERA.minPitchDegrees, maxPitchDegrees: VISITOR_CAMERA.maxPitchDegrees });
@@ -1117,12 +1176,134 @@ export class WorldEngine {
   private resetView() {
     const view = this.startView;
     if (!view) return;
+    this.flight = null;
     if (this.bridge.store.getState().angleLocked) this.setAngleLock(false);
     this.followingActor = false;
     if (this.chosenActor) this.publishActor();
     this.rig.setOrientation(view.yawDegrees, view.pitchDegrees);
     this.rig.lookAt(view.x, view.z, view.distance);
     this.invalidate();
+  }
+
+  /** Zones that are places (a section of the site, or a mini-game): their areas, names on the terrain, and the list the UI shows. */
+  private installPlaces(definition: RuntimeMap, query: WorldQuery) {
+    const areas = measureZones(query);
+    const listed: ZoneInfo[] = [];
+    for (const zone of [...definition.zones].sort((a, b) => a.displayOrder - b.displayOrder)) {
+      const area = areas.get(zone.numericId);
+      if (!area) continue;
+      const section = zoneSection(zone);
+      const minigame = zone.kind === "minigame";
+      if (!section && !minigame) continue;
+      const info: ZoneInfo = { id: zone.id, label: section?.label ?? zone.label, color: zone.color, kind: section?.kind ?? null, minigame };
+      listed.push(info);
+      this.places.set(zone.numericId, { info, area, yaw: zone.focusDirection ? FOCUS_DIRECTION_YAW[zone.focusDirection] ?? null : null });
+    }
+    this.zoneLabels = new ZoneLabels([...this.places.values()].map(({ info, area }) => ({
+      zoneId: info.id, text: info.label, color: info.color, x: area.labelX, y: area.labelY, z: area.labelZ,
+    })));
+    this.zoneLabels.resize(Math.max(1, this.canvas.clientHeight), this.rig.camera.fov);
+    this.scene.add(this.zoneLabels.group);
+    this.bridge.set({ zones: listed, place: null });
+  }
+
+  /** Zone names fade with the zoom; the zone under the camera's target is published when it changes. */
+  private updatePlaces() {
+    const view = this.rig.getView();
+    const hidden = this.entry !== null || this.minigames?.playing === true || !this.isInteractive();
+    this.zoneLabels?.update(view.distance, this.rig.curveDistance(LABEL_FADE_NEAR), this.rig.curveDistance(LABEL_FADE_FAR), hidden);
+    if (!this.query || this.entry) return;
+    const column = Math.floor(view.x + this.query.width / 2);
+    const row = Math.floor(view.z + this.query.depth / 2);
+    const place = this.places.get(this.query.columnZone(column, row))?.info.id ?? null;
+    if (place !== this.bridge.store.getState().place) this.bridge.set({ place });
+  }
+
+  /** The zone whose name is under a point of the canvas, or null. */
+  private labelAt(clientX: number, clientY: number) {
+    if (!this.zoneLabels?.visible) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    this.rig.camera.updateMatrixWorld();
+    return this.zoneLabels.pick(this.rig.camera, ((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1, rect.width / rect.height);
+  }
+
+  /**
+   * Flies to a zone and frames all of it: from the zone's own focus direction
+   * when the map gives one, on the zoom curve, rising over the way when the
+   * trip is long. Input during the flight takes over at once.
+   */
+  private flyToZone(zoneId: string, inset: { right?: number; bottom?: number } | undefined, reducedMotion: boolean) {
+    const place = [...this.places.values()].find((candidate) => candidate.info.id === zoneId);
+    if (!place || !this.isInteractive()) return;
+    if (this.minigames?.playing) this.leaveMinigame(false);
+    this.interaction?.setFocused(null);
+    this.viewBeforeFocus = null;
+    if (this.followingActor) {
+      this.followingActor = false;
+      this.publishActor();
+    }
+    const goal = this.rig.getGoal();
+    const camera = this.rig.camera;
+    const yaw = place.yaw ?? THREE.MathUtils.degToRad(goal.yawDegrees);
+    const width = Math.max(1, this.canvas.clientWidth);
+    const height = Math.max(1, this.canvas.clientHeight);
+    const right = Math.min(inset?.right ?? 0, width * 0.6);
+    const bottom = Math.min(inset?.bottom ?? 0, height * 0.6);
+    const curve = VISITOR_CAMERA.zoomCurve;
+    const pitchAt = (distance: number) => THREE.MathUtils.degToRad(this.rig.pitchForDistance(distance) ?? goal.pitchDegrees);
+    // Frame the zone in the part of the screen a panel leaves free.
+    const frame = frameZone(place.area, {
+      yawRadians: yaw,
+      fovDegrees: camera.fov * (1 - bottom / height),
+      aspect: (width - right) / Math.max(1, height - bottom),
+      pitchAt,
+      minDistance: this.rig.curveDistance(curve[0].distance),
+      maxDistance: this.rig.curveDistance(curve[curve.length - 1].distance),
+    });
+    // Shift the target so the zone sits in the middle of the free part:
+    // right (screen) is (cos yaw, -sin yaw) on the ground, up-screen is away from the camera.
+    const halfHeight = frame.distance * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    const across = (right / width) * halfHeight * (width / height);
+    const along = ((bottom / height) * halfHeight) / Math.max(0.2, Math.sin(pitchAt(frame.distance)));
+    const to = {
+      x: frame.x + Math.cos(yaw) * across + Math.sin(yaw) * along,
+      z: frame.z - Math.sin(yaw) * across + Math.cos(yaw) * along,
+      distance: frame.distance,
+      yaw,
+    };
+    if (reducedMotion) {
+      this.flight = null;
+      this.rig.setOrientation(THREE.MathUtils.radToDeg(yaw), undefined, true);
+      this.rig.lookAt(to.x, to.z, to.distance, true);
+    } else {
+      const from = { x: goal.x, z: goal.z, distance: goal.distance, yaw: THREE.MathUtils.degToRad(goal.yawDegrees) };
+      this.flight = { plan: planFlight(from, to), elapsed: 0, goal: null };
+    }
+    this.invalidate();
+  }
+
+  /** One step of a zone flight. Returns true while the camera is still travelling. */
+  private advanceFlight(delta: number) {
+    const flight = this.flight!;
+    const goal = this.rig.getGoal();
+    const moved = flight.goal !== null && (
+      Math.abs(goal.x - flight.goal.x) > 1e-4 || Math.abs(goal.z - flight.goal.z) > 1e-4
+      || Math.abs(goal.distance - flight.goal.distance) > 1e-4 || Math.abs(goal.yawDegrees - flight.goal.yawDegrees) > 1e-3
+    );
+    if (moved) {
+      // The visitor took over.
+      this.flight = null;
+      return this.rig.update(delta);
+    }
+    flight.elapsed += delta;
+    const pose = sampleFlight(flight.plan, flight.elapsed);
+    this.rig.setOrientation(THREE.MathUtils.radToDeg(pose.yaw), undefined, true);
+    this.rig.lookAt(pose.x, pose.z, pose.distance, true);
+    flight.goal = this.rig.getGoal();
+    if (!pose.done) return true;
+    this.flight = null;
+    return false;
   }
 
   private updateFrustum() {
@@ -1209,8 +1390,15 @@ export class WorldEngine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, PIXEL_RATIO_CAP[quality]));
     this.renderer.setSize(width, height, false);
     this.rig.setAspect(width / height);
+    // A turned phone moves the zoom curve; an entry not yet started follows it.
+    if (this.entryPlan && !this.entry) {
+      const curve = VISITOR_CAMERA.zoomCurve;
+      this.entryPlan.finalDistance = this.rig.getGoal().distance;
+      this.entryPlan.farDistance = this.rig.curveDistance(curve[curve.length - 1].distance);
+    }
     this.loaderCamera.aspect = width / height;
     this.loaderCamera.updateProjectionMatrix();
+    this.zoneLabels?.resize(height, this.rig.camera.fov);
     this.syncOutlineScale();
     this.invalidate();
   }

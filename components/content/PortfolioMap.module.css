@@ -1,0 +1,121 @@
+.map {
+  max-width: 560px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: #26421a;
+  box-shadow: var(--shadow-sm);
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Pixel art stays crisp when scaled up. */
+  image-rendering: pixelated;
+}
+
+.zone {
+  cursor: pointer;
+  outline: none;
+}
+
+.area {
+  opacity: 0.22;
+  transition: opacity 120ms ease;
+  shape-rendering: crispEdges;
+}
+
+.outline {
+  fill: none;
+  stroke-width: 0.35;
+  stroke-linecap: square;
+  opacity: 0.9;
+}
+
+.zone:hover .area,
+.zone:focus-visible .area,
+.zone[aria-current="location"] .area {
+  opacity: 0.5;
+}
+
+.zone:focus-visible .outline {
+  stroke: var(--foreground) !important;
+  stroke-width: 0.6;
+}
+
+.label {
+  fill: #18221f;
+  paint-order: stroke;
+  stroke: rgba(247, 249, 246, 0.92);
+  stroke-width: 0.9;
+  stroke-linejoin: round;
+  font: 700 2.2px var(--font-sans);
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+.svg image {
+  pointer-events: none;
+}
+
+.labelLink {
+  cursor: pointer;
+}
+
+.labelLink:hover .label {
+  fill: var(--accent);
+}
+
+.pin circle {
+  fill: #f2a43a;
+  stroke: #18221f;
+  stroke-width: 0.3;
+}
+
+.pin text {
+  fill: #18221f;
+  font: 700 1.6px var(--font-sans);
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.pin:hover circle,
+.pin:focus-visible circle {
+  fill: #ffd27a;
+  stroke-width: 0.5;
+}
+
+.pin:focus-visible {
+  outline: none;
+}
+
+.marker path {
+  fill: #ffffff;
+  stroke: #18221f;
+  stroke-width: 0.5;
+  stroke-linejoin: round;
+}
+
+.marker {
+  transition: transform 120ms linear;
+}
+
+/* The world's corner map: smaller names and pins, no shadow of its own. */
+.compact {
+  border-radius: var(--radius-md);
+}
+
+.compact {
+  max-width: none;
+}
+
+.compact .label {
+  font-size: 3.6px;
+  stroke-width: 1.1;
+}
+
+.compact .pin text {
+  font-size: 2.2px;
+}

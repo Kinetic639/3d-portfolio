@@ -235,3 +235,9 @@ The rule for all three: **every shader program exists before the visitor enters.
 3. The world renders on demand, so the pass costs nothing while the world is still. It adds at least one draw call per drawn frame and a full-screen fill: budget it.
 
 **Check** a change with `pnpm perf`: `entry.programsCompiled` and `dig4x.programsCompiled` must stay 0, and the frame-time and draw-call budgets show what it costs. For a visible change, compare screenshots before and after (`?world=voxels` and `?world=baked` in development).
+
+## Zones, sections and the map
+
+- A zone is a section of the site when its content reference names the section's kind (Projects, Experience...), or its label is the section's name. Set the reference in the editor's zone inspector. Such zones get a URL (`/projects`), a name on the terrain when zoomed out, a place on the map, and the "You are in" indicator. Mini-game zones are places too, without a URL. Other zones (unnamed areas) stay out of all of these.
+- The zone's focus direction (zone inspector) is the side the camera looks from when it flies there.
+- The map image is drawn by `pnpm assets` from the saved map; after editing a map, run `pnpm assets` (or restart `pnpm dev`) to redraw it.

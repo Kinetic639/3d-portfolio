@@ -1,7 +1,13 @@
 import Link from "next/link";
 import ContentArticle from "@/components/content/ContentArticle";
+import SectionArticle from "@/components/content/SectionArticle";
+import PortfolioMap from "@/components/content/PortfolioMap";
+import type { MinimapData } from "@/lib/minimap/minimap";
+import { readMinimapData } from "@/lib/minimap/minimap-store";
+import { readMapIndex } from "@/lib/maps/map-store";
 import { PORTFOLIO_CONTENT } from "@/content/portfolio";
-import { CONTENT_SECTIONS, getContentPath, listContentByKind, type ContentItem } from "@/lib/content/content";
+import { CONTENT_SECTIONS, getContentPath, listContentByKind, type ContentItem, type ContentSection } from "@/lib/content/content";
+import { getSectionPath } from "@/lib/content/places";
 import styles from "./LandingPage.module.css";
 
 /**
@@ -9,28 +15,31 @@ import styles from "./LandingPage.module.css";
  * its own: no JavaScript, WebGL or waiting is needed to read it. The 3D world
  * loads behind it and is offered once it is ready.
  *
- * On an item's own URL the item is shown first, as the page's main heading,
- * followed by the rest of the portfolio.
+ * On an item's or a section's own URL that item or section is shown first,
+ * as the page's main heading, followed by the rest of the portfolio.
  */
-export default function LandingPage({ featured }: { featured?: ContentItem }) {
+export default function LandingPage({ featured, featuredSection, minimap }: { featured?: ContentItem; featuredSection?: ContentSection; minimap?: MinimapData | null }) {
   const { owner } = PORTFOLIO_CONTENT;
+  // The default map's, unless a page names another (a map preview). Read at build time.
+  const map = minimap === undefined ? readMinimapData(readMapIndex().defaultMapId) : minimap;
+  const inner = featured !== undefined || featuredSection !== undefined;
 
   return (
     <div id="landing" className={styles.page}>
       <a className={styles.skip} href="#content">Skip to content</a>
 
       <header className={styles.header}>
-        {featured ? (
+        {inner ? (
           <p className={styles.brand}><Link href="/">{owner.name}</Link></p>
         ) : (
           <h1 className={styles.name}>{owner.name}</h1>
         )}
         <p className={styles.role}>{owner.role}</p>
-        {featured ? null : <p className={styles.tagline}>{owner.tagline}</p>}
+        {inner ? null : <p className={styles.tagline}>{owner.tagline}</p>}
         <nav aria-label="Sections">
           <ul className={styles.nav}>
             {CONTENT_SECTIONS.map((section) => (
-              <li key={section.kind}><a href={`${featured ? "/" : ""}#${section.segment}`}>{section.label}</a></li>
+              <li key={section.kind}><a href={`${inner ? "/" : ""}#${section.segment}`}>{section.label}</a></li>
             ))}
           </ul>
         </nav>
@@ -42,13 +51,28 @@ export default function LandingPage({ featured }: { featured?: ContentItem }) {
             <ContentArticle item={featured} headingLevel={1} />
           </section>
         ) : null}
+        {featuredSection ? (
+          <section className={styles.featured} aria-label={featuredSection.label}>
+            <SectionArticle section={featuredSection} items={listContentByKind(PORTFOLIO_CONTENT, featuredSection.kind)} headingLevel={1} />
+          </section>
+        ) : null}
+
+        {map ? (
+          <section id="map" className={styles.section} aria-labelledby="map-heading">
+            <h2 id="map-heading" className={styles.sectionTitle}>Map</h2>
+            <p className={styles.mapIntro}>Every zone of the 3D world is a section of this site. Choose one to read it here, or enter the world from its page to go there.</p>
+            <PortfolioMap data={map} current={featuredSection ? map.zones.find((zone) => zone.contentReference?.contentType === featuredSection.kind)?.id : null} />
+          </section>
+        ) : null}
 
         {CONTENT_SECTIONS.map((section) => {
           const items = listContentByKind(PORTFOLIO_CONTENT, section.kind);
           if (items.length === 0) return null;
           return (
             <section key={section.kind} id={section.segment} className={styles.section} aria-labelledby={`${section.segment}-heading`}>
-              <h2 id={`${section.segment}-heading`} className={styles.sectionTitle}>{section.label}</h2>
+              <h2 id={`${section.segment}-heading`} className={styles.sectionTitle}>
+                {section.singleton ? section.label : <Link href={getSectionPath(section)}>{section.label}</Link>}
+              </h2>
               <ul className={section.singleton ? styles.single : styles.grid}>
                 {items.map((item) => (
                   <li key={item.id} className={styles.card}>

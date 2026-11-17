@@ -70,7 +70,9 @@ test("drag pans, wheel zooms and both stay inside limits", async ({ page }) => {
   await settle(page);
   const zoomedOut = await view(page);
   expect(zoomedOut.distance).toBeGreaterThan(start.distance);
-  expect(zoomedOut.distance).toBeLessThanOrEqual(98);
+  expect(zoomedOut.distance).toBeLessThanOrEqual(90);
+  // Zoomed all the way out, the camera looks down on the map.
+  expect(zoomedOut.pitchDegrees).toBeCloseTo(74, 1);
 
   for (let pass = 0; pass < 12; pass += 1) {
     await page.mouse.move(200, 200);
@@ -85,11 +87,12 @@ test("drag pans, wheel zooms and both stay inside limits", async ({ page }) => {
   expect(Math.abs(edge.z)).toBeLessThanOrEqual(32);
 });
 
-test("the camera turns and tilts within its limits", async ({ page }) => {
+test("the camera turns, and its tilt follows the zoom curve", async ({ page }) => {
   await openWorld(page);
   const start = await view(page);
-  // As in the original: a low angle, looking across the terrain.
-  expect(start.pitchDegrees).toBeCloseTo(14.4, 1);
+  // Rests close and low, looking across the terrain as the original did.
+  expect(start.pitchDegrees).toBeCloseTo(20, 1);
+  expect(start.distance).toBeCloseTo(24, 1);
   expect(start.yawDegrees).toBeCloseTo(45, 1);
 
   const turn = async (fromX: number, fromY: number, toX: number, toY: number) => {
@@ -110,11 +113,21 @@ test("the camera turns and tilts within its limits", async ({ page }) => {
   expect(turned.x).toBeCloseTo(start.x, 3);
   expect(turned.z).toBeCloseTo(start.z, 3);
 
+  // Dragging up or down does not tilt: the tilt belongs to the zoom.
   await turn(640, 100, 640, 700);
-  expect((await view(page)).pitchDegrees).toBeCloseTo(70, 1);
-  await turn(640, 700, 640, 20);
-  await turn(640, 700, 640, 20);
-  expect((await view(page)).pitchDegrees).toBeCloseTo(8, 1);
+  expect((await view(page)).pitchDegrees).toBeCloseTo(start.pitchDegrees, 1);
+  // Zooming in lowers the camera to the curve's near end, zooming out lifts it.
+  await page.mouse.move(640, 360);
+  for (let step = 0; step < 20; step += 1) await page.mouse.wheel(0, -400);
+  await settle(page);
+  const near = await view(page);
+  expect(near.distance).toBeCloseTo(14, 1);
+  expect(near.pitchDegrees).toBeCloseTo(12, 1);
+  await page.mouse.wheel(0, 400);
+  await settle(page);
+  const stepOut = await view(page);
+  expect(stepOut.distance).toBeGreaterThan(near.distance);
+  expect(stepOut.pitchDegrees).toBeGreaterThan(near.pitchDegrees);
 
   // A right drag without Ctrl pans, and a right click opens nothing.
   await page.mouse.click(640, 360, { button: "right" });
@@ -222,7 +235,7 @@ test("content can be opened from the menu with the keyboard alone", async ({ pag
   await openWorld(page);
   await page.getByText("Menu", { exact: true }).focus();
   await page.keyboard.press("Enter");
-  const link = page.getByRole("link", { name: "Contact" });
+  const link = page.getByRole("navigation", { name: "Portfolio sections" }).getByRole("link", { name: "Contact" });
   await link.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Contact" })).toBeVisible();
@@ -300,8 +313,13 @@ test("the original's view buttons: the angle lock keeps the tilt, Reset view ret
   await page.getByRole("button", { name: "Lock camera angle" }).click();
   await expect(page.getByRole("button", { name: "Unlock camera angle" })).toHaveAttribute("aria-pressed", "true");
   await drag(640, 200, 840, 600, true);
+  // Locked, zooming keeps the tilt (it leaves the zoom curve).
+  await page.mouse.move(640, 360);
+  for (let step = 0; step < 4; step += 1) await page.mouse.wheel(0, 400);
+  await settle(page);
   const locked = await view(page);
   expect(locked.pitchDegrees).toBeCloseTo(start.pitchDegrees, 1);
+  expect(locked.distance).toBeGreaterThan(start.distance + 5);
   expect(Math.abs(locked.yawDegrees - start.yawDegrees)).toBeGreaterThan(10);
 
   await drag(640, 360, 900, 500, false);
@@ -313,6 +331,101 @@ test("the original's view buttons: the angle lock keeps the tilt, Reset view ret
   expect(reset.z).toBeCloseTo(start.z, 1);
   expect(reset.yawDegrees).toBeCloseTo(start.yawDegrees, 0);
   expect(reset.distance).toBeCloseTo(start.distance, 0);
+  expect(reset.pitchDegrees).toBeCloseTo(start.pitchDegrees, 0);
   // Reset lifts the lock.
   await expect(page.getByRole("button", { name: "Lock camera angle" })).toHaveAttribute("aria-pressed", "false");
+});
+
+type PlacesProbe = {
+  places: Map<number, { info: { id: string; label: string }; area: { minX: number; maxX: number; minZ: number; maxZ: number } }>;
+  zoneLabels: { group: { children: Array<{ userData: { zoneId: string }; position: { clone: () => { project: (camera: unknown) => { x: number; y: number } } } }> } };
+  rig: { camera: unknown };
+};
+
+/** Bounds of a zone the engine treats as a place, by its label. */
+const zoneArea = (page: import("@playwright/test").Page, label: string) => page.evaluate((name) => {
+  const engine = window.__worldEngine as unknown as PlacesProbe;
+  return [...engine.places.values()].find((place) => place.info.label === name)!.area;
+}, label);
+
+test("a section's URL is its zone: the camera flies to frame it and the panel lists the section", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openWorld(page);
+  await page.getByText("Menu").click();
+  await page.getByRole("navigation", { name: "Portfolio sections" }).getByRole("link", { name: "Projects", exact: true }).click();
+  await expect(page).toHaveURL(/\/projects$/);
+  const panel = page.getByRole("dialog");
+  await expect(panel.getByRole("heading", { name: "Projects" })).toBeVisible();
+  await expect(panel.getByRole("link", { name: "Project Placeholder One" })).toBeVisible();
+  await settle(page);
+  const area = await zoneArea(page, "Projects");
+  const framed = await view(page);
+  // The target sits beside the zone's middle (shifted for the panel), and the camera is on the zoom curve.
+  expect(Math.hypot(framed.x - (area.minX + area.maxX) / 2, framed.z - (area.minZ + area.maxZ) / 2)).toBeLessThan(10);
+  expect(framed.distance).toBeGreaterThanOrEqual(14);
+
+  // An item from the section's list opens in the same panel, at its own URL.
+  await panel.getByRole("link", { name: "Project Placeholder One" }).click();
+  await expect(page).toHaveURL(new RegExp(`${PROJECT_PATH}$`));
+  await page.goBack();
+  await expect(page).toHaveURL(/\/projects$/);
+
+  await page.getByRole("dialog").getByRole("button", { name: /close/i }).click();
+  await expect(page).toHaveURL(/\/$/);
+  // The zone the camera is over is named, and naming it is the way back to its section.
+  await expect(page.getByText("You are in")).toBeVisible();
+  await page.getByRole("button", { name: "Projects" }).click();
+  await expect(page).toHaveURL(/\/projects$/);
+  expect(errors).toEqual([]);
+});
+
+test("zone names show when zoomed out, and a click on one goes to its section", async ({ page }) => {
+  await openWorld(page);
+  await page.mouse.move(640, 360);
+  const labelAt = () => page.evaluate(() => {
+    const engine = window.__worldEngine as unknown as PlacesProbe & { zoneLabels: { visible: boolean } };
+    const sprite = engine.zoneLabels.group.children.find((child) => child.userData.zoneId === "zone-4")!;
+    const ndc = sprite.position.clone().project(engine.rig.camera);
+    const rect = document.querySelector("canvas")!.getBoundingClientRect();
+    return { visible: engine.zoneLabels.visible, x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
+  });
+  // Close up the names are hidden.
+  expect((await labelAt()).visible).toBe(false);
+  for (let step = 0; step < 6; step += 1) await page.mouse.wheel(0, 400);
+  await settle(page);
+  const label = await labelAt();
+  expect(label.visible).toBe(true);
+  await page.mouse.move(label.x, label.y);
+  await expect(page.getByText("Click to open")).toBeVisible();
+  await page.mouse.click(label.x, label.y);
+  await expect(page).toHaveURL(/\/experience$/);
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Experience" })).toBeVisible();
+});
+
+test("the corner map flies to a zone, opens items, and shows where the camera is", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openWorld(page);
+  const corner = page.getByRole("group", { name: /Map of the world/ });
+  await expect(corner).toBeVisible();
+  const marker = () => page.locator("[class*=minimap] g[class*=marker]").getAttribute("transform");
+  await expect.poll(marker).not.toBeNull();
+  const before = await marker();
+
+  await page.locator('[class*=minimap] a[tabindex="-1"][href="/skills"]').click();
+  await expect(page).toHaveURL(/\/skills$/);
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Skills" })).toBeVisible();
+  await settle(page);
+  const area = await zoneArea(page, "Skills");
+  const framed = await view(page);
+  expect(Math.hypot(framed.x - (area.minX + area.maxX) / 2, framed.z - (area.minZ + area.maxZ) / 2)).toBeLessThan(10);
+  await page.getByRole("dialog").getByRole("button", { name: /close/i }).click();
+  // The marker followed the camera.
+  await expect.poll(marker).not.toBe(before);
+
+  await corner.getByRole("link", { name: "Project Placeholder One" }).click();
+  await expect(page).toHaveURL(new RegExp(`${PROJECT_PATH}$`));
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Project Placeholder One" })).toBeVisible();
+  // While a panel is open the corner map steps aside.
+  await expect(corner).toHaveCount(0);
+  expect(errors).toEqual([]);
 });

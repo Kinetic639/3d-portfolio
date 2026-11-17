@@ -10,13 +10,13 @@ type MineProbe = {
 };
 
 /** Brings the mine's icon into the middle of the view. */
-async function lookAtMine(page: Page) {
-  await page.evaluate((id) => {
+async function lookAtMine(page: Page, distance = 40) {
+  await page.evaluate(([id, at]) => {
     const engine = (window.__worldEngine as unknown as MineProbe);
     const item = engine.interaction.items.find((candidate) => candidate.id === id)!;
-    engine.rig.lookAt(item.focus.x, item.focus.z, 40, true);
+    engine.rig.lookAt(item.focus.x, item.focus.z, at, true);
     engine.invalidate();
-  }, MINE);
+  }, [MINE, distance] as const);
   await settle(page);
 }
 
@@ -81,8 +81,8 @@ test("leaving the mine with its button restores the view", async ({ page }) => {
   await expect(hud).toBeVisible();
   await settle(page);
   const playing = await page.evaluate(() => (window.__worldEngine as unknown as { rig: { getView: () => { pitchDegrees: number } } }).rig.getView());
-  // The game looks down into the zone, more steeply than visitors normally do.
-  expect(playing.pitchDegrees).toBeGreaterThan(before.pitchDegrees + 10);
+  // The game's view is on the zoom curve and looks down into the zone, more steeply than the visitor's resting view (20 degrees).
+  expect(playing.pitchDegrees).toBeGreaterThan(30);
 
   await hud.getByRole("button", { name: /leave/i }).click();
   await expect(hud).toHaveCount(0);
