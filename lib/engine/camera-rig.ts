@@ -36,22 +36,72 @@ export type CameraRigOptions = {
   onUserPan?: () => void;
   /** Called whenever the rig needs another frame. */
   onChange: () => void;
+  /**
+   * Ties the tilt to the distance: zooming in lowers the camera towards the
+   * ground, zooming out lifts it towards a top-down view. Pitch is then not
+   * changed by dragging. Null: tilt and distance are independent.
+   */
+  zoomCurve?: ZoomCurve | null;
+  /** On narrow screens the whole curve moves out so at least this many units stay visible across. */
+  minVisibleWidth?: number;
 };
 
+/** Points of a zoom curve, from nearest to farthest. */
+export type ZoomCurve = ReadonlyArray<{ distance: number; pitchDegrees: number }>;
+
 /**
- * The visitor's camera as it was in the original: looking across the terrain
- * from a low angle, close, free to turn. (Original: camera at 16, 8.6, 16
- * looking at 0, 2.8, 0; polar angle limited to 20-82 degrees; distance 22-98.)
+ * Pitch at a distance on a curve: a monotone cubic through the points, in
+ * log distance (zoom steps feel even), flat beyond the ends.
  */
+export function pitchOnCurve(curve: ZoomCurve, distance: number) {
+  const xs = curve.map((point) => Math.log(point.distance));
+  const ys = curve.map((point) => point.pitchDegrees);
+  const x = Math.log(Math.max(distance, 1e-6));
+  if (x <= xs[0]) return ys[0];
+  if (x >= xs[xs.length - 1]) return ys[ys.length - 1];
+  const slopes = xs.slice(1).map((value, index) => (ys[index + 1] - ys[index]) / (value - xs[index]));
+  // Fritsch-Carlson tangents: no overshoot, so the pitch never dips while zooming out.
+  const tangents = xs.map((_, index) => {
+    if (index === 0) return slopes[0];
+    if (index === xs.length - 1) return slopes[slopes.length - 1];
+    const a = slopes[index - 1];
+    const b = slopes[index];
+    return a * b <= 0 ? 0 : (2 * a * b) / (a + b);
+  });
+  let segment = 0;
+  while (x > xs[segment + 1]) segment += 1;
+  const h = xs[segment + 1] - xs[segment];
+  const s = (x - xs[segment]) / h;
+  const s2 = s * s;
+  const s3 = s2 * s;
+  return (2 * s3 - 3 * s2 + 1) * ys[segment] + (s3 - 2 * s2 + s) * h * tangents[segment] + (-2 * s3 + 3 * s2) * ys[segment + 1] + (s3 - s2) * h * tangents[segment + 1];
+}
+
+/**
+ * The visitor's camera: zooming in lowers it towards the ground, zooming out
+ * lifts it towards a map-like view from above. It rests close and fairly low,
+ * near the original's look. (Original: camera at 16, 8.6, 16 looking at
+ * 0, 2.8, 0; distance 22-98.)
+ */
+export const VISITOR_ZOOM_CURVE: ZoomCurve = [
+  { distance: 14, pitchDegrees: 12 },
+  { distance: 24, pitchDegrees: 20 },
+  { distance: 45, pitchDegrees: 44 },
+  { distance: 90, pitchDegrees: 74 },
+];
+
 export const VISITOR_CAMERA = {
-  pitchDegrees: 14.4,
+  pitchDegrees: 20,
   yawDegrees: 45,
   minPitchDegrees: 8,
-  maxPitchDegrees: 70,
+  maxPitchDegrees: 80,
   targetHeight: 2.8,
-  initialDistance: 23.4,
-  minDistance: 22,
-  maxDistance: 98,
+  initialDistance: 24,
+  minDistance: 14,
+  maxDistance: 90,
+  zoomCurve: VISITOR_ZOOM_CURVE,
+  /** Phones in portrait keep about this many metres in view across: the whole curve moves out. */
+  minVisibleWidth: 16,
   panSpeed: 0.4,
   panButtons: [0, 2],
 } satisfies Partial<CameraRigOptions>;
@@ -82,7 +132,10 @@ const KEY_PAN = new Map<string, [number, number]>([
 export class CameraRig {
   readonly camera: THREE.PerspectiveCamera;
   private readonly element: HTMLElement;
-  private readonly options: Required<Omit<CameraRigOptions, "onTap" | "onUserPan">> & Pick<CameraRigOptions, "onTap" | "onUserPan">;
+  private readonly options: Required<Omit<CameraRigOptions, "onTap" | "onUserPan" | "zoomCurve" | "minVisibleWidth">> & Pick<CameraRigOptions, "onTap" | "onUserPan" | "zoomCurve" | "minVisibleWidth">;
+  /** Multiplies the curve's distances so a narrow screen still sees minVisibleWidth across. */
+  private curveScale = 1;
+  private curveEnabled = true;
   private readonly direction = new THREE.Vector3();
   private readonly target = new THREE.Vector3();
   private readonly goalTarget = new THREE.Vector3();
@@ -122,6 +175,8 @@ export class CameraRig {
       onTap: options.onTap,
       onUserPan: options.onUserPan,
       onChange: options.onChange,
+      zoomCurve: options.zoomCurve ?? null,
+      minVisibleWidth: options.minVisibleWidth,
     };
     this.camera = new THREE.PerspectiveCamera(this.options.fov, 1, 0.5, 600);
     this.pitch = this.goalPitch = THREE.MathUtils.degToRad(this.options.pitchDegrees);
@@ -158,6 +213,43 @@ export class CameraRig {
   setAspect(aspect: number) {
     this.camera.aspect = aspect;
     this.camera.updateProjectionMatrix();
+    const curve = this.options.zoomCurve;
+    const width = this.options.minVisibleWidth;
+    if (curve && width) {
+      // Width seen at the resting distance, and how much further to go to see `width`.
+      const rest = this.options.initialDistance;
+      const seen = 2 * rest * Math.tan(THREE.MathUtils.degToRad(this.options.fov) / 2) * aspect;
+      const scale = Math.max(1, width / seen);
+      if (Math.abs(scale - this.curveScale) > 1e-6) {
+        this.goalDistance *= scale / this.curveScale;
+        this.distance *= scale / this.curveScale;
+        this.curveScale = scale;
+        this.clampGoal();
+        this.apply();
+      }
+    }
+  }
+
+  /** Whether the tilt follows the zoom curve. Off holds the current tilt (the visitor's angle lock). */
+  setCurveEnabled(enabled: boolean) {
+    this.curveEnabled = enabled;
+    this.clampGoal();
+    this.options.onChange();
+  }
+
+  /** The curve's distances on this screen (scaled for narrow screens). */
+  curveDistance(distance: number) {
+    return distance * this.curveScale;
+  }
+
+  /** Pitch the curve gives at a distance on this screen, or null without a curve. */
+  pitchForDistance(distance: number) {
+    const curve = this.options.zoomCurve;
+    return curve ? pitchOnCurve(curve, distance / this.curveScale) : null;
+  }
+
+  private get followsCurve() {
+    return Boolean(this.options.zoomCurve) && this.curveEnabled;
   }
 
   /** Moves the goal. With `immediate`, the camera jumps there without easing. */
@@ -301,6 +393,13 @@ export class CameraRig {
   }
 
   private clampGoal() {
+    const curve = this.options.zoomCurve;
+    if (curve) {
+      const near = curve[0].distance * this.curveScale;
+      const far = curve[curve.length - 1].distance * this.curveScale;
+      this.goalDistance = THREE.MathUtils.clamp(this.goalDistance, near, far);
+      if (this.curveEnabled) this.goalPitch = THREE.MathUtils.degToRad(pitchOnCurve(curve, this.goalDistance / this.curveScale));
+    }
     this.goalPitch = THREE.MathUtils.clamp(
       this.goalPitch,
       THREE.MathUtils.degToRad(this.options.minPitchDegrees),
@@ -309,7 +408,7 @@ export class CameraRig {
     const { minX, maxX, minZ, maxZ } = this.bounds;
     this.goalTarget.x = THREE.MathUtils.clamp(this.goalTarget.x, minX, maxX);
     this.goalTarget.z = THREE.MathUtils.clamp(this.goalTarget.z, minZ, maxZ);
-    this.goalDistance = THREE.MathUtils.clamp(this.goalDistance, this.options.minDistance, this.options.maxDistance);
+    if (!curve) this.goalDistance = THREE.MathUtils.clamp(this.goalDistance, this.options.minDistance, this.options.maxDistance);
   }
 
   /** World units covered by one CSS pixel at the target's depth. */
@@ -331,7 +430,8 @@ export class CameraRig {
     if (!this.options.rotate) return;
     const perPixel = (2 * Math.PI * ROTATE_SPEED * this.options.rotateSpeed) / (this.element.clientHeight || 1);
     this.goalYaw -= dx * perPixel;
-    this.goalPitch += dy * perPixel;
+    // With a zoom curve the tilt belongs to the zoom; dragging only turns.
+    if (!this.followsCurve) this.goalPitch += dy * perPixel;
     this.clampGoal();
     this.options.onChange();
   }

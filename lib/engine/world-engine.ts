@@ -94,9 +94,13 @@ export type WarmUpReport = {
 const PIXEL_RATIO_CAP: Record<QualityTier, number> = { low: 1, medium: 1.25, high: 1.5 };
 const LOWER_QUALITY: Record<QualityTier, QualityTier | null> = { high: "medium", medium: "low", low: null };
 const FOCUS_DISTANCE = 38;
-/** How close the camera comes to a mini-game zone, and how steeply it looks down on it, so nothing around the zone stands in front of the blocks. */
-const MINIGAME_DISTANCE = 26;
-const MINIGAME_PITCH = 52;
+/**
+ * A game's view: a step out along the zoom curve, so the camera looks down
+ * on the zone and nothing around it stands in front of the blocks. The pitch
+ * applies only with the angle lock on (off the curve).
+ */
+const MINIGAME_DISTANCE = 38;
+const MINIGAME_PITCH = 44;
 const LEAVE_MS = 450;
 /** The box at the bottom centre of the canvas where the loader is drawn on the landing page, in CSS pixels. */
 export const LOADER_VIEWPORT = { width: 260, height: 200 } as const;
@@ -409,12 +413,20 @@ export class WorldEngine {
     const platformTop = count > 0 ? top : 0;
     this.beacon.place(platformX, platformTop, platformZ);
 
-    // The path ends where the visitor's camera rests at the spawn.
+    // The path ends where the visitor's camera rests at the spawn, and comes
+    // down the visitor's own zoom curve (scaled for this screen).
     this.rig.setOrientation(VISITOR_CAMERA.yawDegrees, VISITOR_CAMERA.pitchDegrees, true);
-    this.rig.lookAt(this.spawn.x, this.spawn.z, VISITOR_CAMERA.initialDistance, true);
-    const finalPosition = this.rig.camera.position.clone();
+    this.rig.lookAt(this.spawn.x, this.spawn.z, this.rig.curveDistance(VISITOR_CAMERA.initialDistance), true);
+    const rest = this.rig.getGoal();
     const finalTarget = new THREE.Vector3(this.spawn.x, VISITOR_CAMERA.targetHeight, this.spawn.z);
-    this.entryPlan = { platformX, platformZ, platformTop, finalPosition, finalTarget };
+    const curve = VISITOR_CAMERA.zoomCurve;
+    this.entryPlan = {
+      platformX, platformZ, platformTop, finalTarget,
+      finalYaw: THREE.MathUtils.degToRad(rest.yawDegrees),
+      finalDistance: rest.distance,
+      farDistance: this.rig.curveDistance(curve[curve.length - 1].distance),
+      pitchAt: (distance) => THREE.MathUtils.degToRad(this.rig.pitchForDistance(distance) ?? rest.pitchDegrees),
+    };
     loaderView(this.entryPlan, this.loaderCamera.position, this.entryTarget);
     this.loaderCamera.lookAt(this.entryTarget);
     this.loaderCamera.updateMatrixWorld();
@@ -433,7 +445,7 @@ export class WorldEngine {
     this.entities?.setPopTime(-1);
     if (this.interaction) this.interaction.group.visible = false;
     this.rig.setOrientation(VISITOR_CAMERA.yawDegrees, VISITOR_CAMERA.pitchDegrees, true);
-    this.rig.lookAt(this.spawn.x, this.spawn.z, VISITOR_CAMERA.initialDistance, true);
+    this.rig.lookAt(this.spawn.x, this.spawn.z, this.rig.curveDistance(VISITOR_CAMERA.initialDistance), true);
     if (this.loaderReady) this.startLanding();
   }
 
@@ -822,7 +834,7 @@ export class WorldEngine {
     // Remember where the visitor was only for the first focus in a row.
     this.viewBeforeFocus ??= this.rig.getGoal();
     this.interaction?.setFocused(item.id);
-    this.rig.focusOn(item.focus.x, item.focus.z, Math.min(this.rig.getGoal().distance, FOCUS_DISTANCE), inset);
+    this.rig.focusOn(item.focus.x, item.focus.z, Math.min(this.rig.getGoal().distance, this.rig.curveDistance(FOCUS_DISTANCE)), inset);
   }
 
   private enter(command: Extract<WorldCommand, { type: "enter" }>) {
@@ -955,8 +967,9 @@ export class WorldEngine {
     this.viewBeforeMinigame = this.rig.getGoal();
     this.interaction?.setHovered(null);
     this.interaction?.setFocused(item.id);
+    // On the curve the distance sets the tilt; with the angle locked the tilt stays.
     this.rig.setOrientation(undefined, MINIGAME_PITCH);
-    this.rig.focusOn(item.focus.x, item.focus.z, MINIGAME_DISTANCE);
+    this.rig.focusOn(item.focus.x, item.focus.z, this.rig.curveDistance(MINIGAME_DISTANCE));
     this.bridge.set({ minigame: hud, hovered: null });
     this.schedulePick();
     this.invalidate();
@@ -1104,9 +1117,10 @@ export class WorldEngine {
     return true;
   }
 
-  /** The original's angle lock: keeps the current tilt; turning and zooming stay free. */
+  /** The original's angle lock: keeps the current tilt (off the zoom curve); turning and zooming stay free. */
   private setAngleLock(locked: boolean) {
     const pitch = this.rig.getGoal().pitchDegrees;
+    this.rig.setCurveEnabled(!locked);
     this.rig.configure(locked
       ? { minPitchDegrees: pitch, maxPitchDegrees: pitch }
       : { minPitchDegrees: VISITOR_CAMERA.minPitchDegrees, maxPitchDegrees: VISITOR_CAMERA.maxPitchDegrees });
@@ -1209,6 +1223,12 @@ export class WorldEngine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, PIXEL_RATIO_CAP[quality]));
     this.renderer.setSize(width, height, false);
     this.rig.setAspect(width / height);
+    // A turned phone moves the zoom curve; an entry not yet started follows it.
+    if (this.entryPlan && !this.entry) {
+      const curve = VISITOR_CAMERA.zoomCurve;
+      this.entryPlan.finalDistance = this.rig.getGoal().distance;
+      this.entryPlan.farDistance = this.rig.curveDistance(curve[curve.length - 1].distance);
+    }
     this.loaderCamera.aspect = width / height;
     this.loaderCamera.updateProjectionMatrix();
     this.syncOutlineScale();

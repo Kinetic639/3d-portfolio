@@ -70,7 +70,9 @@ test("drag pans, wheel zooms and both stay inside limits", async ({ page }) => {
   await settle(page);
   const zoomedOut = await view(page);
   expect(zoomedOut.distance).toBeGreaterThan(start.distance);
-  expect(zoomedOut.distance).toBeLessThanOrEqual(98);
+  expect(zoomedOut.distance).toBeLessThanOrEqual(90);
+  // Zoomed all the way out, the camera looks down on the map.
+  expect(zoomedOut.pitchDegrees).toBeCloseTo(74, 1);
 
   for (let pass = 0; pass < 12; pass += 1) {
     await page.mouse.move(200, 200);
@@ -85,11 +87,12 @@ test("drag pans, wheel zooms and both stay inside limits", async ({ page }) => {
   expect(Math.abs(edge.z)).toBeLessThanOrEqual(32);
 });
 
-test("the camera turns and tilts within its limits", async ({ page }) => {
+test("the camera turns, and its tilt follows the zoom curve", async ({ page }) => {
   await openWorld(page);
   const start = await view(page);
-  // As in the original: a low angle, looking across the terrain.
-  expect(start.pitchDegrees).toBeCloseTo(14.4, 1);
+  // Rests close and low, looking across the terrain as the original did.
+  expect(start.pitchDegrees).toBeCloseTo(20, 1);
+  expect(start.distance).toBeCloseTo(24, 1);
   expect(start.yawDegrees).toBeCloseTo(45, 1);
 
   const turn = async (fromX: number, fromY: number, toX: number, toY: number) => {
@@ -110,11 +113,21 @@ test("the camera turns and tilts within its limits", async ({ page }) => {
   expect(turned.x).toBeCloseTo(start.x, 3);
   expect(turned.z).toBeCloseTo(start.z, 3);
 
+  // Dragging up or down does not tilt: the tilt belongs to the zoom.
   await turn(640, 100, 640, 700);
-  expect((await view(page)).pitchDegrees).toBeCloseTo(70, 1);
-  await turn(640, 700, 640, 20);
-  await turn(640, 700, 640, 20);
-  expect((await view(page)).pitchDegrees).toBeCloseTo(8, 1);
+  expect((await view(page)).pitchDegrees).toBeCloseTo(start.pitchDegrees, 1);
+  // Zooming in lowers the camera to the curve's near end, zooming out lifts it.
+  await page.mouse.move(640, 360);
+  for (let step = 0; step < 20; step += 1) await page.mouse.wheel(0, -400);
+  await settle(page);
+  const near = await view(page);
+  expect(near.distance).toBeCloseTo(14, 1);
+  expect(near.pitchDegrees).toBeCloseTo(12, 1);
+  await page.mouse.wheel(0, 400);
+  await settle(page);
+  const stepOut = await view(page);
+  expect(stepOut.distance).toBeGreaterThan(near.distance);
+  expect(stepOut.pitchDegrees).toBeGreaterThan(near.pitchDegrees);
 
   // A right drag without Ctrl pans, and a right click opens nothing.
   await page.mouse.click(640, 360, { button: "right" });
@@ -300,8 +313,13 @@ test("the original's view buttons: the angle lock keeps the tilt, Reset view ret
   await page.getByRole("button", { name: "Lock camera angle" }).click();
   await expect(page.getByRole("button", { name: "Unlock camera angle" })).toHaveAttribute("aria-pressed", "true");
   await drag(640, 200, 840, 600, true);
+  // Locked, zooming keeps the tilt (it leaves the zoom curve).
+  await page.mouse.move(640, 360);
+  for (let step = 0; step < 4; step += 1) await page.mouse.wheel(0, 400);
+  await settle(page);
   const locked = await view(page);
   expect(locked.pitchDegrees).toBeCloseTo(start.pitchDegrees, 1);
+  expect(locked.distance).toBeGreaterThan(start.distance + 5);
   expect(Math.abs(locked.yawDegrees - start.yawDegrees)).toBeGreaterThan(10);
 
   await drag(640, 360, 900, 500, false);
@@ -313,6 +331,7 @@ test("the original's view buttons: the angle lock keeps the tilt, Reset view ret
   expect(reset.z).toBeCloseTo(start.z, 1);
   expect(reset.yawDegrees).toBeCloseTo(start.yawDegrees, 0);
   expect(reset.distance).toBeCloseTo(start.distance, 0);
+  expect(reset.pitchDegrees).toBeCloseTo(start.pitchDegrees, 0);
   // Reset lifts the lock.
   await expect(page.getByRole("button", { name: "Lock camera angle" })).toHaveAttribute("aria-pressed", "false");
 });
