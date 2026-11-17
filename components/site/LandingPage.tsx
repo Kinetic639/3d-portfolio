@@ -2,6 +2,7 @@ import Link from "next/link";
 import ContentArticle from "@/components/content/ContentArticle";
 import SectionArticle from "@/components/content/SectionArticle";
 import PortfolioMap from "@/components/content/PortfolioMap";
+import ThemeToggle from "./ThemeToggle";
 import type { MinimapData } from "@/lib/minimap/minimap";
 import { readMinimapData } from "@/lib/minimap/minimap-store";
 import { readMapIndex } from "@/lib/maps/map-store";
@@ -29,6 +30,7 @@ export default function LandingPage({ featured, featuredSection, minimap }: { fe
       <a className={styles.skip} href="#content">Skip to content</a>
 
       <header className={styles.header}>
+        <ThemeToggle className={styles.theme} />
         {inner ? (
           <p className={styles.brand}><Link href="/">{owner.name}</Link></p>
         ) : (

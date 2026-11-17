@@ -209,6 +209,23 @@ test("the landing page is navigable by keyboard", async ({ page }) => {
   await waitForPhase(page, "world");
 });
 
+test("day is the default theme; night is a switch away and is remembered", async ({ page }) => {
+  await page.goto("/");
+  const toggle = page.getByRole("switch", { name: "Night theme" });
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  expect(await page.evaluate(() => document.documentElement.dataset.theme ?? "light")).toBe("light");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
+  // The page's colours follow (they ease over 2.5 s).
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor), { timeout: 5000 }).toBe("rgb(15, 21, 25)");
+  // A returning visitor gets night from the first paint, before any script of the app runs.
+  await page.reload();
+  expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
+  await page.getByRole("switch", { name: "Night theme" }).click();
+  expect(await page.evaluate(() => document.documentElement.dataset.theme ?? "light")).toBe("light");
+});
+
 test("each list section has its own page, which is also its zone's address", async ({ page }) => {
   const response = await page.goto("/projects");
   expect(response?.status()).toBe(200);

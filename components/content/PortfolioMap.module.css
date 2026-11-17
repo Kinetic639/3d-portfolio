@@ -60,6 +60,14 @@
   pointer-events: none;
 }
 
+:global(html[data-theme="dark"]) .svg image {
+  filter: brightness(0.5) saturate(0.75) hue-rotate(12deg);
+}
+
+:global(html[data-theme-switching]) .svg image {
+  transition: filter 2s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
 .labelLink {
   cursor: pointer;
 }

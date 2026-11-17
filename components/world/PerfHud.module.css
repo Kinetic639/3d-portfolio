@@ -14,11 +14,11 @@
 
 .badge,
 .details {
-  border: 1px solid rgba(24, 34, 31, 0.16);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  color: #15201c;
-  background: rgba(247, 249, 246, 0.86);
-  box-shadow: 0 12px 32px rgba(24, 34, 31, 0.15);
+  color: var(--foreground);
+  background: var(--panel);
+  box-shadow: var(--shadow-sm);
 }
 
 .badge {
@@ -32,7 +32,7 @@
 
 .badge strong {
   min-width: 2.2em;
-  color: #24785e;
+  color: var(--accent);
   font-size: 15px;
   text-align: left;
   font-variant-numeric: tabular-nums;
@@ -62,7 +62,7 @@
 }
 
 .details dt {
-  color: #56635e;
+  color: var(--muted);
 }
 
 .details dd {

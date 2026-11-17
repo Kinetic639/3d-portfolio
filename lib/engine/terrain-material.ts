@@ -21,6 +21,10 @@ export type TerrainUniforms = {
   uTime: { value: number };
   /** 0-1: how strongly the loader platform bobs. */
   uLoaderMotion: { value: number };
+  /** Day and night (day-night.ts): multiplies the terrain's light; white by day. */
+  uLightTint: { value: THREE.Color };
+  /** Added to every pixel; the original's warm lift by day. */
+  uLightGlow: { value: THREE.Color };
 };
 
 /**
@@ -48,7 +52,13 @@ export function createEditorTerrainUniforms(): EditorTerrainUniforms {
 export const REVEAL_COMPLETE = 1000;
 
 export function createTerrainUniforms(): TerrainUniforms {
-  return { uExpansionProgress: { value: REVEAL_COMPLETE }, uTime: { value: 0 }, uLoaderMotion: { value: 0 } };
+  return {
+    uExpansionProgress: { value: REVEAL_COMPLETE },
+    uTime: { value: 0 },
+    uLoaderMotion: { value: 0 },
+    uLightTint: { value: new THREE.Color(1, 1, 1) },
+    uLightGlow: { value: new THREE.Color(0.035, 0.028, 0.018) },
+  };
 }
 
 const TILE = 64;
@@ -194,6 +204,8 @@ const FRAGMENT_SHADER = /* glsl */ `
   #include <shadowmap_pars_fragment>
   #include <shadowmask_pars_fragment>
   uniform sampler2DArray uAtlas;
+  uniform vec3 uLightTint;
+  uniform vec3 uLightGlow;
   // Layer of each texture kind's first tile, indexed by kind - 1.
   uniform float uKindLayer[${TILE_ROWS.length}];
 
@@ -237,8 +249,9 @@ const FRAGMENT_SHADER = /* glsl */ `
     }
     vec3 lightDirection = normalize(vec3(0.35, 0.8, 0.42));
     float light = clamp(dot(normalize(vNormal), lightDirection), 0.0, 1.0);
-    vec3 color = base * (0.48 + light * 0.52);
-    color += vec3(0.035, 0.028, 0.018);
+    // By day (tint white, the original's glow) exactly the original's light; dusk and night recolour it.
+    vec3 color = base * (0.48 + light * 0.52) * uLightTint;
+    color += uLightGlow;
     // 1 outside shadows and when the map has none; the light's shadow intensity sets how dark.
     color *= getShadowMask();
 

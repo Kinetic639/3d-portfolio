@@ -191,3 +191,14 @@
   margin: -6px 0 16px;
   color: var(--muted);
 }
+
+.header {
+  position: relative;
+}
+
+/* Day and night, top right of the header. */
+.theme {
+  position: absolute;
+  top: 24px;
+  right: 0;
+}

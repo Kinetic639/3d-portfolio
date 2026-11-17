@@ -402,6 +402,30 @@ test("zone names show when zoomed out, and a click on one goes to its section", 
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Experience" })).toBeVisible();
 });
 
+test("the switch beside the map turns day to night in the world, with no new shaders", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openWorld(page);
+  type SkyProbe = { environment: { changingSky: boolean; skyState: { lightIntensity: number; background: { getHex: () => number } } }; renderer: { info: { programs: unknown[] } } };
+  const sky = () => page.evaluate(() => {
+    const engine = window.__worldEngine as unknown as SkyProbe;
+    return { changing: engine.environment.changingSky, background: engine.environment.skyState.background.getHex(), programs: engine.renderer.info.programs.length };
+  });
+  const day = await sky();
+  const toggle = page.locator("[class*=minimapBar]").getByRole("switch", { name: "Night theme" });
+  await toggle.click();
+  expect((await sky()).changing).toBe(true);
+  await expect.poll(async () => (await sky()).changing, { timeout: 5000 }).toBe(false);
+  const night = await sky();
+  expect(night.background).toBe(0x0f1724);
+  expect(night.programs).toBe(day.programs);
+  // The world stops drawing again once night has fallen.
+  await settle(page);
+
+  await toggle.click();
+  await expect.poll(async () => (await sky()).background, { timeout: 5000 }).toBe(day.background);
+  expect(errors).toEqual([]);
+});
+
 test("the corner map flies to a zone, opens items, and shows where the camera is", async ({ page }) => {
   const errors = trackErrors(page);
   await openWorld(page);

@@ -85,6 +85,22 @@
       "max": 0,
       "why": "Measured 0."
     },
+    "dayNight.p95FrameMs": {
+      "max": 17.5,
+      "why": "The theme switch in the world runs at the display rate: only light values change."
+    },
+    "dayNight.maxFrameMs": {
+      "max": 34,
+      "why": "At most one dropped frame while the page's colours and the world's light change together."
+    },
+    "dayNight.longTasks": {
+      "max": 0,
+      "why": "Nothing heavy runs during the switch."
+    },
+    "dayNight.programsCompiled": {
+      "max": 0,
+      "why": "Day and night are uniform values on the same shaders: nothing compiles."
+    },
     "dig4x.blocksDug": {
       "min": 6,
       "why": "The scenario really digs (8 clicks). Measured 8."

@@ -26,6 +26,44 @@
   --shadow-lg: 0 24px 54px rgba(24, 34, 31, 0.22);
 }
 
+/* Night: the same tokens, dark. Day stays the default whatever the system says. */
+:root[data-theme="dark"] {
+  --background: #0f1519;
+  --foreground: #e3e9e5;
+  --muted: #98a6a0;
+  --panel: rgba(22, 30, 33, 0.9);
+  --border: rgba(227, 233, 229, 0.16);
+  --accent: #4cc39a;
+  --accent-strong: #6ad6ae;
+  --accent-soft: rgba(76, 195, 154, 0.16);
+  --danger: #e2766c;
+  --danger-soft: rgba(226, 118, 108, 0.16);
+  --warning: #d9a656;
+  --warning-soft: rgba(217, 166, 86, 0.16);
+  --surface: #172024;
+  --shadow-sm: 0 8px 22px rgba(0, 0, 0, 0.34);
+  --shadow-md: 0 12px 34px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 24px 54px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+
+/* While the theme switches, colours ease over with the world's sunset or sunrise (2 s, as DAY_NIGHT_SECONDS):
+   on the page, or (while the world is in front) only on the world's controls,
+   not on the hidden page under it, which would restyle every frame for nothing. */
+html[data-theme-switching]:not([data-world="world"]):not([data-world="entering"]) :is(body, body *),
+html[data-theme-switching] [data-view] * {
+  /* Not box-shadow: the panels' large blurred shadows would repaint every frame. */
+  transition-property: background-color, color, border-color, fill, stroke;
+  transition-duration: 2s;
+  transition-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme-switching] :is(body, body *, [data-view] *) {
+    transition-duration: 0s;
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

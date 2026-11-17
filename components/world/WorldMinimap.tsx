@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import PortfolioMap, { type MapPlace } from "@/components/content/PortfolioMap";
+import ThemeToggle from "@/components/site/ThemeToggle";
 import { useWorldBridge } from "@/lib/bridge/use-world-bridge";
 import { worldBridge } from "@/lib/bridge/world-bridge";
 import type { MinimapData } from "@/lib/minimap/minimap";
@@ -51,9 +52,12 @@ export default function WorldMinimap({ data, hidden, onPlace, onPin }: {
   if (hidden) return null;
   return (
     <div className={styles.minimap} data-open={open}>
-      <button type="button" className={styles.minimapToggle} aria-expanded={open} onClick={() => setOpen(!open)}>
-        {open ? "Hide map" : "Map"}
-      </button>
+      <div className={styles.minimapBar}>
+        <ThemeToggle />
+        <button type="button" className={styles.minimapToggle} aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? "Hide map" : "Map"}
+        </button>
+      </div>
       {open ? (
         <PortfolioMap
           data={data}
