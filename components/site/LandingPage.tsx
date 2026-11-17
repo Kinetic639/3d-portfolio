@@ -1,6 +1,10 @@
 import Link from "next/link";
 import ContentArticle from "@/components/content/ContentArticle";
 import SectionArticle from "@/components/content/SectionArticle";
+import PortfolioMap from "@/components/content/PortfolioMap";
+import type { MinimapData } from "@/lib/minimap/minimap";
+import { readMinimapData } from "@/lib/minimap/minimap-store";
+import { readMapIndex } from "@/lib/maps/map-store";
 import { PORTFOLIO_CONTENT } from "@/content/portfolio";
 import { CONTENT_SECTIONS, getContentPath, listContentByKind, type ContentItem, type ContentSection } from "@/lib/content/content";
 import { getSectionPath } from "@/lib/content/places";
@@ -14,8 +18,10 @@ import styles from "./LandingPage.module.css";
  * On an item's or a section's own URL that item or section is shown first,
  * as the page's main heading, followed by the rest of the portfolio.
  */
-export default function LandingPage({ featured, featuredSection }: { featured?: ContentItem; featuredSection?: ContentSection }) {
+export default function LandingPage({ featured, featuredSection, minimap }: { featured?: ContentItem; featuredSection?: ContentSection; minimap?: MinimapData | null }) {
   const { owner } = PORTFOLIO_CONTENT;
+  // The default map's, unless a page names another (a map preview). Read at build time.
+  const map = minimap === undefined ? readMinimapData(readMapIndex().defaultMapId) : minimap;
   const inner = featured !== undefined || featuredSection !== undefined;
 
   return (
@@ -48,6 +54,14 @@ export default function LandingPage({ featured, featuredSection }: { featured?: 
         {featuredSection ? (
           <section className={styles.featured} aria-label={featuredSection.label}>
             <SectionArticle section={featuredSection} items={listContentByKind(PORTFOLIO_CONTENT, featuredSection.kind)} headingLevel={1} />
+          </section>
+        ) : null}
+
+        {map ? (
+          <section id="map" className={styles.section} aria-labelledby="map-heading">
+            <h2 id="map-heading" className={styles.sectionTitle}>Map</h2>
+            <p className={styles.mapIntro}>Every zone of the 3D world is a section of this site. Choose one to read it here, or enter the world from its page to go there.</p>
+            <PortfolioMap data={map} current={featuredSection ? map.zones.find((zone) => zone.contentReference?.contentType === featuredSection.kind)?.id : null} />
           </section>
         ) : null}
 

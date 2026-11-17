@@ -21,6 +21,8 @@ import {
 import { isWorldHistoryEntry, useContentRoute, worldHistoryState } from "./use-content-route";
 import { useWorldBoot } from "./use-world-boot";
 import PerfHud from "./PerfHud";
+import WorldMinimap from "./WorldMinimap";
+import type { MinimapData } from "@/lib/minimap/minimap";
 import { useUiWork } from "@/lib/perf/ui-work";
 import styles from "./WorldLayer.module.css";
 
@@ -53,7 +55,13 @@ function panelInset() {
  * This is where bridge state meets the DOM and the router. The engine knows
  * nothing about URLs, history or the landing page.
  */
-export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaultMapId: string; bakes: Record<string, string>; serveBakes: boolean }) {
+export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }: {
+  defaultMapId: string;
+  bakes: Record<string, string>;
+  serveBakes: boolean;
+  /** Each map's minimap data, drawn at build time; a map without one has no corner map. */
+  minimaps: Record<string, MinimapData>;
+}) {
   useUiWork();
   const pathname = usePathname();
   const previewMapId = MAP_PATH.exec(pathname)?.[1];
@@ -269,6 +277,17 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes }: { defaul
         <MinigameHud />
         <ActorHud />
         <PerfHud active={phase === "world"} />
+        {minimaps[mapId] ? (
+          <WorldMinimap
+            data={minimaps[mapId]}
+            hidden={panelOpen}
+            onPlace={(target) => {
+              const zone = zones.find((candidate) => candidate.id === target.zone.id);
+              if (zone) goToZone(zone);
+            }}
+            onPin={openPath}
+          />
+        ) : null}
 
         {layerView(phase) === "loader" && PORTFOLIO_CONTENT.items[0] ? (
           <div className={styles.panel} aria-hidden="true">

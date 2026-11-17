@@ -222,7 +222,7 @@ export class WorldEngine {
       onUserPan: () => this.stopFollowing(),
     });
     this.rig.setEnabled(false);
-    bridge.diagnostics.engine = { frames: this.frames, stats: this.stats };
+    bridge.diagnostics.engine = { frames: this.frames, stats: this.stats, view: () => this.rig.getView() };
 
     this.beacon.group.traverse((object) => object.layers.enable(LOADER_LAYER));
     this.scene.add(this.beacon.group);

@@ -235,7 +235,7 @@ test("content can be opened from the menu with the keyboard alone", async ({ pag
   await openWorld(page);
   await page.getByText("Menu", { exact: true }).focus();
   await page.keyboard.press("Enter");
-  const link = page.getByRole("link", { name: "Contact" });
+  const link = page.getByRole("navigation", { name: "Portfolio sections" }).getByRole("link", { name: "Contact" });
   await link.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Contact" })).toBeVisible();
@@ -400,4 +400,32 @@ test("zone names show when zoomed out, and a click on one goes to its section", 
   await page.mouse.click(label.x, label.y);
   await expect(page).toHaveURL(/\/experience$/);
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Experience" })).toBeVisible();
+});
+
+test("the corner map flies to a zone, opens items, and shows where the camera is", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openWorld(page);
+  const corner = page.getByRole("group", { name: /Map of the world/ });
+  await expect(corner).toBeVisible();
+  const marker = () => page.locator("[class*=minimap] g[class*=marker]").getAttribute("transform");
+  await expect.poll(marker).not.toBeNull();
+  const before = await marker();
+
+  await page.locator('[class*=minimap] a[tabindex="-1"][href="/skills"]').click();
+  await expect(page).toHaveURL(/\/skills$/);
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Skills" })).toBeVisible();
+  await settle(page);
+  const area = await zoneArea(page, "Skills");
+  const framed = await view(page);
+  expect(Math.hypot(framed.x - (area.minX + area.maxX) / 2, framed.z - (area.minZ + area.maxZ) / 2)).toBeLessThan(10);
+  await page.getByRole("dialog").getByRole("button", { name: /close/i }).click();
+  // The marker followed the camera.
+  await expect.poll(marker).not.toBe(before);
+
+  await corner.getByRole("link", { name: "Project Placeholder One" }).click();
+  await expect(page).toHaveURL(new RegExp(`${PROJECT_PATH}$`));
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Project Placeholder One" })).toBeVisible();
+  // While a panel is open the corner map steps aside.
+  await expect(corner).toHaveCount(0);
+  expect(errors).toEqual([]);
 });

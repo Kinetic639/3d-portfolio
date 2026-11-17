@@ -1,6 +1,7 @@
 import WorldLayer from "@/components/world/WorldLayer";
 import { listFreshBakes } from "@/lib/bake/bake-records";
 import { readMapIndex } from "@/lib/maps/map-store";
+import { readAllMinimaps } from "@/lib/minimap/minimap-store";
 
 /**
  * Whether visitors get a map's bake (when it is fresh) instead of its voxels:
@@ -22,7 +23,7 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
   return (
     <>
       {children}
-      <WorldLayer defaultMapId={defaultMapId} bakes={listFreshBakes()} serveBakes={SERVE_BAKED_WORLDS} />
+      <WorldLayer defaultMapId={defaultMapId} bakes={listFreshBakes()} serveBakes={SERVE_BAKED_WORLDS} minimaps={readAllMinimaps()} />
     </>
   );
 }

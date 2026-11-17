@@ -557,3 +557,44 @@
     top: 64px;
   }
 }
+
+/* The corner map: bottom right, above the world, out of the way of the panel (hidden while it is open). */
+.minimap {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  width: clamp(150px, 18vw, 220px);
+}
+
+.minimapToggle {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+
+.minimapToggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.minimap figure {
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .minimap {
+    width: 124px;
+    bottom: 64px;
+  }
+}

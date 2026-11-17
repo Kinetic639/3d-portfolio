@@ -139,7 +139,9 @@ class Channel<T> {
 export type EngineDiagnostics = {
   frames: FrameRecorder;
   /** Renderer counters of the last frame drawn. */
-  stats: { readonly drawCalls: number; readonly triangles: number; readonly geometries: number; readonly textures: number; readonly programs: number; readonly picks: number };
+  stats: { readonly drawCalls: number; readonly triangles: number; readonly geometries: number; readonly textures: number; readonly programs: number; readonly picks: number; readonly frames: number };
+  /** Where the camera looks: the corner map reads it after frames were drawn and moves its marker without React. */
+  view: () => { x: number; z: number; yawDegrees: number; distance: number };
 };
 
 export type WorldBridge = {
