@@ -10000,6 +10000,689 @@
         "contentType": "project",
         "contentId": "project-placeholder-1"
       }
+    },
+    {
+      "id": "pine-tree-fluffy",
+      "name": "Pine Tree (fluffy)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 5.5,
+          "y": 2,
+          "z": 9.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 1.9187424415249366,
+        "depth": 1.8573941644677947,
+        "height": 3.7030095136910677
+      },
+      "collisionMode": "blocking",
+      "assetReference": "pine-tree-fluffy",
+      "tags": [
+        "model",
+        "nature",
+        "tree",
+        "vegetation",
+        "wind"
+      ],
+      "locked": false
+    },
+    {
+      "id": "pine-tree-fluffy-2",
+      "name": "Pine Tree (fluffy)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 10.5,
+          "y": 2,
+          "z": 10.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 1.9187424415249366,
+        "depth": 1.8573941644677947,
+        "height": 3.7030095136910677
+      },
+      "collisionMode": "blocking",
+      "assetReference": "pine-tree-fluffy",
+      "tags": [
+        "model",
+        "nature",
+        "tree",
+        "vegetation",
+        "wind"
+      ],
+      "locked": false
+    },
+    {
+      "id": "pine-tree-fluffy-3",
+      "name": "Pine Tree (fluffy)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 7.5,
+          "y": 2,
+          "z": 13.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 1.9187424415249366,
+        "depth": 1.8573941644677947,
+        "height": 3.7030095136910677
+      },
+      "collisionMode": "blocking",
+      "assetReference": "pine-tree-fluffy",
+      "tags": [
+        "model",
+        "nature",
+        "tree",
+        "vegetation",
+        "wind"
+      ],
+      "locked": false
+    },
+    {
+      "id": "pine-tree-fluffy-4",
+      "name": "Pine Tree (fluffy)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 11.5,
+          "y": 2,
+          "z": 15.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 1.9187424415249366,
+        "depth": 1.8573941644677947,
+        "height": 3.7030095136910677
+      },
+      "collisionMode": "blocking",
+      "assetReference": "pine-tree-fluffy",
+      "tags": [
+        "model",
+        "nature",
+        "tree",
+        "vegetation",
+        "wind"
+      ],
+      "locked": false
+    },
+    {
+      "id": "pine-tree-fluffy-5",
+      "name": "Pine Tree (fluffy)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 12.5,
+          "y": 2,
+          "z": 9.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 1.9187424415249366,
+        "depth": 1.8573941644677947,
+        "height": 3.7030095136910677
+      },
+      "collisionMode": "blocking",
+      "assetReference": "pine-tree-fluffy",
+      "tags": [
+        "model",
+        "nature",
+        "tree",
+        "vegetation",
+        "wind"
+      ],
+      "locked": false
+    },
+    {
+      "id": "pine-tree-fluffy-6",
+      "name": "Pine Tree (fluffy)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 6.5,
+          "y": 2,
+          "z": 3.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 1.9187424415249366,
+        "depth": 1.8573941644677947,
+        "height": 3.7030095136910677
+      },
+      "collisionMode": "blocking",
+      "assetReference": "pine-tree-fluffy",
+      "tags": [
+        "model",
+        "nature",
+        "tree",
+        "vegetation",
+        "wind"
+      ],
+      "locked": false
+    },
+    {
+      "id": "pine-tree-fluffy-7",
+      "name": "Pine Tree (fluffy)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 7.5,
+          "y": 2,
+          "z": 10.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 1.9187424415249366,
+        "depth": 1.8573941644677947,
+        "height": 3.7030095136910677
+      },
+      "collisionMode": "blocking",
+      "assetReference": "pine-tree-fluffy",
+      "tags": [
+        "model",
+        "nature",
+        "tree",
+        "vegetation",
+        "wind"
+      ],
+      "locked": false
+    },
+    {
+      "id": "pine-tree-fluffy-8",
+      "name": "Pine Tree (fluffy)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 9.5,
+          "y": 2,
+          "z": 12.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 1.9187424415249366,
+        "depth": 1.8573941644677947,
+        "height": 3.7030095136910677
+      },
+      "collisionMode": "blocking",
+      "assetReference": "pine-tree-fluffy",
+      "tags": [
+        "model",
+        "nature",
+        "tree",
+        "vegetation",
+        "wind"
+      ],
+      "locked": false
+    },
+    {
+      "id": "pine-tree-fluffy-9",
+      "name": "Pine Tree (fluffy)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 13.5,
+          "y": 2,
+          "z": 13.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 1.9187424415249366,
+        "depth": 1.8573941644677947,
+        "height": 3.7030095136910677
+      },
+      "collisionMode": "blocking",
+      "assetReference": "pine-tree-fluffy",
+      "tags": [
+        "model",
+        "nature",
+        "tree",
+        "vegetation",
+        "wind"
+      ],
+      "locked": false
+    },
+    {
+      "id": "pine-tree-fluffy-10",
+      "name": "Pine Tree (fluffy)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 16.5,
+          "y": 2,
+          "z": 10.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 1.9187424415249366,
+        "depth": 1.8573941644677947,
+        "height": 3.7030095136910677
+      },
+      "collisionMode": "blocking",
+      "assetReference": "pine-tree-fluffy",
+      "tags": [
+        "model",
+        "nature",
+        "tree",
+        "vegetation",
+        "wind"
+      ],
+      "locked": false
+    },
+    {
+      "id": "pine-tree-fluffy-11",
+      "name": "Pine Tree (fluffy)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 14.5,
+          "y": 2,
+          "z": 4.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 1.9187424415249366,
+        "depth": 1.8573941644677947,
+        "height": 3.7030095136910677
+      },
+      "collisionMode": "blocking",
+      "assetReference": "pine-tree-fluffy",
+      "tags": [
+        "model",
+        "nature",
+        "tree",
+        "vegetation",
+        "wind"
+      ],
+      "locked": false
+    },
+    {
+      "id": "rock-land-small",
+      "name": "Land Rock (small)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 18.5,
+          "y": 2,
+          "z": 7.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 2.42576003074646,
+        "depth": 1.8663849646030766,
+        "height": 0.9817195278093449
+      },
+      "collisionMode": "blocking",
+      "assetReference": "rock-land-small",
+      "tags": [
+        "model",
+        "nature",
+        "rock",
+        "landscape"
+      ],
+      "locked": false
+    },
+    {
+      "id": "rock-land-small-2",
+      "name": "Land Rock (small)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 15.5,
+          "y": 2,
+          "z": 12.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 2.42576003074646,
+        "depth": 1.8663849646030766,
+        "height": 0.9817195278093449
+      },
+      "collisionMode": "blocking",
+      "assetReference": "rock-land-small",
+      "tags": [
+        "model",
+        "nature",
+        "rock",
+        "landscape"
+      ],
+      "locked": false
+    },
+    {
+      "id": "rock-land-small-3",
+      "name": "Land Rock (small)",
+      "entityType": "model",
+      "primitiveType": "box",
+      "transform": {
+        "position": {
+          "x": 14.5,
+          "y": 2,
+          "z": 16.5
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        },
+        "scale": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        }
+      },
+      "placement": {
+        "anchor": "bottom",
+        "snapToGrid": true,
+        "surfaceAttached": true,
+        "surfaceOffset": 0
+      },
+      "appearance": {
+        "color": "#9ca3af",
+        "visibleAtRuntime": true,
+        "visibleInEditor": true
+      },
+      "footprint": {
+        "width": 2.42576003074646,
+        "depth": 1.8663849646030766,
+        "height": 0.9817195278093449
+      },
+      "collisionMode": "blocking",
+      "assetReference": "rock-land-small",
+      "tags": [
+        "model",
+        "nature",
+        "rock",
+        "landscape"
+      ],
+      "locked": false
     }
   ],
   "entityGroups": [],
@@ -10054,11 +10737,41 @@
     "wind": {
       "direction": 90,
       "strength": 0.25
+    },
+    "lighting": {
+      "sunIntensity": 1.95,
+      "groundColor": "#ffffff",
+      "skyIntensity": 1.45,
+      "sunPosition": {
+        "x": 24,
+        "y": 27.3,
+        "z": 18
+      }
+    },
+    "shadows": {
+      "enabled": true
+    },
+    "style": {
+      "hatchStrength": 0.22,
+      "toonBands": 3,
+      "outlineThickness": 1.5
+    }
+  },
+  "modelSettings": {
+    "rock-land-small": {
+      "style": {
+        "outlineScale": 0.63
+      }
+    },
+    "pine-tree-fluffy": {
+      "style": {
+        "outlineScale": 0.3
+      }
     }
   },
   "metadata": {
     "createdAt": "2026-08-03T00:00:00Z",
-    "updatedAt": "2026-11-16T15:25:25.897Z",
+    "updatedAt": "2026-11-17T15:23:15.614Z",
     "authoringVersion": "primary-terrain-v2"
   }
 }
