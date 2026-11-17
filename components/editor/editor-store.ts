@@ -1,3 +1,4 @@
+import { DEFAULT_SCATTER } from "@/lib/editor/scatter";
 import { createContext, useContext } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
@@ -86,6 +87,7 @@ export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
   entityColor: "#9ca3af",
   entityName: "Placeholder",
   collisionMode: "blocking",
+  scatter: { ...DEFAULT_SCATTER },
 };
 
 export function createEditorStore(preferences: EditorViewPreferences = DEFAULT_EDITOR_VIEW_PREFERENCES, layers = DEFAULT_LAYERS) {

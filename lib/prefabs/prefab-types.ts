@@ -11,7 +11,9 @@ export type PrefabCategory =
   | "portfolio"
   | "signage"
   | "navigation"
-  | "decoration";
+  | "decoration"
+  /** Animals and animated characters (models only; no procedural prefab uses it). */
+  | "creatures";
 
 export type PrefabSize = "small" | "medium" | "large" | "custom" | "short" | "long" | "narrow" | "wide" | "low" | "tall" | "standard";
 

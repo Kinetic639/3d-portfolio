@@ -5,6 +5,13 @@ import { CameraRig, VISITOR_CAMERA } from "@/lib/engine/camera-rig";
 import { buildEntityLayer, type EntityLayer } from "@/lib/engine/entity-meshes";
 import { POP_COMPLETE } from "@/lib/engine/entry-sequence";
 import { Environment } from "@/lib/engine/environment";
+import { ModelWindRegistry } from "@/lib/engine/model-wind";
+import { ModelStyleRegistry } from "@/lib/engine/model-style";
+import { resolveActor } from "@/lib/engine/actor";
+import type { EntityLayerOptions } from "@/lib/engine/entity-meshes";
+import { createWindDebugMaterial, type WindDebugView } from "./wind-debug";
+import { scatterPlacements, type ScatterSettings } from "./scatter";
+import { getTerrainSurfaceAtWorldPosition } from "@/lib/world/surface-query";
 import type { ModelLibrary } from "@/lib/engine/model-library";
 import type { TerrainSource } from "@/lib/engine/terrain-meshes";
 import type { MapMarkerDefinition } from "@/lib/maps/map-definition";
@@ -83,6 +90,8 @@ export type ToolSettings = {
   entityColor: string;
   entityName: string;
   collisionMode: CollisionMode;
+  /** Place puts down a scatter of the chosen object instead of one (the style lab's Scene Lab). */
+  scatter: ScatterSettings;
 };
 
 export type ViewSettings = {
@@ -182,6 +191,16 @@ export class EditorViewport {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly environment: Environment;
+  /** Per-model wind bindings; live values for the response, rebuild on a new weight source. */
+  private readonly windModels: ModelWindRegistry;
+  /** Per-model look (toon, outline, contact patch, shadows) and the map's surface style uniforms. */
+  private readonly modelStyles: ModelStyleRegistry;
+  private readonly shadowFocus = new THREE.Vector3();
+  private readonly frustum = new THREE.Frustum();
+  private readonly viewProjection = new THREE.Matrix4();
+  /** A model shown in a debug view instead of its material (wind weights, vertex colours, UV sets). */
+  private debugView: { modelId: string; view: Exclude<WindDebugView, "normal"> } | null = null;
+  private debugMaterials: THREE.Material[] = [];
   private readonly rig: CameraRig;
   private readonly raycaster = new THREE.Raycaster();
   private readonly overlays = new THREE.Group();
@@ -256,7 +275,11 @@ export class EditorViewport {
     this.rig = new CameraRig(canvas, { onChange: () => this.invalidate(), ...EDITOR_CAMERA, minDistance: view.minDistance, initialDistance: 90, pitchDegrees: 35, yawDegrees: 45 });
     this.camera = this.rig.camera;
 
-    this.entities = buildEntityLayer(session.getEntities(), models);
+    this.environment.apply(session.getMeta().environment);
+    this.windModels = new ModelWindRegistry(models, this.environment.wind, session.getMeta().modelSettings);
+    this.modelStyles = new ModelStyleRegistry(models, session.getMeta().modelSettings, session.getMeta().environment.style);
+    this.applyShadowAvailability();
+    this.entities = buildEntityLayer(session.getEntities(), models, this.layerOptions());
     this.scene.add(terrain.group, this.entities.group, this.helpers, this.overlays);
 
     // Surface plates: depth test off, so a plate is never hidden by the block it sits on.
@@ -574,9 +597,10 @@ export class EditorViewport {
       this.entitiesDirty = false;
       this.scene.remove(this.entities.group);
       this.entities.dispose();
-      this.entities = buildEntityLayer(this.session.getEntities(), this.models);
+      this.entities = buildEntityLayer(this.session.getEntities(), this.models, this.layerOptions());
       this.entities.group.visible = !this.view.hidden.has("entities");
       this.scene.add(this.entities.group);
+      this.applyDebugView();
       this.stats.entityRebuilds += 1;
       this.selectionDirty = true;
     }
@@ -590,7 +614,17 @@ export class EditorViewport {
     }
 
     const moving = this.rig.update(delta);
-    let animating = this.entities.update(delta);
+    this.camera.updateMatrixWorld();
+    this.viewProjection.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.viewProjection);
+    // Animated models out of view are not animated and do not ask for frames.
+    let animating = this.entities.update(delta, this.frustum);
+    if (this.environment.wind.active && this.entities.group.visible && this.entities.windInView(this.frustum)) animating = true;
+    this.environment.update(this.lastTickAt / 1000, delta);
+    if (this.renderer.shadowMap.enabled) {
+      const view = this.rig.getView();
+      this.environment.followView(this.shadowFocus.set(view.x, 0, view.z), view.distance);
+    }
     if (this.popClock !== null) {
       this.popClock += delta;
       const done = this.popClock > this.entities.popDuration + 0.1;
@@ -623,7 +657,20 @@ export class EditorViewport {
     if (width === 0 || height === 0) return;
     this.renderer.setSize(width, height, false);
     this.rig.setAspect(width / height);
+    this.modelStyles?.surface.setViewport(this.camera.fov, height);
     this.invalidate();
+  }
+
+  /** Shadow maps follow the map's setting; switching them recompiles the lit materials (editor only). */
+  private applyShadowAvailability() {
+    const enabled = this.environment.shadowsEnabled;
+    if (this.renderer.shadowMap.enabled === enabled) return;
+    this.renderer.shadowMap.enabled = enabled;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.scene.traverse((object) => {
+      const material = (object as THREE.Mesh).material;
+      for (const item of Array.isArray(material) ? material : material ? [material] : []) item.needsUpdate = true;
+    });
   }
 
   private onSessionChange(change: SessionChange) {
@@ -657,9 +704,79 @@ export class EditorViewport {
     };
   }
 
+  /** Options shared by every entity layer the editor builds. */
+  private layerOptions(): EntityLayerOptions {
+    const world = this.session.world;
+    return {
+      wind: this.windModels.options(),
+      style: this.modelStyles.options(),
+      actors: {
+        forModel: (modelId) => {
+          const entry = this.models.entry(modelId);
+          return entry?.actor ? resolveActor(entry.actor, this.session.getMeta().modelSettings?.[modelId]?.actor) : null;
+        },
+        groundAt: (x, z) => {
+          const surface = getTerrainSurfaceAtWorldPosition(world, { x, z });
+          return surface.valid ? surface.worldPosition.y : 0;
+        },
+      },
+    };
+  }
+
+  /** The style lab's clip list: plays a clip on every instance of a creature model; null goes back to idle. */
+  previewActorClip(modelId: string, clip: string | null) {
+    for (const placed of this.entities.actors) {
+      if (placed.modelId !== modelId) continue;
+      if (clip) placed.actor.preview(clip);
+      else placed.actor.rest();
+    }
+    this.invalidate();
+  }
+
+  /** Shows every instance of a model in a debug view; "normal" (or no model) restores its material. */
+  setModelDebugView(modelId: string | null, view: WindDebugView) {
+    this.debugView = modelId && view !== "normal" ? { modelId, view } : null;
+    this.applyDebugView();
+    this.invalidate();
+  }
+
+  private applyDebugView() {
+    this.entities.group.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (mesh.userData.originalMaterial) {
+        mesh.material = mesh.userData.originalMaterial as THREE.Material;
+        delete mesh.userData.originalMaterial;
+      }
+    });
+    this.debugMaterials.forEach((material) => material.dispose());
+    this.debugMaterials = [];
+    const debug = this.debugView;
+    const entry = debug ? this.models.entry(debug.modelId) : null;
+    if (!debug || !entry) return;
+    const binding = this.windModels.forModel(debug.modelId);
+    for (const mesh of this.entities.modelMeshes(debug.modelId)) {
+      const original = mesh.material as THREE.Material;
+      const material = createWindDebugMaterial(debug.view, original, binding, entry.bounds, this.environment.wind.uniforms);
+      mesh.userData.originalMaterial = original;
+      mesh.material = material;
+      this.debugMaterials.push(material);
+    }
+  }
+
   private applyMeta() {
     const meta = this.session.getMeta();
     this.environment.apply(meta.environment);
+    // Response values are uniforms; a new weight source is a new shader.
+    if (this.windModels.update(meta.modelSettings)) this.entitiesDirty = true;
+    // Surface values are uniforms; a model's shading, outline, patch or shadow casting are batches.
+    this.modelStyles?.applySurface(meta.environment.style);
+    if (this.modelStyles?.update(meta.modelSettings)) this.entitiesDirty = true;
+    // Creature motion is read every frame: new values apply at once.
+    for (const placed of this.entities?.actors ?? []) {
+      const entry = this.models.entry(placed.modelId);
+      if (entry?.actor) placed.actor.setConfig(resolveActor(entry.actor, meta.modelSettings?.[placed.modelId]?.actor));
+    }
+    this.applyShadowAvailability();
     this.environment.background.set(this.view?.background ?? "#edf1ed");
     for (const zone of meta.zones) {
       const materials = this.zoneMaterials.get(zone.numericId);
@@ -933,6 +1050,18 @@ export class EditorViewport {
     if (this.placement) this.placement.layer.group.visible = false;
     if (tool === "entity") {
       if (!this.view.hidden.has("entities") && !this.view.locked.has("entities")) this.showPlacement(cell);
+      // A scatter shows its area: the columns on the edge of its circle.
+      if (helpers && this.settings.scatter.enabled) {
+        const radius = this.settings.scatter.radius / world.config.blockSize;
+        const reach = Math.ceil(radius) + 1;
+        const ring = new THREE.Color(TOOL_COLORS.entity);
+        for (let dz = -reach; dz <= reach; dz += 1) {
+          for (let dx = -reach; dx <= reach; dx += 1) {
+            const distance = Math.hypot(dx, dz);
+            if (distance > radius - 0.75 && distance <= radius + 0.25) addPlate(cell.x + dx, cell.z + dz, ring);
+          }
+        }
+      }
     } else if (tool === "add") {
       if (helpers) this.showGhost(cell);
     } else if (helpers) {
@@ -1064,9 +1193,8 @@ export class EditorViewport {
   }
 
   /** The entity Place would create, standing at `position` (its base). Null when nothing is chosen. */
-  private draftEntity(position: { x: number; y: number; z: number }): PlacedMapEntity | null {
+  private draftEntity(position: { x: number; y: number; z: number }, taken = new Set(this.session.getEntities().map((entity) => entity.id))): PlacedMapEntity | null {
     const s = this.settings;
-    const taken = new Set(this.session.getEntities().map((entity) => entity.id));
     const transform = { position: { ...position }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
     if (s.modelId) {
       const entry = this.models.entry(s.modelId);
@@ -1187,6 +1315,57 @@ export class EditorViewport {
     if (changes.length > 0) this.session.applyZoneChanges(s.zoneEditMode === "erase" ? "Erase zone" : "Paint zone", changes);
   }
 
+  /** A scatter of the chosen object around a cell: one undo step. */
+  private scatterEntities(cell: GridCoordinate) {
+    const world = this.session.world;
+    const centre = world.gridToWorld(cell.x, 0, cell.z);
+    const surfaceAt = (x: number, z: number) => {
+      const surface = getTerrainSurfaceAtWorldPosition(world, { x, z });
+      return surface.valid ? surface.worldPosition.y : null;
+    };
+    const placements = scatterPlacements({ x: centre.x, z: centre.z }, this.settings.scatter, (x, z) => surfaceAt(x, z) !== null);
+    const taken = new Set(this.session.getEntities().map((entity) => entity.id));
+    const entities: PlacedMapEntity[] = [];
+    for (const placement of placements) {
+      const draft = this.draftEntity({ x: placement.x, y: surfaceAt(placement.x, placement.z)!, z: placement.z }, taken);
+      if (!draft) {
+        this.callbacks.onMessage({ type: "error", text: "Choose an object to scatter." });
+        return;
+      }
+      draft.transform.rotation.y = placement.rotationY;
+      draft.transform.scale = { x: draft.transform.scale.x * placement.scale, y: draft.transform.scale.y * placement.scale, z: draft.transform.scale.z * placement.scale };
+      // Scattered objects stand where they fall, not snapped to the grid.
+      draft.placement = { ...draft.placement, snapToGrid: false };
+      const entity = groundIfAttached(this.session, draft);
+      taken.add(entity.id);
+      entities.push(entity);
+    }
+    if (entities.length === 0) {
+      this.callbacks.onMessage({ type: "error", text: "No ground to scatter on here." });
+      return;
+    }
+    this.session.addEntities(`Scatter ${entities.length} ${entities[0].name}`, entities);
+    this.selection = entities.map((entity) => entity.id);
+    this.selectionDirty = true;
+    this.callbacks.onSelectionChange(this.selection);
+    this.callbacks.onMessage({ type: "info", text: `${entities.length} × ${entities[0].name} scattered.` });
+    const model = entities[0].entityType === "model" ? entities[0].assetReference : undefined;
+    if (model && !this.models.get(model)) void this.models.ensureLoaded([model]).then(() => this.refreshEntities());
+  }
+
+  /** Removes every placed instance of the chosen object (the lab's "clear asset"). Returns how many. */
+  clearChosenObject() {
+    const s = this.settings;
+    const ids = this.session.getEntities()
+      .filter((entity) => (s.modelId ? entity.entityType === "model" && entity.assetReference === s.modelId : s.prefabId ? entity.prefabId === s.prefabId : false))
+      .map((entity) => entity.id);
+    if (ids.length > 0) this.session.removeEntities(`Clear ${ids.length} objects`, ids);
+    this.selection = this.selection.filter((id) => !ids.includes(id));
+    this.selectionDirty = true;
+    this.callbacks.onSelectionChange(this.selection);
+    return ids.length;
+  }
+
   private placeEntity(cell: GridCoordinate) {
     const surface = getTerrainSurfaceAt(this.session.world, cell.x, cell.z);
     if (!surface.valid) {
@@ -1250,7 +1429,10 @@ export class EditorViewport {
       return;
     }
     if (!cell || this.locked(tool)) return;
-    if (tool === "entity") this.placeEntity(cell);
+    if (tool === "entity") {
+      if (this.settings.scatter.enabled) this.scatterEntities(cell);
+      else this.placeEntity(cell);
+    }
     else if (tool === "marker") this.placeMarker(cell);
     else if (tool === "navigation") {
       this.selectedCell = cell;

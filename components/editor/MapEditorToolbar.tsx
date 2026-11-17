@@ -83,6 +83,13 @@ import { BLOCK_IDS, RENDERABLE_BLOCK_DEFINITIONS, getBlockDefinition, type Block
 import type { GridCoordinate, WorldPosition } from "@/lib/world/world-config";
 import { getShapeDefinition, getShapePitch, getShapeStateValue, setShapePitch, TERRAIN_PALETTE_SHAPE_DEFINITIONS, type ShapeCategory } from "@/lib/voxel-shapes/shape-registry";
 import { SHAPE_IDS, type CellRotation, type ShapeId } from "@/lib/voxel-shapes/shape-ids";
+import type { MapEnvironment, MapLighting, MapShadows, MapSurfaceStyle, MapWind, ModelActorSettings, ModelStyleSettings, ModelWindSettings } from "@/lib/maps/map-definition";
+import { EdgesSection, LightingSection, ModelStyleSection, SurfaceSection } from "./StylePanels";
+import { ScatterSection } from "./ScatterSection";
+import { ActorSection } from "./ActorSection";
+import type { ScatterSettings } from "@/lib/editor/scatter";
+import type { WindDebugView } from "@/lib/editor/wind-debug";
+import { ModelSection, WindSection, type SelectedModelInfo } from "./WindPanels";
 
 export type EntityTransformMode = "translate" | "rotate";
 export type ZoneFocusDirection = MapZoneFocusDirection;
@@ -130,6 +137,27 @@ export type EditorInspectorState = {
   /** What the viewport shows as terrain: the voxels, or the current bake. */
   renderMode: "voxels" | "baked";
   bakeStatus: string;
+  environment: MapEnvironment;
+  onWindChange: (patch: Partial<MapWind>) => void;
+  /** Starts (label) or ends (null) a group of changes that undo as one step, e.g. a slider drag. */
+  onEditGroup: (label: string | null) => void;
+  /** The selected model's data and wind response; null when the selection is not one model. */
+  selectedModel: SelectedModelInfo | null;
+  modelDebugView: WindDebugView;
+  onModelDebugViewChange: (view: WindDebugView) => void;
+  /** Changes this map's settings for the selected model; null resets them to the model's defaults. */
+  onModelWindChange: (patch: ModelWindSettings | null) => void;
+  onModelStyleChange: (patch: ModelStyleSettings | null) => void;
+  onModelActorChange: (patch: ModelActorSettings | null) => void;
+  /** Plays a clip on every instance of the selected creature model; null back to idle. */
+  onPreviewClip: (clip: string | null) => void;
+  onLightingChange: (patch: Partial<MapLighting>) => void;
+  onShadowsChange: (patch: Partial<MapShadows>) => void;
+  onSurfaceStyleChange: (patch: Partial<MapSurfaceStyle>) => void;
+  scatter: ScatterSettings;
+  onScatterChange: (patch: Partial<ScatterSettings>) => void;
+  /** Removes every placed instance of the chosen object. */
+  onClearChosenObject: () => void;
   zoneId: number;
   zoneEditMode: ZoneEditMode;
   zoneSelectionMode: ZoneSelectionMode;
@@ -816,10 +844,21 @@ function ZoneRailTools({ props }: { props: MapEditorToolbarProps }) {
 
 type PrefabPickerCategory = PrefabCategory | "all" | "models";
 
+/** How a palette category reads; "creatures" holds animals and animated characters. */
+function categoryLabel(category: PrefabPickerCategory) {
+  if (category === "creatures") return "animals & characters";
+  return category.replace(/-/g, " ");
+}
+
 function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapEditorToolbarProps; workspace: EditorWorkspace; fileInputRef: React.RefObject<HTMLInputElement | null>; setBottomTab: (tab: BottomDockTab) => void }) {
   const activePrefab = BUILT_IN_PREFABS.find((prefab) => prefab.id === props.activePrefabId) ?? null;
-  const categories = useMemo(() => listPrefabCategories(), []);
-  const prefabCategories = useMemo<PrefabPickerCategory[]>(() => ["all", ...categories, "models"], [categories]);
+  // Prefab categories, plus those only models use (animals and characters have no prefabs).
+  const modelCategories = props.models.map((model) => model.category as PrefabCategory);
+  const modelCategoryKey = [...new Set(modelCategories)].sort().join("|");
+  const prefabCategories = useMemo<PrefabPickerCategory[]>(
+    () => ["all", ...new Set([...listPrefabCategories(), ...(modelCategoryKey ? (modelCategoryKey.split("|") as PrefabCategory[]) : [])]), "models"],
+    [modelCategoryKey],
+  );
   const [activeCategory, setActiveCategory] = useState<PrefabPickerCategory>(activePrefab?.category ?? "all");
   const [prefabPreviewYaw, setPrefabPreviewYaw] = useState(0);
   const prefabPreviewDrag = useRef<{ x: number; yaw: number } | null>(null);
@@ -836,27 +875,28 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
     const prefabs = query
       ? categoryPrefabs.filter((prefab) => prefab.name.toLowerCase().includes(query) || prefab.tags.some((tag) => tag.includes(query)))
       : categoryPrefabs;
-    const models = activeCategory === "all" || activeCategory === "models"
-      ? props.models.filter((model) => !query || model.name.toLowerCase().includes(query) || model.id.includes(query))
-      : [];
+    const models = props.models
+      .filter((model) => activeCategory === "all" || activeCategory === "models" || model.category === activeCategory)
+      .filter((model) => !query || model.name.toLowerCase().includes(query) || model.id.includes(query));
     const activeModel = props.models.find((model) => model.id === props.activeModelId) ?? null;
 
     return (
       <Panel title="Primitive Palette">
         <Section title="Prefab Library">
-          <label>Category<select value={activeCategory} onChange={(event) => setActiveCategory(event.target.value as PrefabPickerCategory)}>{prefabCategories.map((category) => <option key={category} value={category}>{category === "all" ? "all" : category.replace(/-/g, " ")}</option>)}</select></label>
+          <label>Category<select value={activeCategory} onChange={(event) => setActiveCategory(event.target.value as PrefabPickerCategory)}>{prefabCategories.map((category) => <option key={category} value={category}>{categoryLabel(category)}</option>)}</select></label>
           <input aria-label="Search prefabs" placeholder="Search prefabs" value={props.prefabSearch} onChange={(event) => props.onPrefabSearchChange(event.target.value)} />
           <div className="editor-shape-list" role="listbox" aria-label="Prefab selector">
-            {prefabs.map((prefab) => (
-              <button key={prefab.id} type="button" role="option" aria-selected={props.activePrefabId === prefab.id} className={props.activePrefabId === prefab.id ? "active" : ""} title={prefab.description} onClick={() => props.onActivePrefabChange(prefab.id)}>
-                <PrefabPreview prefab={prefab} variantId={prefab.id === props.activePrefabId ? props.activePrefabVariantId : undefined} viewYaw={prefabPreviewYaw} onViewYawChange={setPrefabPreviewYaw} dragRef={prefabPreviewDrag} compact />
-                <span>{prefab.name}</span>
-              </button>
-            ))}
+            {/* Models first: they are the finished art; prefabs are grey-box stand-ins. */}
             {models.map((model) => (
               <button key={`model-${model.id}`} type="button" role="option" aria-selected={props.activeModelId === model.id} className={props.activeModelId === model.id ? "active" : ""} title={`Model: ${model.name}`} onClick={() => props.onActiveModelChange(model.id)}>
                 <ModelThumbnail model={model} />
                 <span>{model.name}</span>
+              </button>
+            ))}
+            {prefabs.map((prefab) => (
+              <button key={prefab.id} type="button" role="option" aria-selected={props.activePrefabId === prefab.id} className={props.activePrefabId === prefab.id ? "active" : ""} title={prefab.description} onClick={() => props.onActivePrefabChange(prefab.id)}>
+                <PrefabPreview prefab={prefab} variantId={prefab.id === props.activePrefabId ? props.activePrefabVariantId : undefined} viewYaw={prefabPreviewYaw} onViewYawChange={setPrefabPreviewYaw} dragRef={prefabPreviewDrag} compact />
+                <span>{prefab.name}</span>
               </button>
             ))}
             {prefabs.length === 0 && models.length === 0 ? <span className="editor-muted editor-empty-state">No matching objects.</span> : null}
@@ -864,7 +904,7 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
           {activeModel && activeModel.variants.length > 1 ? (
             <label>Variant<select value={props.activePrefabVariantId || activeModel.variants[0].id} onChange={(event) => props.onActivePrefabVariantChange(event.target.value)}>{activeModel.variants.map((variant) => <option key={variant.id} value={variant.id}>{variant.label}</option>)}</select></label>
           ) : null}
-          {activeModel ? <span className="editor-muted">model · {activeModel.category}</span> : null}
+          {activeModel ? <span className="editor-muted">model · {categoryLabel(activeModel.category as PrefabCategory)}</span> : null}
           {activePrefab ? (
             <label>Variant<select value={props.activePrefabVariantId || activePrefab.defaultVariantId} onChange={(event) => props.onActivePrefabVariantChange(event.target.value)}>{activePrefab.variants.map((variant) => <option key={variant.id} value={variant.id}>{variant.label}</option>)}</select></label>
           ) : null}
@@ -875,6 +915,7 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
             </>
           ) : null}
         </Section>
+        <ScatterSection scatter={props.scatter} objectName={activeModel?.name ?? activePrefab?.name ?? null} onChange={props.onScatterChange} onClear={props.onClearChosenObject} />
         <Section title="Primitive Fallback">
           <div className="editor-thumb-grid">
             {PRIMITIVES.map((primitive) => <button key={primitive} type="button" className={props.primitiveType === primitive && !props.activePrefabId ? "active" : ""} onClick={() => selectPrimitive(primitive)}>{primitive}</button>)}
@@ -919,6 +960,10 @@ function Palette({ props, workspace, fileInputRef, setBottomTab }: { props: MapE
           <ActionButton icon="bake" onClick={props.onBake}>Bake Map</ActionButton>
           <ActionButton icon="preview" className={props.renderMode === "baked" ? "active" : ""} onClick={() => props.onRenderModeChange(props.renderMode === "baked" ? "voxels" : "baked")}>{props.renderMode === "baked" ? "Show Voxels" : "Show Baked"}</ActionButton>
         </Section>
+        <WindSection wind={props.environment.wind} onChange={props.onWindChange} onGroup={props.onEditGroup} />
+        <LightingSection lighting={props.environment.lighting} onChange={props.onLightingChange} onGroup={props.onEditGroup} />
+        <SurfaceSection style={props.environment.style} onChange={props.onSurfaceStyleChange} onGroup={props.onEditGroup} />
+        <EdgesSection style={props.environment.style} shadows={props.environment.shadows} onStyleChange={props.onSurfaceStyleChange} onShadowsChange={props.onShadowsChange} onGroup={props.onEditGroup} />
       </Panel>
     );
   }
@@ -1415,6 +1460,15 @@ function Inspector({ props, workspace }: { props: MapEditorToolbarProps; workspa
             <button type="button" className={entity.appearance.visibleAtRuntime ? "" : "active"} onClick={props.onToggleEntityHidden}>{entity.appearance.visibleAtRuntime ? "Hide" : "Hidden"}</button>
           </div>
         </Section>
+        {props.selectedModel ? (
+          <>
+            {props.selectedModel.actor ? (
+              <ActorSection name={props.selectedModel.name} actor={props.selectedModel.actor} overridden={props.selectedModel.actorOverridden} clips={props.selectedModel.animations} onChange={props.onModelActorChange} onPreview={props.onPreviewClip} onGroup={props.onEditGroup} />
+            ) : null}
+            <ModelStyleSection name={props.selectedModel.name} style={props.selectedModel.style} overridden={props.selectedModel.styleOverridden} hasOutlineData={props.selectedModel.hasOutlineData} onChange={props.onModelStyleChange} onGroup={props.onEditGroup} />
+            <ModelSection model={props.selectedModel} debugView={props.modelDebugView} onWindChange={props.onModelWindChange} onDebugViewChange={props.onModelDebugViewChange} onGroup={props.onEditGroup} />
+          </>
+        ) : null}
       </Panel>
     );
   }
@@ -1961,8 +2015,9 @@ function getViewport() {
   return { width: window.innerWidth, height: window.innerHeight };
 }
 
+/** Sliders and checkboxes take no typing, so the editor's shortcuts (Ctrl+S after a drag) still apply to them. */
 function isTypingTarget(target: EventTarget | null) {
-  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+  return target instanceof HTMLElement && Boolean(target.closest("input:not([type='range']):not([type='checkbox']), textarea, select, [contenteditable='true']"));
 }
 
 function formatCoordinate(coordinate: GridCoordinate | null) {

@@ -72,9 +72,20 @@ Accepts schema v1–v4, writes `maps/my-map/map.json` in v5. `--backdrop N` adds
    }
    ```
 
-   `scale` converts the model's units to blocks. `anchor` is the point that sits at an instance's position: the centre of the base (`bottom`) or the centre of the model. `animation` names a clip to loop. `replacesPrefabs` draws every placed instance of those procedural prefabs with this model.
+   `scale` converts the model's units to blocks. `anchor` is the point that sits at an instance's position: the centre of the base (`bottom`) or the centre of the model. `animation` names a clip to loop. `replacesPrefabs` draws every placed instance of those procedural prefabs with this model. `category` `creatures` is for animals and animated characters (shown as **animals & characters**).
+
+   Optional fields that make the file smaller or the model cheaper to draw:
+
+   | Field | Use |
+   |---|---|
+   | `attributes` | Extra vertex attributes to keep, e.g. `["COLOR_0", "COLOR_1"]` when a shader reads them (the pine's wind weights). Only position, normal, the first UV set, joints and weights are kept otherwise; exported models often carry several unused UV and colour sets. |
+   | `alpha` | `"cutout"` draws transparent materials alpha-tested (opaque, no sorting): right for leaves and feathers. `alphaCutoff` sets the threshold (default 0.5). `"opaque"` ignores alpha. |
+   | `animations` | Clips to keep. Long baked clips are usually most of a rigged model's size (the crow: 5.6 MB with its three 20-70 s flight loops, 311 KB without). |
+   | `rootMotionNode` | Node whose translation is removed from every clip, so the model moves only where the game moves it. |
+
+   Every model's animations are also resampled (redundant keyframes dropped).
 3. Run `pnpm assets` (or restart `pnpm dev`, or press **Rescan models** in the editor). The table it prints shows the size before and after, triangles and textures; errors name the asset and the problem.
-4. In the editor, choose the Object tool: the model is under **Models** with its picture and size. Place it like any object.
+4. In the editor, choose the Object tool: the model is listed first under its category (and under **Models**) with its picture and size. Place it like any object.
 
 To replace a model, overwrite its file and run `pnpm assets`: every placed instance changes. Do not rename the folder once maps use it; the folder name is the id maps store.
 
@@ -106,6 +117,7 @@ Changing the file layout means raising `BAKE_FORMAT_VERSION` in `lib/bake/baked-
 | Move the view | Right or middle drag pans, Ctrl + right drag turns and tilts, wheel zooms; the compass faces a direction, the lock keeps the tilt, the arrow resets the view |
 | Terrain | **Terrain** tab. Paint, Add Block (the block's ghost shows where it goes, in its real shape), Erase, Raise, Lower, Flatten (green columns rise, red ones drop), Clear. Brush shape and size in the left dock. Add and Erase act on click; hold **Ctrl** to repeat them while dragging. **Q** / **E** turn the shape, **R** / **Shift+R** tilt it, **F** flips a slab |
 | Objects | **Objects** tab. Pick a prefab or a model (models from `assets/models`, with a picture rendered from the model); Place shows a translucent copy where it will stand. **Select** to pick, Shift adds, drag moves (Alt: no snapping); **Rotate** in the left dock turns by dragging. **Ctrl+D** duplicates, **Del** deletes. The inspector sets which content an object opens |
+| Scatter | **Objects** tab, choose an object, **Scatter** section: **Scatter on click**, then count, radius, spacing, seed, random rotation and scale (min, max). Each click scatters on the ground, one undo step; **Clear all** removes every instance of the chosen object |
 | Zones | **Zones** tab. New Zone, then Paint, Replace or Erase with the brush, or Area Fill (drag a rectangle). Name, colour, kind (area or mini-game) and content in the left dock |
 | Navigation | **Navigation** tab. Select a cell, Place Node; Connect Latest; Create Route |
 | Undo / redo | **Ctrl+Z**, **Ctrl+Y** or **Ctrl+Shift+Z**: one history for everything |
@@ -143,7 +155,59 @@ The engine handles picking, the outline, remeshing, the burst, the camera, the H
 - `pnpm perf` before merging anything that touches the engine, the world UI or the landing page. A failure names the metric and its budget; if the change is intended, re-measure with `pnpm perf --update` and edit `perf/budgets.json` with the reason.
 - Something the engine animates must still show up as frames in the badge only while it moves; if it reads a number while nothing moves, it is asking for frames it does not need.
 
+## Make a model sway in the wind
+
+1. The model needs vertex data that says how much each vertex moves (0 at the base, 1 at the tips). Exported vegetation usually has it in a colour set (the pine: `COLOR_1` red), otherwise use `"height"`.
+2. In its `asset.json`, keep that data and give the default response:
+
+   ```json
+   "attributes": ["COLOR_1"],
+   "wind": { "sway": 0.7, "branches": 0.55, "leaves": 0.32, "stiffness": 1, "weightSource": "color_1-r" }
+   ```
+
+   `weightSource` is `color_1-r|g|b|a`, `uv-x|y`, `uv1-x|y`, `uv2-x|y` or `height`. The pipeline refuses a source the model does not have.
+3. Run `pnpm assets`. Every instance of the model now sways.
+4. In the editor, select an instance: **Wind response** changes the response for all instances of that model in this map (stored in the map's `modelSettings`; **Reset to model defaults** removes it). **Debug view** shows the weight, height, vertex colours or UV sets, to pick the source by eye.
+
+The wind itself is a map setting: **Map** workspace, **Weather · Wind**: presets (calm, light breeze, windy, strong wind, storm), on/off, direction (where it blows to), strength, speed, gust strength and frequency, turbulence. A slider drag is one undo step.
+
+Wind costs almost no CPU (the motion is in the vertex shader), but it needs continuous frames: the world redraws every frame while the wind blows and a wind-reactive model is in view, and is still otherwise. Visitors who prefer reduced motion see no wind.
+
+## Style a model (toon, outline, contact patch, shadows)
+
+1. In its `asset.json`, set how it is drawn by default:
+
+   ```json
+   "style": { "shading": "toon", "outline": true, "outlineScale": 0.55, "contactShadow": true, "castShadow": true }
+   ```
+
+   `shading` `"toon"` is the style lab's banded, hatched look; `"standard"` keeps the model's own material. `outline: true` makes `pnpm assets` compute the model's outline normals (about 8 KB); without them a model cannot get an outline. `outlineScale` multiplies the map's outline thickness for this model.
+2. In the editor, select an instance: **Style · all <model>** overrides these for this map (shading, outline, outline scale, contact patch, shadow casting); **Reset to model defaults** removes the override.
+3. The map's look is in the **Map** workspace:
+   - **Lighting**: sun strength, colour and position (only the direction matters), sky light with sky and ground colours; presets **Original** and **Style lab**. Lights models; the terrain keeps its own light.
+   - **Surface**: toon bands, hatch power and scale, hatching on the surface (UV) or the screen.
+   - **Edges and depth**: outline thickness in pixels (default) or world units (the lab's), edge colour, contact patch darkness, and shadows: on/off, strength, bias, normal bias, map size.
+
+Shadows are off by default (a map turns them on), follow the view, and are off for visitors on the lowest quality; the contact patch is the cheap stand-in. With 60 trees and rocks in view (RTX 2060), shadows cost about 0.3-0.5 ms of CPU per frame; the frame stays at 16.7 ms.
+
+## Add a creature (a model you can send places)
+
+1. The model needs clips whose names say what they are: `idle`, `walk`, `run`, `takeoff`, `fly` (and optionally `land`; without it, landing plays take-off backwards). Keep only those with `animations`, remove root motion with `rootMotionNode`, and use category `creatures`.
+2. Give it motion in `asset.json` (the crow's, from the style lab):
+
+   ```json
+   "actor": { "walkSpeed": 0.75, "runSpeed": 1.65, "flightSpeed": 2.8, "flightHeight": 3, "turnSpeed": 7, "crossfade": 0.2, "groundOffset": 0, "forwardYaw": 0 }
+   ```
+
+3. In the editor, select an instance: **Actor · all <model>** changes the motion for this map and previews any clip on every instance.
+4. In the world, a visitor clicks it to choose it (the camera follows), clicks the ground to send it, picks **Auto** (walk close, run further, fly far or up a step), **Walk**, **Run** or **Fly**, and lets it go with the button or Esc. Moving the view by hand stops following; **Follow** resumes.
+
+Animated models animate, and ask for frames, only while they are in view (or travelling).
+
 ## Add an engine system (wind, weather, time of day)
+
+Everything in `lib/` stays free of React and Next.js (`pnpm lint` enforces it): the engine runs outside React and talks to the page only through `lib/bridge`. A React hook that reads engine state belongs next to `lib/bridge/use-world-bridge.ts`.
+
 
 1. Put shared values in `Environment.uniforms` (`lib/engine/environment.ts`) and update them in `Environment.update` or a setter.
 2. In a custom material, spread `environment.uniforms` into the material's uniforms and read them in the shader.

@@ -32,10 +32,16 @@ export function trackErrors(page: Page) {
   return errors;
 }
 
-/** Opens a landing page and waits until the world behind it is warmed up. */
+/**
+ * Opens a landing page and waits until the world behind it is warmed up.
+ * The wind is held still (as for visitors who prefer reduced motion): trees
+ * swaying in view keep the world drawing by design, and these tests check
+ * that it draws only on demand. Wind has its own tests.
+ */
 export async function openLanding(page: Page, path = "/") {
   await page.goto(path);
   await waitForPhase(page, "ready");
+  await page.evaluate(() => (window.__worldEngine as unknown as { environment: { wind: { setStilled: (stilled: boolean) => void } } }).environment.wind.setStilled(true));
 }
 
 export const enterButton = (page: Page) => page.getByRole("button", { name: /enter the world/i });

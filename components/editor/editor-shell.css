@@ -1721,3 +1721,68 @@
   border-radius: 999px;
   background: #3c9c78;
 }
+
+/* Weather and model panels (WindPanels.tsx): a label row above a full-width slider, as in the style lab. */
+.editor-slider {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.editor-slider > span {
+  display: flex;
+  justify-content: space-between;
+  color: var(--editor-muted);
+}
+
+.editor-slider > span strong {
+  color: var(--editor-text, inherit);
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-slider input[type="range"] {
+  width: 100%;
+}
+
+.editor-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.4rem;
+}
+
+.editor-preset-row button {
+  flex: 1 1 auto;
+  min-width: 4.5rem;
+}
+
+.editor-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.editor-checkbox input[type="checkbox"] {
+  width: 1rem;
+  min-height: 1rem;
+}
+
+.editor-color-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--editor-muted);
+}
+
+.editor-color-row input[type="color"] {
+  width: 2.3rem;
+  min-height: 1.6rem;
+  padding: 0.1rem;
+}
+
+.editor-seed-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 0.45rem;
+}

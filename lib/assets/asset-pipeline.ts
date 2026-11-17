@@ -2,25 +2,37 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { Logger, NodeIO, type Document } from "@gltf-transform/core";
-import { ALL_EXTENSIONS } from "@gltf-transform/extensions";
-import { dedup, getBounds, meshopt, prune, weld } from "@gltf-transform/functions";
+import { ALL_EXTENSIONS, EXTTextureWebP } from "@gltf-transform/extensions";
+import { dedup, getBounds, meshopt, prune, resample, weld } from "@gltf-transform/functions";
 import { MeshoptDecoder, MeshoptEncoder } from "meshoptimizer";
+import sharp from "sharp";
 import { getPrefabDefinition } from "@/lib/prefabs/prefab-library";
-import { isAssetId, validateAssetMetadata, type AssetManifest, type AssetManifestEntry, type AssetMetadata } from "./asset-types";
+import { addOutlineNormals } from "./outline-normals";
+import { BASE_VERTEX_ATTRIBUTES, isAssetId, validateAssetMetadata, type AssetManifest, type AssetManifestEntry, type AssetMetadata } from "./asset-types";
 
 /**
  * The model pipeline (Node only): reads every folder in assets/models,
  * checks its metadata, optimises the model and writes the result and a
  * manifest to public/assets/models.
  *
- * Optimisation: duplicate accessors and materials merged, unused data
- * removed, vertices welded, then meshopt compression (smaller files, decoded
- * on the GPU-friendly path by the loader). Textures are copied as they are.
+ * Optimisation: vertex attributes nobody reads dropped (asset.json can keep
+ * more), clips trimmed to the ones asked for and root motion removed,
+ * transparency turned into alpha testing where asked, duplicate accessors and
+ * materials merged, unused data removed, animation keyframes resampled
+ * (redundant keys dropped), vertices welded, then meshopt compression
+ * (smaller files, decoded on the GPU-friendly path by the loader). Textures
+ * are re-encoded as WebP (quality 90, alpha lossless, so cut-out edges stay
+ * exact) and capped at `maxTextureSize`.
  *
  * Work is skipped for models whose source and metadata have not changed.
  */
 /** Raise when the optimisation steps change, so every output is rebuilt. */
-const PIPELINE_VERSION = 1;
+// 4: prune keeps the attributes prepareDocument chose (it dropped COLOR_1 before). 5: outline normals.
+const PIPELINE_VERSION = 5;
+
+/** Largest texture side kept unless asset.json says otherwise. */
+export const DEFAULT_MAX_TEXTURE_SIZE = 2048;
+const TEXTURE_QUALITY = 90;
 
 /** Sizes above these are reported as warnings; they do not fail the run. */
 export const ASSET_BUDGET = { bytes: 1_500_000, triangles: 60_000 };
@@ -65,9 +77,84 @@ function describe(document: Document) {
     materials: root.listMaterials().length,
     textures: root.listTextures().length,
     animations: root.listAnimations().map((animation) => animation.getName()),
+    attributes: [...new Set(root.listMeshes().flatMap((mesh) => mesh.listPrimitives().flatMap((primitive) => primitive.listSemantics())))].sort(),
     skinned: root.listSkins().length > 0,
     bounds: { min: [...bounds.min] as [number, number, number], max: [...bounds.max] as [number, number, number] },
   };
+}
+
+/**
+ * The per-model steps asset.json asks for, applied before the generic ones.
+ * Returns a problem to report, or null.
+ */
+export function prepareDocument(document: Document, metadata: AssetMetadata): string | null {
+  const root = document.getRoot();
+  const keep = new Set([...BASE_VERTEX_ATTRIBUTES, ...(metadata.attributes ?? [])]);
+  const present = new Set<string>();
+  for (const mesh of root.listMeshes()) {
+    for (const primitive of mesh.listPrimitives()) {
+      for (const semantic of primitive.listSemantics()) {
+        present.add(semantic);
+        if (!keep.has(semantic)) primitive.setAttribute(semantic, null);
+      }
+    }
+  }
+  const missingAttribute = (metadata.attributes ?? []).find((name) => !present.has(name));
+  if (missingAttribute) return `attribute ${missingAttribute} is not in the model (it has: ${[...present].sort().join(", ")}).`;
+
+  if (metadata.animations) {
+    const names = root.listAnimations().map((animation) => animation.getName());
+    const missing = metadata.animations.find((name) => !names.includes(name));
+    if (missing) return `animation "${missing}" is not in the model (it has: ${names.join(", ") || "none"}).`;
+    for (const animation of root.listAnimations()) {
+      if (metadata.animations.includes(animation.getName())) continue;
+      animation.listChannels().forEach((channel) => channel.dispose());
+      animation.listSamplers().forEach((sampler) => sampler.dispose());
+      animation.dispose();
+    }
+  }
+  if (metadata.rootMotionNode) {
+    if (!root.listNodes().some((node) => node.getName() === metadata.rootMotionNode)) return `rootMotionNode "${metadata.rootMotionNode}" is not a node of the model.`;
+    for (const animation of root.listAnimations()) {
+      for (const channel of animation.listChannels()) {
+        if (channel.getTargetPath() !== "translation" || channel.getTargetNode()?.getName() !== metadata.rootMotionNode) continue;
+        channel.getSampler()?.dispose();
+        channel.dispose();
+      }
+    }
+  }
+  if (metadata.alpha) {
+    for (const material of root.listMaterials()) {
+      if (metadata.alpha === "opaque") material.setAlphaMode("OPAQUE");
+      else if (material.getAlphaMode() !== "OPAQUE") material.setAlphaMode("MASK").setAlphaCutoff(metadata.alphaCutoff ?? 0.5);
+    }
+  }
+  return null;
+}
+
+/**
+ * Every texture as WebP, no larger than maxSize on either side, with sharp
+ * directly so alpha is kept lossless (cut-out edges stay exact). three.js's
+ * GLTFLoader reads EXT_texture_webp. The sharp devDependency must be the
+ * version @gltf-transform/functions loads (through ndarray-pixels): two
+ * copies of libvips in one process fail with "colourspace: parameter space
+ * not set".
+ */
+export async function compressTextures(document: Document, maxSize: number) {
+  const textures = document.getRoot().listTextures();
+  if (textures.length === 0) return;
+  for (const texture of textures) {
+    const image = texture.getImage();
+    if (!image) continue;
+    const encoded = await sharp(Buffer.from(image))
+      .resize({ width: maxSize, height: maxSize, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: TEXTURE_QUALITY, alphaQuality: 100, effort: 6 })
+      .toBuffer();
+    texture.setImage(new Uint8Array(encoded)).setMimeType("image/webp");
+    const uri = texture.getURI();
+    if (uri) texture.setURI(uri.replace(/\.(png|jpe?g)$/i, ".webp"));
+  }
+  document.createExtension(EXTTextureWebP).setRequired(true);
 }
 
 export async function processAssets(options: { root?: string; force?: boolean } = {}): Promise<AssetReport> {
@@ -132,12 +219,27 @@ export async function processAssets(options: { root?: string; force?: boolean } 
         document = await io.read(modelFile);
         // The transforms narrate every step at the default level; the report below says what matters.
         document.setLogger(new Logger(Logger.Verbosity.WARN));
-        await document.transform(dedup(), prune(), weld(), meshopt({ encoder: MeshoptEncoder, level: "medium" }));
+        const problem = prepareDocument(document, metadata);
+        if (problem) {
+          fail(problem);
+          continue;
+        }
+        if (metadata.style?.outline) addOutlineNormals(document);
+        await document.transform(dedup(), prune({ keepAttributes: true }), resample(), weld(), meshopt({ encoder: MeshoptEncoder, level: "medium" }));
+        await compressTextures(document, metadata.maxTextureSize ?? DEFAULT_MAX_TEXTURE_SIZE);
       } catch (error) {
         fail(`could not be read or optimised (${error instanceof Error ? error.message : String(error)}).`);
         continue;
       }
       const stats = describe(document);
+      const windSource = metadata.wind?.weightSource;
+      if (windSource && windSource !== "height") {
+        const attribute = { color_1: "COLOR_1", uv: "TEXCOORD_0", uv1: "TEXCOORD_1", uv2: "TEXCOORD_2" }[windSource.split("-")[0]];
+        if (!attribute || !stats.attributes.includes(attribute)) {
+          fail(`wind.weightSource ${windSource} needs ${attribute ?? "an attribute"}; keep it with "attributes" in asset.json.`);
+          continue;
+        }
+      }
       if (metadata.animation && !stats.animations.includes(metadata.animation)) {
         fail(`animation "${metadata.animation}" is not in the model (it has: ${stats.animations.join(", ") || "none"}).`);
         continue;
@@ -154,6 +256,9 @@ export async function processAssets(options: { root?: string; force?: boolean } 
         anchor: metadata.anchor ?? "bottom",
         collision: metadata.collision ?? "blocking",
         animation: metadata.animation,
+        wind: metadata.wind,
+        style: metadata.style,
+        actor: metadata.actor,
         variants: metadata.variants ?? [],
         replacesPrefabs: metadata.replacesPrefabs ?? [],
         tags: metadata.tags ?? [],

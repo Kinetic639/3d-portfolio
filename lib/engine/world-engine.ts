@@ -20,6 +20,11 @@ import { buildBakedTerrain, buildWorldForMap, type TerrainSource } from "./terra
 import { buildSurfaceChunkMesh } from "@/lib/terrain/surface-mesher";
 import { createVoxelWorldQuery, type WorldQuery } from "./world-query";
 import { FrameRecorder } from "@/lib/perf/frame-recorder";
+import { ModelWindRegistry } from "./model-wind";
+import { ModelStyleRegistry } from "./model-style";
+import { resolveActor, type ActorMovement } from "./actor";
+import type { PlacedActor } from "./entity-meshes";
+import type { ActorHud } from "@/lib/bridge/world-bridge";
 
 /**
  * The 3D runtime. Plain TypeScript on three.js: no React anywhere in this
@@ -104,12 +109,31 @@ const WARM_FRAME_BUDGET_MS = 10;
 /** Longest single slice of warm-up work per animation frame. */
 const WARM_SLICE_MS = 6;
 
+/** 30 frames per second for wind alone. */
+const WIND_FRAME_MS = 1000 / 30;
+
 const nextFrame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve));
 
 export class WorldEngine {
   readonly stats: EngineStats = { frames: 0, loaderFrames: 0, picks: 0, frameCpuMs: 0, frameIntervalMs: 0, worstFrameIntervalMs: 0, drawCalls: 0, triangles: 0, geometries: 0, textures: 0, programs: 0 };
   /** The last few seconds of world frames (not warm-up or loader frames), for the perf HUD. */
   readonly frames = new FrameRecorder();
+  private readonly frustum = new THREE.Frustum();
+  private readonly viewProjection = new THREE.Matrix4();
+  private modelStyles: ModelStyleRegistry | null = null;
+  /** The creature the visitor chose: clicks on the ground send it there. */
+  private chosenActor: PlacedActor | null = null;
+  /** Ground of the loaded map, for sending creatures. */
+  private query: WorldQuery | null = null;
+  private actorMovement: ActorHud["movement"] = "auto";
+  private followingActor = false;
+  private readonly actorTarget = new THREE.Vector3();
+  /** Where the entry left the camera: Reset view returns there. */
+  private startView: ReturnType<CameraRig["getGoal"]> | null = null;
+  private readonly shadowFocus = new THREE.Vector3();
+  /** The last frame was drawn only because of the wind: draw at WIND_FRAME_MS. */
+  private windOnly = false;
+  private lastWindFrameAt = 0;
   warmUpReport: WarmUpReport | null = null;
   private readonly canvas: HTMLCanvasElement;
   private readonly bridge: WorldBridge;
@@ -177,8 +201,13 @@ export class WorldEngine {
     this.sky = this.scene.background;
     this.rig = new CameraRig(canvas, {
       ...VISITOR_CAMERA,
-      onChange: () => this.invalidate(),
+      // Input wants full-rate frames at once, even when only the wind was moving before.
+      onChange: () => {
+        this.windOnly = false;
+        this.invalidate();
+      },
       onTap: (clientX, clientY) => this.handleTap(clientX, clientY),
+      onUserPan: () => this.stopFollowing(),
     });
     this.rig.setEnabled(false);
     bridge.diagnostics.engine = { frames: this.frames, stats: this.stats };
@@ -220,6 +249,15 @@ export class WorldEngine {
       this.schedulePick();
     });
     this.cleanup.push(bridge.commands.subscribe((command) => this.handleCommand(command)));
+    // Wind is motion nobody asked for: still for visitors who prefer reduced motion.
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onMotionPreference = () => {
+      this.environment.wind.setStilled(reducedMotion.matches);
+      this.invalidate();
+    };
+    onMotionPreference();
+    reducedMotion.addEventListener("change", onMotionPreference);
+    this.cleanup.push(() => reducedMotion.removeEventListener("change", onMotionPreference));
   }
 
   /**
@@ -299,11 +337,25 @@ export class WorldEngine {
     minigameVoxels: Omit<MinigameHostOptions, "map"> | null,
   ) {
     this.terrain = terrain;
+    this.query = query;
     if (minigameVoxels && MinigameHost.playableZones(definition).length > 0) {
       this.minigames = new MinigameHost({ map: definition, ...minigameVoxels });
       this.scene.add(this.minigames.group);
     }
-    this.entities = buildEntityLayer(definition.entities, models);
+    this.environment.apply(definition.environment);
+    // Shadows are decided before warm-up, so their programs are compiled with everything else.
+    this.applyShadowAvailability(false);
+    const wind = new ModelWindRegistry(models, this.environment.wind, definition.modelSettings);
+    this.modelStyles = new ModelStyleRegistry(models, definition.modelSettings, definition.environment.style);
+    this.syncOutlineScale();
+    const actors = {
+      forModel: (modelId: string) => {
+        const entry = models.entry(modelId);
+        return entry?.actor ? resolveActor(entry.actor, definition.modelSettings?.[modelId]?.actor) : null;
+      },
+      groundAt: (x: number, z: number) => groundHeight(query, x, z),
+    };
+    this.entities = buildEntityLayer(definition.entities, models, { wind: wind.options(), style: this.modelStyles.options(), actors });
     this.interaction = new InteractionLayer({
       map: definition,
       query,
@@ -311,7 +363,6 @@ export class WorldEngine {
       describeContent: options.describeContent ?? (() => null),
     });
     this.scene.add(terrain.group, this.entities.group, this.interaction.group);
-    this.environment.apply(definition.environment);
 
     // The camera may only centre on the playable area; backdrop scenery stays out of reach.
     const min = query.cellToWorld(definition.playableBounds.minX, 0, definition.playableBounds.minZ);
@@ -700,6 +751,12 @@ export class WorldEngine {
       this.entities.dispose();
       this.entities = null;
     }
+    this.modelStyles?.dispose();
+    this.modelStyles = null;
+    this.chosenActor = null;
+    this.followingActor = false;
+    this.query = null;
+    this.bridge.set({ actor: null });
     this.viewBeforeFocus = null;
     this.bridge.set({ hovered: null });
   }
@@ -714,6 +771,7 @@ export class WorldEngine {
         break;
       case "set-quality":
         this.bridge.set({ quality: command.quality });
+        this.applyShadowAvailability(true);
         this.resize();
         break;
       case "focus-content":
@@ -722,6 +780,24 @@ export class WorldEngine {
         break;
       case "leave-minigame":
         this.leaveMinigame();
+        break;
+      case "release-actor":
+        this.chooseActor(null);
+        break;
+      case "set-angle-lock":
+        this.setAngleLock(command.locked);
+        break;
+      case "reset-view":
+        this.resetView();
+        break;
+      case "follow-actor":
+        this.followingActor = this.chosenActor !== null;
+        this.publishActor();
+        this.invalidate();
+        break;
+      case "set-actor-movement":
+        this.actorMovement = command.movement;
+        this.publishActor();
         break;
       case "clear-focus":
         this.interaction?.setFocused(null);
@@ -841,6 +917,19 @@ export class WorldEngine {
       this.invalidate();
       return;
     }
+    const ray = this.rayAt(clientX, clientY);
+    const actor = this.actorOnRay(ray);
+    if (this.chosenActor) {
+      // The chosen creature: clicking it again lets it go; clicking the ground sends it there.
+      if (actor === this.chosenActor) this.chooseActor(null);
+      else if (actor) this.chooseActor(actor);
+      else this.sendActor(ray);
+      return;
+    }
+    if (actor) {
+      this.chooseActor(actor);
+      return;
+    }
     const item = this.pickAt(clientX, clientY);
     if (item?.minigame && item.zoneNumericId !== null) {
       this.startMinigame(item);
@@ -893,6 +982,12 @@ export class WorldEngine {
   private readonly frame = (now: number) => {
     this.frameHandle = 0;
     if (this.disposed || !this.active) return;
+    // When only the wind moves, half the display rate is enough and saves battery.
+    if (this.windOnly && this.lastWindFrameAt > 0 && now - this.lastWindFrameAt < WIND_FRAME_MS - 4) {
+      this.invalidate();
+      return;
+    }
+    this.lastWindFrameAt = now;
     const startedAt = performance.now();
     // Clamp: after an idle gap the first frame must not see a huge time step.
     const delta = this.lastTickAt > 0 ? Math.min((now - this.lastTickAt) / 1000, 0.1) : 1 / 60;
@@ -902,8 +997,28 @@ export class WorldEngine {
     const waving = this.advanceWave(delta);
     // Animated models need a frame every frame for as long as the world is shown.
     const bursting = this.minigames?.update(delta) ?? false;
-    const animating = (this.entities?.update(delta) ?? false) || waving || bursting;
-    this.environment.update(this.elapsedSeconds);
+    // Wind needs frames only while it blows and something it moves is in view.
+    this.updateFrustum();
+    const windy = this.environment.wind.active && (this.entities?.windInView(this.frustum) ?? false);
+    const othersAnimating = (this.entities?.update(delta, this.frustum) ?? false) || waving || bursting;
+    const animating = othersAnimating || windy;
+    this.windOnly = windy && !othersAnimating && !cameraMoving && this.entry === null;
+    if (this.chosenActor) {
+      const status = this.chosenActor.actor.status;
+      if (this.followingActor) {
+        const at = this.chosenActor.actor.position;
+        if (this.actorTarget.distanceToSquared(at) > 1e-6) {
+          this.actorTarget.copy(at);
+          this.rig.lookAt(at.x, at.z);
+        }
+      }
+      if (status.state !== this.bridge.store.getState().actor?.state) this.publishActor();
+    }
+    this.environment.update(this.elapsedSeconds, delta);
+    if (this.renderer.shadowMap.enabled) {
+      const view = this.rig.getView();
+      this.environment.followView(this.shadowFocus.set(view.x, 0, view.z), view.distance);
+    }
     if (this.terrain?.uniforms) this.terrain.uniforms.uTime.value = this.elapsedSeconds;
     // While the camera leaves the loader, the page is still fading out underneath: no sky yet,
     // so the canvas covers the whole viewport at once without a visible edge.
@@ -964,6 +1079,7 @@ export class WorldEngine {
     this.entry = null;
     // The camera is exactly where the rig rests; hand it back.
     const goal = this.rig.getGoal();
+    this.startView = { ...goal };
     this.rig.lookAt(goal.x, goal.z, goal.distance, true);
     this.entities?.setPopTime(POP_COMPLETE);
     if (this.interaction) this.interaction.group.visible = true;
@@ -988,6 +1104,103 @@ export class WorldEngine {
     return true;
   }
 
+  /** The original's angle lock: keeps the current tilt; turning and zooming stay free. */
+  private setAngleLock(locked: boolean) {
+    const pitch = this.rig.getGoal().pitchDegrees;
+    this.rig.configure(locked
+      ? { minPitchDegrees: pitch, maxPitchDegrees: pitch }
+      : { minPitchDegrees: VISITOR_CAMERA.minPitchDegrees, maxPitchDegrees: VISITOR_CAMERA.maxPitchDegrees });
+    this.bridge.set({ angleLocked: locked });
+  }
+
+  /** Back to the view the entry ended on (the angle lock is lifted, nothing is followed). */
+  private resetView() {
+    const view = this.startView;
+    if (!view) return;
+    if (this.bridge.store.getState().angleLocked) this.setAngleLock(false);
+    this.followingActor = false;
+    if (this.chosenActor) this.publishActor();
+    this.rig.setOrientation(view.yawDegrees, view.pitchDegrees);
+    this.rig.lookAt(view.x, view.z, view.distance);
+    this.invalidate();
+  }
+
+  private updateFrustum() {
+    const camera = this.rig.camera;
+    camera.updateMatrixWorld();
+    this.viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.viewProjection);
+  }
+
+  /** For tests and the perf probe. */
+  windInView() {
+    if (!this.entities) return false;
+    this.updateFrustum();
+    return this.entities.windInView(this.frustum);
+  }
+
+  /** The nearest creature whose bounds the ray passes through. */
+  private actorOnRay(ray: THREE.Ray) {
+    let best: PlacedActor | null = null;
+    let bestDistance = Infinity;
+    for (const placed of this.entities?.actors ?? []) {
+      const hit = ray.intersectSphere(placed.bounds(), this.actorTarget);
+      if (!hit) continue;
+      const distance = hit.distanceTo(ray.origin);
+      if (distance < bestDistance) {
+        best = placed;
+        bestDistance = distance;
+      }
+    }
+    if (best) this.actorTarget.copy(best.actor.position);
+    return best;
+  }
+
+  /** Chooses a creature (the camera follows it) or lets it go (null). */
+  private chooseActor(placed: PlacedActor | null) {
+    this.chosenActor = placed;
+    this.followingActor = placed !== null;
+    if (placed) this.actorTarget.set(Number.NaN, 0, 0);
+    this.interaction?.setHovered(null);
+    this.publishActor();
+    this.invalidate();
+  }
+
+  /** Sends the chosen creature to where the ray meets the ground. */
+  private sendActor(ray: THREE.Ray) {
+    const placed = this.chosenActor;
+    const hit = this.query?.raycast(ray.origin, ray.direction);
+    if (!placed || !hit) return;
+    const point = ray.at(hit.distance, new THREE.Vector3());
+    const destination = new THREE.Vector3(point.x, groundHeight(this.query!, point.x, point.z), point.z);
+    placed.actor.goTo(destination, this.movementTo(placed, destination));
+    this.followingActor = true;
+    this.publishActor();
+    this.invalidate();
+  }
+
+  /** "auto": walk close by, run further, fly far or up and down a step. */
+  private movementTo(placed: PlacedActor, destination: THREE.Vector3): ActorMovement {
+    if (this.actorMovement !== "auto") return this.actorMovement;
+    const from = placed.actor.position;
+    const distance = Math.hypot(destination.x - from.x, destination.z - from.z);
+    if (distance > 10 || Math.abs(destination.y - from.y) > 1.5) return "flight";
+    return distance > 4 ? "run" : "walk";
+  }
+
+  private stopFollowing() {
+    if (!this.followingActor) return;
+    this.followingActor = false;
+    this.publishActor();
+  }
+
+  private publishActor() {
+    const placed = this.chosenActor;
+    this.bridge.set({
+      actor: placed ? { entityId: placed.entityId, name: placed.name, state: placed.actor.status.state, movement: this.actorMovement, following: this.followingActor } : null,
+    });
+  }
+
   private resize() {
     const width = this.canvas.clientWidth;
     const height = this.canvas.clientHeight;
@@ -998,7 +1211,32 @@ export class WorldEngine {
     this.rig.setAspect(width / height);
     this.loaderCamera.aspect = width / height;
     this.loaderCamera.updateProjectionMatrix();
+    this.syncOutlineScale();
     this.invalidate();
+  }
+
+  /** Screen-space outlines need the size of a pixel at distance 1. */
+  private syncOutlineScale() {
+    this.modelStyles?.surface.setViewport(this.rig.camera.fov, this.canvas.clientHeight || 1);
+  }
+
+  /**
+   * Shadow maps on when the map has shadows and the quality tier is not low.
+   * Turning them on or off changes every lit program, so a change after
+   * warm-up (a quality switch) recompiles them: `recompile`.
+   */
+  private applyShadowAvailability(recompile: boolean) {
+    const enabled = this.environment.shadowsEnabled && this.bridge.store.getState().quality !== "low";
+    if (this.renderer.shadowMap.enabled === enabled) return;
+    this.renderer.shadowMap.enabled = enabled;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.environment.sun.castShadow = enabled;
+    if (recompile) {
+      this.scene.traverse((object) => {
+        const material = (object as THREE.Mesh).material;
+        for (const item of Array.isArray(material) ? material : material ? [material] : []) item.needsUpdate = true;
+      });
+    }
   }
 }
 
@@ -1022,4 +1260,11 @@ function firstColumn(world: VoxelWorld, zoneId: number) {
   const { width } = world.config;
   const index = world.zones.indexOf(zoneId);
   return index < 0 ? null : { x: index % width, z: Math.floor(index / width) };
+}
+
+/** Ground height at a world position (the query works in grid columns). */
+function groundHeight(query: WorldQuery, x: number, z: number) {
+  const column = Math.min(query.width - 1, Math.max(0, Math.floor(x + query.width / 2)));
+  const row = Math.min(query.depth - 1, Math.max(0, Math.floor(z + query.depth / 2)));
+  return query.surfaceHeight(column, row);
 }

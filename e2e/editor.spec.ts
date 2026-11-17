@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { trackErrors } from "./helpers";
+import { enterButton, openLanding, trackErrors, waitForPhase } from "./helpers";
 
 /**
  * The editor exists only in development, so these tests are skipped against a
@@ -15,7 +15,12 @@ type EditorProbe = {
   session: {
     world: { getHighestNonAirY: (x: number, z: number) => number | null; getBlock: (x: number, y: number, z: number) => number; getColumnZone: (x: number, z: number) => number; gridToWorld: (x: number, y: number, z: number) => { x: number; y: number; z: number } };
     getEntities: () => Array<{ id: string; transform: { position: { x: number; y: number; z: number }; rotation: { y: number }; scale: { x: number } }; contentReference?: { contentId: string } }>;
-    getMeta: () => { name: string; zones: Array<{ numericId: number; label: string; kind?: string; minigame?: { gameId: string } }> };
+    getMeta: () => {
+      name: string;
+      zones: Array<{ numericId: number; label: string; kind?: string; minigame?: { gameId: string } }>;
+      environment: { wind: { strength: number } & Record<string, unknown>; lighting?: Record<string, unknown>; style?: Record<string, unknown> };
+      modelSettings?: Record<string, unknown>;
+    };
     undoLabel: string | null;
     isDirty: boolean;
   };
@@ -25,7 +30,7 @@ type EditorProbe = {
     resetWorstFrame: () => void;
     isBakedView: boolean;
   };
-  store: { getState: () => { selection: string[]; settings: { tool: string; brush: { size: number } } } };
+  store: { getState: () => { selection: string[]; settings: { tool: string; brush: { size: number } } }; setState: (patch: { selection: string[] }) => void };
 };
 
 declare global {
@@ -387,6 +392,20 @@ test("Bake writes the baked world next to the map and tracks whether it is curre
   await expect.poll(status).toBe("stale");
 });
 
+test("models are listed under their own category, animals and characters included", async ({ page }) => {
+  await openEditor(page);
+  await workspace(page, "Objects");
+  const category = leftDock(page).getByRole("combobox", { name: "Category" });
+  await expect(category.locator("option", { hasText: "animals & characters" })).toHaveCount(1);
+  await category.selectOption("creatures");
+  await expect(leftDock(page).getByRole("option", { name: /Crow/ })).toBeVisible();
+  await expect(leftDock(page).getByRole("option", { name: /Pine Tree/ })).toHaveCount(0);
+  await category.selectOption("nature");
+  await expect(leftDock(page).getByRole("option", { name: /Pine Tree \(fluffy\)/ })).toBeVisible();
+  await expect(leftDock(page).getByRole("option", { name: /Land Rock \(small\)/ })).toBeVisible();
+  await expect(leftDock(page).getByRole("option", { name: /Crow/ })).toHaveCount(0);
+});
+
 test("models from the asset pipeline appear in the object palette with a picture and can be placed", async ({ page }) => {
   await openEditor(page);
   await workspace(page, "Objects");
@@ -418,4 +437,166 @@ test("models from the asset pipeline appear in the object palette with a picture
   await expect(page.locator(".editor-validation-list")).toContainText("No validation issues");
   await page.keyboard.press("Control+z");
   await page.keyboard.press("Control+z");
+});
+
+test("wind: presets and values in the Map workspace, a model's response and debug views in the inspector", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openEditor(page);
+  await workspace(page, "Objects");
+  await leftDock(page).getByRole("combobox", { name: "Category" }).selectOption("nature");
+  await leftDock(page).getByRole("option", { name: /Pine Tree \(fluffy\)/ }).click();
+  const spot = await columnTop(page, 20, 20);
+  await page.mouse.click(spot.x, spot.y);
+  const pine = (await entities(page)).find((entity) => (entity as { assetReference?: string }).assetReference === "pine-tree-fluffy")!;
+  expect(pine).toBeTruthy();
+
+  await workspace(page, "Map");
+  const panel = page.locator("details[aria-label='Weather and wind']");
+  await panel.getByRole("button", { name: "Windy" }).click();
+  await expect(panel.getByRole("button", { name: "Windy" })).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().environment.wind)).toMatchObject({ strength: 0.72, gustStrength: 0.28, turbulence: 0.3 });
+  // The tree is in view and the wind blows: the viewport keeps drawing.
+  const framesWhile = async () => { const before = (await stats(page)).frames; await page.waitForTimeout(600); return (await stats(page)).frames - before; };
+  expect(await framesWhile()).toBeGreaterThan(10);
+  await panel.getByRole("button", { name: "Calm" }).click();
+  await page.waitForTimeout(300);
+  expect(await framesWhile()).toBeLessThan(3);
+  await page.keyboard.press("Control+z");
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().environment.wind.strength)).toBe(0.72);
+
+  await page.evaluate((id) => window.__editor!.store.setState({ selection: [id] }), pine.id);
+  const response = page.locator("details[aria-label='Wind response']");
+  await expect(response).toContainText("Pine Tree (fluffy)");
+  await response.getByRole("combobox", { name: "Wind weight source" }).selectOption("height");
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().modelSettings)).toEqual({ "pine-tree-fluffy": { wind: { weightSource: "height" } } });
+  const debug = page.getByRole("combobox", { name: "Model debug view" });
+  for (const view of ["weight", "color_1-g", "color-r", "uv", "normal"]) await debug.selectOption(view);
+  await response.getByRole("button", { name: "Reset to model defaults" }).click();
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().modelSettings)).toBeUndefined();
+  // Every shader compiled: a GLSL error would be logged here.
+  await page.waitForTimeout(300);
+  expect(errors).toEqual([]);
+});
+
+test("style: lighting, surface, edges and shadows in the Map workspace, a model's style in the inspector", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openEditor(page);
+  await workspace(page, "Objects");
+  await leftDock(page).getByRole("combobox", { name: "Category" }).selectOption("nature");
+  await leftDock(page).getByRole("option", { name: /Land Rock \(small\)/ }).click();
+  const spot = await columnTop(page, 22, 22);
+  await page.mouse.click(spot.x, spot.y);
+  const rock = (await entities(page)).find((entity) => (entity as { assetReference?: string }).assetReference === "rock-land-small")!;
+
+  await workspace(page, "Map");
+  const environment = () => page.evaluate(() => window.__editor!.session.getMeta().environment);
+  await page.locator("details[aria-label='Lighting']").getByRole("button", { name: "Style lab" }).click();
+  expect((await environment()).lighting).toMatchObject({ sunIntensity: 2.4, sunColor: "#fff0d3" });
+  const edges = page.locator("details[aria-label='Edges and depth']");
+  await edges.getByRole("checkbox", { name: "Shadows" }).check();
+  expect(await page.evaluate(() => (window.__editor!.viewport as unknown as { renderer: { shadowMap: { enabled: boolean } } }).renderer.shadowMap.enabled)).toBe(true);
+  await page.locator("details[aria-label='Surface']").getByRole("slider", { name: "Hatch power" }).fill("0.6");
+  await edges.getByRole("button", { name: "World units" }).click();
+  expect((await environment()).style).toMatchObject({ hatchStrength: 0.6, outlineMode: "world", outlineThickness: 0.012 });
+  await page.keyboard.press("Control+z");
+  expect((await environment()).style).toMatchObject({ hatchStrength: 0.6 });
+  expect((await environment()).style?.outlineMode).not.toBe("world");
+
+  await page.evaluate((id) => window.__editor!.store.setState({ selection: [id] }), rock.id);
+  const modelStyle = page.locator("details[aria-label='Model style']");
+  await expect(modelStyle).toContainText("Land Rock (small)");
+  await modelStyle.getByRole("button", { name: "Model's own" }).click();
+  await modelStyle.getByRole("checkbox", { name: "Contact AO patch" }).uncheck();
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().modelSettings)).toEqual({ "rock-land-small": { style: { shading: "standard", contactShadow: false } } });
+  await modelStyle.getByRole("button", { name: "Reset to model defaults" }).click();
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().modelSettings)).toBeUndefined();
+  await page.waitForTimeout(300);
+  expect(errors).toEqual([]);
+});
+
+test("scatter: one click places many of the chosen object on the ground, as one undo step", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openEditor(page);
+  await workspace(page, "Objects");
+  await leftDock(page).getByRole("combobox", { name: "Category" }).selectOption("nature");
+  await leftDock(page).getByRole("option", { name: /Pine Tree \(fluffy\)/ }).click();
+  const scatter = page.locator("details[aria-label='Scatter']");
+  await scatter.getByRole("checkbox", { name: "Scatter on click" }).check();
+  await scatter.getByRole("slider", { name: "Count" }).fill("15");
+  await scatter.getByRole("slider", { name: "Radius" }).fill("10");
+  await scatter.getByRole("slider", { name: "Spacing" }).fill("2");
+  const pines = async () => (await entities(page)).filter((entity) => (entity as { assetReference?: string }).assetReference === "pine-tree-fluffy") as unknown as Array<{ transform: { position: { x: number; y: number; z: number }; scale: { x: number } } }>;
+  const centre = await columnTop(page, 32, 32);
+  await page.mouse.click(centre.x, centre.y);
+  const placed = await pines();
+  expect(placed.length).toBeGreaterThan(8);
+  expect(placed.length).toBeLessThanOrEqual(15);
+  // Apart and on the ground.
+  for (const [index, pine] of placed.entries()) {
+    for (const other of placed.slice(index + 1)) expect(Math.hypot(pine.transform.position.x - other.transform.position.x, pine.transform.position.z - other.transform.position.z)).toBeGreaterThanOrEqual(1.99);
+  }
+  expect(new Set(placed.map((pine) => pine.transform.scale.x)).size).toBeGreaterThan(1);
+  expect(await undoLabel(page)).toMatch(/Scatter \d+ Pine Tree/);
+  await page.keyboard.press("Control+z");
+  expect(await pines()).toHaveLength(0);
+  await page.keyboard.press("Control+y");
+  expect((await pines()).length).toBe(placed.length);
+  await scatter.getByRole("button", { name: /Clear all Pine Tree/ }).click();
+  expect(await pines()).toHaveLength(0);
+  expect(errors).toEqual([]);
+});
+
+test("creatures: the crow's motion and clips in the editor; in the world, choose it and send it", async ({ page }) => {
+  const errors = trackErrors(page);
+  await openEditor(page);
+  await workspace(page, "Objects");
+  await leftDock(page).getByRole("combobox", { name: "Category" }).selectOption("creatures");
+  await leftDock(page).getByRole("option", { name: /Crow/ }).click();
+  const spot = await columnTop(page, 30, 30);
+  await page.mouse.click(spot.x, spot.y);
+  const crow = (await entities(page)).find((entity) => (entity as { assetReference?: string }).assetReference === "crow")!;
+  await page.evaluate((id) => window.__editor!.store.setState({ selection: [id] }), crow.id);
+  const panel = page.locator("details[aria-label='Actor']");
+  await panel.getByRole("combobox", { name: "Preview clip" }).selectOption("ANIM_Crow_Run");
+  const actorState = () => page.evaluate(() => (window.__editor!.viewport as unknown as { entities: { actors: Array<{ actor: { status: { state: string; animation: string } } }> } }).entities.actors[0].actor.status);
+  await expect.poll(actorState).toMatchObject({ state: "preview", animation: "ANIM_Crow_Run" });
+  await panel.getByRole("slider", { name: "Walk speed" }).fill("1.5");
+  expect(await page.evaluate(() => window.__editor!.session.getMeta().modelSettings)).toEqual({ crow: { actor: { walkSpeed: 1.5 } } });
+  await page.keyboard.press("Control+s");
+  await expect(statusBar(page)).not.toContainText("unsaved");
+
+  // Not openWorld: a creature in view animates, so the world never stops drawing (by design).
+  await openLanding(page, `/map/${SCRATCH}`);
+  await enterButton(page).click();
+  await waitForPhase(page, "world");
+  type WorldProbe = { entities: { actors: Array<{ actor: { status: { state: string }; position: { x: number; y: number; z: number; clone: () => { project: (camera: unknown) => { x: number; y: number } } } }; bounds: () => { center: { clone: () => { project: (camera: unknown) => { x: number; y: number } } } } }> }; rig: { camera: unknown; lookAt: (x: number, z: number, d: number, i: boolean) => void; configure: (o: object) => void }; invalidate: () => void };
+  await page.evaluate(() => {
+    const engine = window.__worldEngine as unknown as WorldProbe;
+    const at = engine.entities.actors[0].actor.position;
+    engine.rig.configure({ minDistance: 6 });
+    engine.rig.lookAt(at.x, at.z, 12, true);
+    engine.invalidate();
+  });
+  await page.waitForTimeout(500);
+  const toScreen = (kind: "crow" | "ground") => page.evaluate((which) => {
+    const engine = window.__worldEngine as unknown as WorldProbe;
+    const placed = engine.entities.actors[0];
+    const point = which === "crow" ? placed.bounds().center.clone() : placed.actor.position.clone();
+    const ndc = which === "crow" ? point.project(engine.rig.camera) : (() => { const p = placed.actor.position.clone() as unknown as { x: number; add: (v: object) => { project: (c: unknown) => { x: number; y: number } } }; return p.add({ x: 4, y: 0, z: 0 }).project(engine.rig.camera); })();
+    const rect = document.querySelector("canvas")!.getBoundingClientRect();
+    return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
+  }, kind);
+  const crowAt = await toScreen("crow");
+  await page.mouse.click(crowAt.x, crowAt.y);
+  const hud = page.getByRole("region", { name: "Crow" });
+  await expect(hud).toBeVisible();
+  await hud.getByRole("button", { name: "Walk" }).click();
+  const ground = await toScreen("ground");
+  await page.mouse.click(ground.x, ground.y);
+  const state = () => page.evaluate(() => (window.__worldEngine as unknown as WorldProbe).entities.actors[0].actor.status.state);
+  await expect.poll(state).toBe("walking");
+  await expect.poll(state, { timeout: 10_000 }).toBe("idle");
+  await page.keyboard.press("Escape");
+  await expect(hud).toHaveCount(0);
+  expect(errors).toEqual([]);
 });

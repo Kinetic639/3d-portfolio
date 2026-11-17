@@ -124,6 +124,10 @@ export function getTerrainAtlas(): TerrainAtlas {
 }
 
 const VERTEX_SHADER = /* glsl */ `
+  // Shadows from models and prefabs, when the map has them (three.js's own shadow code).
+  #include <common>
+  #include <shadowmap_pars_vertex>
+
   uniform float uExpansionProgress;
   uniform float uTime;
   uniform float uLoaderMotion;
@@ -175,11 +179,20 @@ const VERTEX_SHADER = /* glsl */ `
     vUvMirror = step(3.5, aTex.z);
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(grownPosition, 1.0);
+
+    vec4 worldPosition = modelMatrix * vec4(grownPosition, 1.0);
+    vec3 transformedNormal = normalMatrix * normal;
+    #include <shadowmap_vertex>
   }
 `;
 
 const FRAGMENT_SHADER = /* glsl */ `
   precision highp sampler2DArray;
+  #include <common>
+  #include <packing>
+  #include <lights_pars_begin>
+  #include <shadowmap_pars_fragment>
+  #include <shadowmask_pars_fragment>
   uniform sampler2DArray uAtlas;
   // Layer of each texture kind's first tile, indexed by kind - 1.
   uniform float uKindLayer[${TILE_ROWS.length}];
@@ -226,6 +239,8 @@ const FRAGMENT_SHADER = /* glsl */ `
     float light = clamp(dot(normalize(vNormal), lightDirection), 0.0, 1.0);
     vec3 color = base * (0.48 + light * 0.52);
     color += vec3(0.035, 0.028, 0.018);
+    // 1 outside shadows and when the map has none; the light's shadow intensity sets how dark.
+    color *= getShadowMask();
 
     #ifdef EDITOR_VIEW
     if (uGridLines > 0.5) {
@@ -242,7 +257,9 @@ const FRAGMENT_SHADER = /* glsl */ `
 
 export function createTerrainMaterial(uniforms: TerrainUniforms, atlas: THREE.Texture = getTerrainAtlas().texture, editor?: EditorTerrainUniforms) {
   return new THREE.ShaderMaterial({
-    uniforms: { ...uniforms, ...editor, uAtlas: { value: atlas }, uKindLayer: { value: KIND_FIRST_LAYER } },
+    // Light uniforms only for the shadow maps: the terrain keeps the original's own fixed light.
+    lights: true,
+    uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.lights]), ...uniforms, ...editor, uAtlas: { value: atlas }, uKindLayer: { value: KIND_FIRST_LAYER } },
     defines: editor ? { EDITOR_VIEW: 1 } : {},
     vertexShader: VERTEX_SHADER,
     fragmentShader: FRAGMENT_SHADER,

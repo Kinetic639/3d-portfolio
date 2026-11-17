@@ -447,3 +447,54 @@
     animation: none;
   }
 }
+
+/* The chosen creature's movement modes, under its HUD title. */
+.actorModes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.actorModes button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The panel's shell while the loader waits: drawn at the layer's 1 % opacity
+   so the browser has rasterized a panel (its large blurred shadow and its
+   text) before the first one opens. Without it the first open costs a
+   50-120 ms frame. Removed when the world is entered. */
+
+/* The original's view controls: small icon buttons, top right. */
+.viewButtons {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  gap: 6px;
+}
+
+.iconButton {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--foreground);
+  background: rgba(247, 249, 246, 0.76);
+  box-shadow: 0 8px 22px rgba(24, 34, 31, 0.12);
+  cursor: pointer;
+}
+
+.iconButton:hover,
+.iconButton[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.iconButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

@@ -152,15 +152,121 @@ export type MapPresentationConfig = {
   backgroundId?: string;
 };
 
+export type MapWind = {
+  /** Compass degrees the wind blows towards, 0 = north (-Z). */
+  direction: number;
+  /** 0 (still) to 2; the storm preset is 1.6. */
+  strength: number;
+  /** Off: nothing moves, whatever the other values. Default on. */
+  enabled?: boolean;
+  /** Tempo of the sway, 0-3. Default 1. */
+  speed?: number;
+  /** How much a gust adds to the strength, 0-1. Default 0. */
+  gustStrength?: number;
+  /** Gusts per second, 0-1. Default 0.1. */
+  gustFrequency?: number;
+  /** Fine, irregular motion of leaves, 0-1. Default 0. */
+  turbulence?: number;
+};
+
+/** Light on models (the terrain keeps the original's own light). Omitted fields: the original look. */
+export type MapLighting = {
+  sunIntensity?: number;
+  sunColor?: string;
+  /** Where the sun is, relative to what it lights; only the direction matters. */
+  sunPosition?: { x: number; y: number; z: number };
+  /** Sky light: colour from above, ground colour from below. */
+  skyIntensity?: number;
+  skyColor?: string;
+  groundColor?: string;
+};
+
+export type MapShadows = {
+  /** Models and prefabs cast shadows on the terrain and on each other. Default off. */
+  enabled?: boolean;
+  /** How dark a shadow makes the terrain, 0-1. */
+  strength?: number;
+  bias?: number;
+  normalBias?: number;
+  /** Shadow map side in pixels. */
+  mapSize?: 1024 | 2048 | 4096;
+};
+
+/** The style lab's surface look for models drawn with toon shading. */
+export type MapSurfaceStyle = {
+  /** Light steps, 2-6. */
+  toonBands?: number;
+  /** Cross-hatching in the shade, 0-1. */
+  hatchStrength?: number;
+  hatchScale?: number;
+  /** "uv": the hatching sticks to the surface; "screen": to the screen. */
+  hatchMode?: "uv" | "screen";
+  /** Edge thickness: pixels in "screen" mode, world units in "world" mode (the lab's). */
+  outlineThickness?: number;
+  outlineMode?: "screen" | "world";
+  outlineColor?: string;
+  /** Darkness of the soft contact patch under models that use it, 0-1. */
+  contactShadow?: number;
+};
+
 export type MapEnvironment = {
   /** Hours, 0-24. */
   timeOfDay: number;
-  wind: {
-    /** Compass degrees the wind blows towards, 0 = north (-Z). */
-    direction: number;
-    /** 0 (still) to 1 (storm). */
-    strength: number;
-  };
+  wind: MapWind;
+  lighting?: MapLighting;
+  shadows?: MapShadows;
+  style?: MapSurfaceStyle;
+};
+
+/** How a wind-reactive model moves; omitted fields use the model's defaults from asset.json. */
+export type ModelWindSettings = {
+  /** Whole-tree sway. */
+  sway?: number;
+  branches?: number;
+  /** Leaf flutter. */
+  leaves?: number;
+  /** Divides the sway and branch motion; higher is stiffer. */
+  stiffness?: number;
+  /** Which vertex data says how much each vertex moves: "color_1-r", "uv-y", "height"... */
+  weightSource?: string;
+};
+
+/** How a model is drawn; omitted fields use the model's defaults from asset.json. */
+export type ModelStyleSettings = {
+  /** "toon": the style lab's banded, hatched shading; "standard": the model's own material. */
+  shading?: "toon" | "standard";
+  /** Draw the edge (needs the outline data the pipeline computes for models with an outline by default). */
+  outline?: boolean;
+  /** Multiplies the map's outline thickness for this model. */
+  outlineScale?: number;
+  /** A soft dark patch on the ground under each instance. */
+  contactShadow?: boolean;
+  /** Casts a shadow when the map has shadows on. */
+  castShadow?: boolean;
+};
+
+/** How an animated creature moves when sent somewhere (the style lab's crow controls). Blocks per second, degrees. */
+export type ModelActorSettings = {
+  walkSpeed?: number;
+  runSpeed?: number;
+  flightSpeed?: number;
+  /** Height of the flight arc above the higher end. */
+  flightHeight?: number;
+  /** How fast it turns to face where it goes. */
+  turnSpeed?: number;
+  /** Seconds to blend from one clip to the next. */
+  crossfade?: number;
+  /** Lifts the model above the ground it stands on. */
+  groundOffset?: number;
+  /** Turns the model if its front is not where it walks. */
+  forwardYaw?: number;
+};
+
+/** Per-model settings for this map, by model id. They apply to every placed instance of the model. */
+export type ModelSettings = {
+  wind?: ModelWindSettings;
+  style?: ModelStyleSettings;
+  actor?: ModelActorSettings;
 };
 
 export type MapDefinition = {
@@ -184,6 +290,8 @@ export type MapDefinition = {
   defaultCameraPresetId?: string;
   presentation: MapPresentationConfig;
   environment: MapEnvironment;
+  /** Settings for models used in this map, by model id. */
+  modelSettings?: Record<string, ModelSettings>;
   metadata: {
     createdAt?: string;
     updatedAt?: string;
@@ -283,6 +391,7 @@ export function createMapDefinitionFromWorld(input: {
   defaultCameraPresetId?: string;
   presentation?: Partial<MapPresentationConfig>;
   environment?: MapEnvironment;
+  modelSettings?: Record<string, ModelSettings>;
   metadata?: MapDefinition["metadata"];
 }): MapDefinition {
   const { edits, zoneAssignments } = serializeWorldEdits(input.world);
@@ -318,6 +427,7 @@ export function createMapDefinitionFromWorld(input: {
       backgroundId: input.presentation?.backgroundId,
     },
     environment: cloneEnvironment(input.environment ?? DEFAULT_MAP_ENVIRONMENT),
+    modelSettings: cloneModelSettings(input.modelSettings),
     metadata: { ...input.metadata },
   };
 }
@@ -374,6 +484,7 @@ export function cloneMapDefinition(map: MapDefinition): MapDefinition {
     cameraPresets: map.cameraPresets.map(cloneCameraPreset),
     presentation: { ...map.presentation },
     environment: cloneEnvironment(map.environment),
+    modelSettings: cloneModelSettings(map.modelSettings),
     metadata: { ...map.metadata },
   };
 }
@@ -475,6 +586,7 @@ export function migrateMapDefinition(input: unknown): MapDefinition {
     environment: isRecord(source.environment)
       ? cloneEnvironment(source.environment as MapEnvironment)
       : cloneEnvironment(DEFAULT_MAP_ENVIRONMENT),
+    modelSettings: isRecord(source.modelSettings) ? cloneModelSettings(source.modelSettings as Record<string, ModelSettings>) : undefined,
     metadata: isRecord(source.metadata) ? { ...(source.metadata as MapDefinition["metadata"]) } : {},
   };
 }
@@ -689,10 +801,18 @@ export function validateMapDefinition(input: unknown, options: MapValidationOpti
     !isRecord(environment) || !isRecord(environment.wind) ||
     !isFiniteInRange(environment.timeOfDay, 0, 24) ||
     !isFiniteInRange(environment.wind.direction, 0, 360) ||
-    !isFiniteInRange(environment.wind.strength, 0, 1)
+    !isFiniteInRange(environment.wind.strength, 0, 2)
   ) {
-    errors.push("Environment must define timeOfDay (0-24) and wind direction (0-360) and strength (0-1).");
+    errors.push("Environment must define timeOfDay (0-24) and wind direction (0-360) and strength (0-2).");
+  } else {
+    const wind = environment.wind as Record<string, unknown>;
+    if (wind.enabled !== undefined && typeof wind.enabled !== "boolean") errors.push("Wind enabled must be true or false.");
+    for (const [key, max] of [["speed", 3], ["gustStrength", 1], ["gustFrequency", 1], ["turbulence", 1]] as const) {
+      if (wind[key] !== undefined && !isFiniteInRange(wind[key], 0, max)) errors.push(`Wind ${key} must be between 0 and ${max}.`);
+    }
   }
+  errors.push(...validateModelSettings(map.modelSettings));
+  if (isRecord(environment)) errors.push(...validateLook(environment));
 
   return errors.length > 0 ? { ok: false, errors } : { ok: true, map: cloneMapDefinition(map) };
 }
@@ -962,7 +1082,103 @@ function cloneCameraPreset(preset: MapCameraPreset): MapCameraPreset {
 }
 
 function cloneEnvironment(environment: MapEnvironment): MapEnvironment {
-  return { timeOfDay: environment.timeOfDay, wind: { ...environment.wind } };
+  return {
+    timeOfDay: environment.timeOfDay,
+    wind: { ...environment.wind },
+    ...(environment.lighting ? { lighting: { ...environment.lighting, ...(environment.lighting.sunPosition ? { sunPosition: { ...environment.lighting.sunPosition } } : {}) } } : {}),
+    ...(environment.shadows ? { shadows: { ...environment.shadows } } : {}),
+    ...(environment.style ? { style: { ...environment.style } } : {}),
+  };
+}
+
+function cloneModelSettings(settings: Record<string, ModelSettings> | undefined): Record<string, ModelSettings> | undefined {
+  if (!settings) return undefined;
+  return Object.fromEntries(Object.entries(settings).map(([id, value]) => [id, { ...value, wind: value.wind ? { ...value.wind } : undefined, style: value.style ? { ...value.style } : undefined, actor: value.actor ? { ...value.actor } : undefined }]));
+}
+
+const WIND_RESPONSE_LIMITS = { sway: 3, branches: 3, leaves: 3, stiffness: 5 } as const;
+
+const isColor = (value: unknown) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
+
+/** Lighting, shadows and surface style of an environment. */
+function validateLook(environment: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const check = (group: string, value: unknown, rules: Record<string, (field: unknown) => boolean>) => {
+    if (value === undefined) return;
+    if (!isRecord(value)) {
+      errors.push(`Environment ${group} must be an object.`);
+      return;
+    }
+    for (const [key, valid] of Object.entries(rules)) {
+      if (value[key] !== undefined && !valid(value[key])) errors.push(`Environment ${group}.${key} is not valid.`);
+    }
+  };
+  const range = (min: number, max: number) => (field: unknown) => isFiniteInRange(field, min, max);
+  check("lighting", environment.lighting, {
+    sunIntensity: range(0, 10), sunColor: isColor, skyIntensity: range(0, 10), skyColor: isColor, groundColor: isColor,
+    sunPosition: (field) => isRecord(field) && ["x", "y", "z"].every((axis) => isFiniteInRange(field[axis], -1000, 1000)) && (field.y as number) > 0,
+  });
+  check("shadows", environment.shadows, {
+    enabled: (field) => typeof field === "boolean", strength: range(0, 1), bias: range(-0.01, 0.01), normalBias: range(0, 0.5),
+    mapSize: (field) => field === 1024 || field === 2048 || field === 4096,
+  });
+  check("style", environment.style, {
+    toonBands: (field) => Number.isInteger(field) && isFiniteInRange(field, 2, 6), hatchStrength: range(0, 1), hatchScale: range(0.1, 10),
+    hatchMode: (field) => field === "uv" || field === "screen", outlineThickness: range(0, 10), outlineMode: (field) => field === "screen" || field === "world",
+    outlineColor: isColor, contactShadow: range(0, 1),
+  });
+  return errors;
+}
+
+export const ACTOR_LIMITS: Record<keyof ModelActorSettings, [number, number]> = {
+  walkSpeed: [0, 20], runSpeed: [0, 40], flightSpeed: [0.1, 60], flightHeight: [0, 40], turnSpeed: [0.1, 40], crossfade: [0, 2], groundOffset: [-5, 5], forwardYaw: [-180, 180],
+};
+
+export function validateActorSettings(path: string, actor: unknown): string[] {
+  if (!isRecord(actor)) return [`${path} must be an object.`];
+  const errors: string[] = [];
+  for (const [key, [min, max]] of Object.entries(ACTOR_LIMITS)) {
+    if (actor[key] !== undefined && !isFiniteInRange(actor[key], min, max)) errors.push(`${path}.${key} must be between ${min} and ${max}.`);
+  }
+  return errors;
+}
+
+function validateModelStyle(id: string, style: unknown): string[] {
+  if (!isRecord(style)) return [`modelSettings.${id}.style must be an object.`];
+  const errors: string[] = [];
+  if (style.shading !== undefined && style.shading !== "toon" && style.shading !== "standard") errors.push(`modelSettings.${id}.style.shading must be "toon" or "standard".`);
+  for (const key of ["outline", "contactShadow", "castShadow"]) {
+    if (style[key] !== undefined && typeof style[key] !== "boolean") errors.push(`modelSettings.${id}.style.${key} must be true or false.`);
+  }
+  if (style.outlineScale !== undefined && !isFiniteInRange(style.outlineScale, 0, 5)) errors.push(`modelSettings.${id}.style.outlineScale is out of range.`);
+  return errors;
+}
+
+function validateModelSettings(settings: unknown): string[] {
+  if (settings === undefined) return [];
+  if (!isRecord(settings)) return ["modelSettings must be an object keyed by model id."];
+  const errors: string[] = [];
+  for (const [id, value] of Object.entries(settings)) {
+    if (!isStableId(id) || !isRecord(value)) {
+      errors.push(`modelSettings.${id} must be settings for a model id.`);
+      continue;
+    }
+    if (value.style !== undefined) errors.push(...validateModelStyle(id, value.style));
+    if (value.actor !== undefined) errors.push(...validateActorSettings(`modelSettings.${id}.actor`, value.actor));
+    if (value.wind === undefined) continue;
+    if (!isRecord(value.wind)) {
+      errors.push(`modelSettings.${id}.wind must be an object.`);
+      continue;
+    }
+    for (const [key, max] of Object.entries(WIND_RESPONSE_LIMITS)) {
+      const field = value.wind[key];
+      if (field !== undefined && !isFiniteInRange(field, key === "stiffness" ? 0.1 : 0, max)) errors.push(`modelSettings.${id}.wind.${key} is out of range.`);
+    }
+    if (value.wind.weightSource !== undefined && !(typeof value.wind.weightSource === "string" && /^(height|(color_1|uv|uv1|uv2)-[rgbaxy])$/.test(value.wind.weightSource))) {
+      errors.push(`modelSettings.${id}.wind.weightSource is not a known source.`);
+    }
+  }
+  return errors;
 }
 
 function isStableId(value: unknown): value is string {

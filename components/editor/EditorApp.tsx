@@ -14,7 +14,12 @@ import { Thumbnailer } from "@/lib/editor/thumbnailer";
 import { getModelLibrary } from "@/lib/engine/model-library";
 import { getTerrainAtlas } from "@/lib/engine/terrain-material";
 import { buildWorldForMap } from "@/lib/engine/terrain-meshes";
-import { migrateMapDefinition, type MapDefinition } from "@/lib/maps/map-definition";
+import { migrateMapDefinition, type MapDefinition, type ModelSettings } from "@/lib/maps/map-definition";
+import { resolveWindResponse, windWeightSources } from "@/lib/engine/wind";
+import { resolveModelStyle } from "@/lib/engine/surface-style";
+import { resolveActor } from "@/lib/engine/actor";
+import { windDebugViews, type WindDebugView } from "@/lib/editor/wind-debug";
+import type { SelectedModelInfo } from "./WindPanels";
 import { BUILT_IN_PREFABS } from "@/lib/prefabs/prefab-library";
 import { getDefaultShapeState } from "@/lib/voxel-shapes/shape-registry";
 import type { CellRotation } from "@/lib/voxel-shapes/shape-ids";
@@ -263,8 +268,9 @@ function download(name: string, text: string) {
   URL.revokeObjectURL(url);
 }
 
+/** Sliders and checkboxes have no typing or undo of their own, so editor shortcuts (Ctrl+Z after a drag) still apply to them. */
 function isTyping(target: EventTarget | null) {
-  return target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+  return target instanceof HTMLElement && Boolean(target.closest("input:not([type='range']):not([type='checkbox']), textarea, select, [contenteditable='true']"));
 }
 
 /** Builds the toolbar's props from the session, the store and the viewport. */
@@ -276,6 +282,7 @@ function ConnectedToolbar({ onLayoutChange }: { onLayoutChange: (layout: EditorV
   const meta = session.getMeta();
   const [availableMaps, setAvailableMaps] = useState<Array<{ id: string; name: string }>>([{ id: mapId, name: meta.name }]);
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
+  const [debug, setDebug] = useState<{ modelId: string; view: WindDebugView } | null>(null);
 
   useEffect(() => {
     api<{ maps: Array<{ id: string; name: string }> }>("/api/editor/maps")
@@ -321,6 +328,43 @@ function ConnectedToolbar({ onLayoutChange }: { onLayoutChange: (layout: EditorV
   const message = (text: string, type: "info" | "error" = "info") => store.setState({ message: { type, text } });
 
   const selectedEntity = state.selection.length === 1 ? session.getEntity(state.selection[0]) ?? null : null;
+  const selectedModel = useMemo<SelectedModelInfo | null>(() => {
+    const entry = selectedEntity?.entityType === "model" && selectedEntity.assetReference ? models.entry(selectedEntity.assetReference) : null;
+    if (!entry) return null;
+    const attributes = entry.attributes ?? [];
+    const sources = windWeightSources(attributes);
+    const overrides = meta.modelSettings?.[entry.id]?.wind;
+    const wind = entry.wind ? resolveWindResponse(entry.wind, overrides) : null;
+    if (wind && !sources.includes(wind.weightSource)) wind.weightSource = "height";
+    return {
+      id: entry.id, name: entry.name, attributes, triangles: entry.triangles, vertices: entry.vertices, meshes: entry.meshes,
+      materials: entry.materials, textures: entry.textures, bytes: entry.bytes, animations: entry.animations, bounds: entry.bounds,
+      wind, windOverridden: overrides !== undefined && Object.keys(overrides).length > 0, windSources: sources,
+      debugViews: windDebugViews(attributes, Boolean(entry.wind)),
+      style: resolveModelStyle(entry.style, meta.modelSettings?.[entry.id]?.style),
+      styleOverridden: Object.keys(meta.modelSettings?.[entry.id]?.style ?? {}).length > 0,
+      hasOutlineData: attributes.includes("_OUTLINE_NORMAL"),
+      actor: entry.actor ? resolveActor(entry.actor, meta.modelSettings?.[entry.id]?.actor) : null,
+      actorOverridden: Object.keys(meta.modelSettings?.[entry.id]?.actor ?? {}).length > 0,
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- meta is read fresh from the session; metaRevision says when it changed.
+  }, [selectedEntity, models, state.metaRevision]);
+  const debugView: WindDebugView = debug && selectedModel && debug.modelId === selectedModel.id ? debug.view : "normal";
+  /** Patches this map's settings for the selected model; null removes that group (back to the model's defaults). */
+  const changeModelSettings = <K extends "wind" | "style" | "actor">(key: K, patch: ModelSettings[K] | null) => {
+    if (!selectedModel) return;
+    const next: Record<string, ModelSettings> = { ...(meta.modelSettings ?? {}) };
+    const current: ModelSettings = { ...(next[selectedModel.id] ?? {}) };
+    if (patch === null) delete current[key];
+    else current[key] = { ...current[key], ...patch } as ModelSettings[K];
+    if (Object.keys(current).length > 0) next[selectedModel.id] = current;
+    else delete next[selectedModel.id];
+    const label = patch === null ? `Reset model ${key}` : `Model ${key}`;
+    session.updateMeta(label, { modelSettings: Object.keys(next).length > 0 ? next : undefined });
+  };
+  useEffect(() => {
+    viewport.setModelDebugView(selectedModel && debugView !== "normal" ? selectedModel.id : null, debugView);
+  }, [viewport, selectedModel, debugView]);
   const cell = state.selectedCell;
   const world = session.world;
   const zoneAssignmentCount = useMemo(() => {
@@ -597,6 +641,27 @@ function ConnectedToolbar({ onLayoutChange }: { onLayoutChange: (layout: EditorV
       store.setState({ cleanPreview });
       viewport.setCleanPreview(cleanPreview);
     },
+    environment: meta.environment,
+    onWindChange: (patch) => session.updateMeta("Change wind", { environment: { ...meta.environment, wind: { ...meta.environment.wind, ...patch } } }),
+    onEditGroup: (label) => (label ? session.beginGroup(label) : session.endGroup()),
+    selectedModel,
+    modelDebugView: debugView,
+    onModelDebugViewChange: (view) => setDebug(selectedModel ? { modelId: selectedModel.id, view } : null),
+    scatter: settings.scatter,
+    onScatterChange: (patch) => update({ scatter: { ...settings.scatter, ...patch } }),
+    onClearChosenObject: () => {
+      const removed = viewport.clearChosenObject();
+      message(removed > 0 ? `${removed} objects removed (undo with Ctrl+Z).` : "None of the chosen object is placed.");
+    },
+    onModelWindChange: (patch) => changeModelSettings("wind", patch),
+    onModelStyleChange: (patch) => changeModelSettings("style", patch),
+    onModelActorChange: (patch) => changeModelSettings("actor", patch),
+    onPreviewClip: (clip) => {
+      if (selectedModel) viewport.previewActorClip(selectedModel.id, clip);
+    },
+    onLightingChange: (patch) => session.updateMeta("Change lighting", { environment: { ...meta.environment, lighting: { ...meta.environment.lighting, ...patch } } }),
+    onShadowsChange: (patch) => session.updateMeta("Change shadows", { environment: { ...meta.environment, shadows: { ...meta.environment.shadows, ...patch } } }),
+    onSurfaceStyleChange: (patch) => session.updateMeta("Change surface style", { environment: { ...meta.environment, style: { ...meta.environment.style, ...patch } } }),
     onEntityContentChange: (key) => {
       const reference = parseContentKey(key);
       session.updateEntities(reference ? "Assign content" : "Clear content", state.selection, (entity) => {

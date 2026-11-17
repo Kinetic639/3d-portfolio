@@ -25,6 +25,8 @@ const budgets = (JSON.parse(fs.readFileSync(path.join(__dirname, "budgets.json")
 
 type Probe = {
   stats: { frames: number; picks: number; drawCalls: number; triangles: number };
+  environment: { wind: { active: boolean; setStilled: (stilled: boolean) => void } };
+  windInView: () => boolean;
   frames: { window: (now: number, windowMs: number) => { cpuMean: number | null; cpuMax: number | null } };
   warmUpReport: { ok: boolean; maxFrameMs: number; newResourcesDuringTest: number } | null;
   renderer: { info: { programs: unknown[] } };
@@ -112,6 +114,10 @@ async function loadAndEnter(page: Page) {
   const ready = await page.evaluate(() => window.__perf.phases.find((entry) => entry.phase === "ready")!.t);
   const load = await longTasks(page, 0, ready);
   const report = await page.evaluate(() => (window.__worldEngine as unknown as Probe).warmUpReport);
+  // Wind keeps the world drawing while something sways in view, by design. The scenarios below
+  // check on-demand rendering, so they run with the wind held still (as for reduced motion);
+  // measureWind measures the wind on its own.
+  await page.evaluate(() => (window.__worldEngine as unknown as Probe).environment.wind.setStilled(true));
   // Let the landing page come to rest, as a visitor reading it would.
   await page.waitForTimeout(1500);
 
@@ -237,7 +243,66 @@ async function measureWorld(page: Page) {
   record("hover.uiUpdates", hoverAfter.ui - hoverBefore.ui);
   record("hover.longTasks", (await longTasks(page, hoverFrom, await now(page))).count);
 
+  await measurePanel(page);
+  await measureWind(page);
   await measureMine(page);
+}
+
+/**
+ * Opening content: a click on an object's icon until its panel is shown,
+ * and the frames around it. The first open in a session is the one that
+ * can stall (fonts, raster of the panel), so it is the one measured.
+ */
+async function measurePanel(page: Page) {
+  await page.evaluate((id) => {
+    const probe = window.__worldEngine as unknown as Probe;
+    const item = probe.interaction.items.find((candidate) => candidate.id === id)!;
+    probe.rig.lookAt(item.focus.x, item.focus.z, 30, true);
+    probe.invalidate();
+  }, OBJECT);
+  await settle(page);
+  const icon = await screenPoint(page, "anchor", OBJECT);
+  await startFrames(page);
+  const from = await now(page);
+  await page.mouse.click(icon.x, icon.y);
+  await page.getByRole("dialog").waitFor();
+  const shown = await now(page);
+  await page.waitForTimeout(1500);
+  const to = await now(page);
+  const frames = calculateFrameSummary(await stopFrames(page));
+  const tasks = await longTasks(page, from, to);
+  record("panel.openMs", shown - from);
+  record("panel.maxFrameMs", frames.maxFrameMs);
+  record("panel.longTasks", tasks.count);
+  await page.getByRole("button", { name: /close and return to the world/i }).click();
+  await settle(page);
+}
+
+/**
+ * Wind at the arrival view, when the map has wind and something it moves is
+ * in view there. Recorded as wind.* (no frames are expected to stop).
+ */
+async function measureWind(page: Page) {
+  const state = await page.evaluate(async () => {
+    const probe = window.__worldEngine as unknown as Probe;
+    probe.environment.wind.setStilled(false);
+    probe.invalidate();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const inView = probe.environment.wind.active && probe.windInView();
+    return { inView };
+  });
+  if (state.inView) {
+    const from = await now(page);
+    const before = await page.evaluate(() => (window.__worldEngine as unknown as Probe).stats.frames);
+    await page.waitForTimeout(2000);
+    const to = await now(page);
+    const framesDrawn = (await page.evaluate(() => (window.__worldEngine as unknown as Probe).stats.frames)) - before;
+    const cpu = await page.evaluate(([a, b]) => (window.__worldEngine as unknown as Probe).frames.window(b, b - a), [from, to] as const);
+    record("wind.framesIn2s", framesDrawn);
+    record("wind.engineCpuMeanMs", cpu.cpuMean ?? 0);
+    record("wind.longTasks", (await longTasks(page, from, to)).count);
+  }
+  await page.evaluate(() => (window.__worldEngine as unknown as Probe).environment.wind.setStilled(true));
 }
 
 /** Digging in the mine with the CPU slowed four times, as on a mid-range phone. */

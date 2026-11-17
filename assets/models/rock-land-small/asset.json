@@ -1,0 +1,19 @@
+{
+  "name": "Land Rock (small)",
+  "category": "nature",
+  "description": "Painted land rock, about 2.4 x 1.9 blocks. Free asset.",
+  "scale": 1,
+  "collision": "blocking",
+  "tags": [
+    "nature",
+    "rock",
+    "landscape"
+  ],
+  "style": {
+    "shading": "toon",
+    "outline": true,
+    "outlineScale": 1,
+    "contactShadow": true,
+    "castShadow": true
+  }
+}

@@ -237,6 +237,39 @@ Measured: the sample crate is 3 KB and 24 triangles; three placed crates cost tw
 
 Known limits: a mesh with several materials is drawn with its first; animated models are not instanced and are not faded when they hide something; the occluder fade and tinting assume the model's materials have a base colour.
 
+### Wind (from the style lab)
+
+Ported from the style-lab branch (`environment-controller.ts`, `tree-wind.ts`) with the same presets, gust curve and per-vertex motion (pendulum sway, branches at their own phase, leaf flutter), fitted to the engine:
+
+- **Global wind** (`lib/engine/wind.ts`, `Wind`): the map's `environment.wind` (direction, strength, enabled, speed, gust strength and frequency, turbulence) as one set of uniforms shared by every wind-reactive material. Changing the weather changes values, never shaders.
+- **Per model** (`lib/engine/model-wind.ts`): defaults in `asset.json` `wind`, overrides in the map's `modelSettings[modelId].wind`; one uniform block per model, shared by all its instanced batches, so the editor's sliders change it live.
+- **Shader**: the wind code is added to the instanced batches' existing hook (pop-up and occlusion fade) and gets its own program cache key, because three.js keys programs by the hook's source text. The weight source is compiled in (the lab chose it per vertex through eleven branches); changing it in the editor rebuilds that model's material. Rotated and scaled instances bend with the wind, not with their own axes.
+- **Frames**: wind needs continuous frames only while it blows and a wind-reactive batch intersects the view frustum (`EntityLayer.windInView`); otherwise the world stays still and draws nothing. `prefers-reduced-motion` stills it.
+- **Measured** (production, RTX 2060, 60 pines in view while panning): frame p95 16.8 ms with and without wind, engine CPU 1.4-1.6 ms per frame either way, no extra draw calls; 60 frames per second when idle with trees in view and wind, 0 without wind.
+- **Editor**: Weather · Wind in the Map workspace; Wind response, Model data and Debug view (weight, height, vertex colours, UV sets) in the inspector of a selected model. The lab's mask and detail texture views are not ported: those textures are not part of the model.
+
+### Style: toon shading, outlines, lighting, shadows (from the style lab)
+
+Ported from the style-lab branch (`stylized-rock-material.ts` and the lab's Lighting, Surface and "Edges and depth" panels), fitted to the engine:
+
+- **Toon + hatching** (`lib/engine/surface-style.ts`): three.js's toon material with the lab's procedural crosshatch in the shade. Bands, hatch power, scale and mode are shared uniforms and one 6-texel gradient whose data changes with the band count: changing them never compiles anything. The material's hook is chained with the instance effects (pop, fade, wind) and keyed by both, since three.js keys programs by the hook's text.
+- **Outlines**: the lab's inverted hull, as an instanced batch next to each model batch (one draw call per model part), with the same pop, fade and wind, and with the skeleton for animated models. The smoothed outline normals are computed by the model pipeline (`lib/assets/outline-normals.ts`, attribute `_OUTLINE_NORMAL`), not in the browser. Thickness is in screen pixels by default (the lab's 0.012 world units is under a pixel from the visitor's camera); "world" mode is the lab's.
+- **Contact patch** (the lab's "contact AO"): a soft disc under each instance of models that use it, all in one batch.
+- **Lighting** (`Environment`): sun intensity, colour and direction; a hemisphere sky light replaces the ambient light (white over white is identical). Defaults are the original look; the "Style lab" preset is the lab's. The terrain keeps the original's own light.
+- **Shadows**: three.js shadow maps (PCF), cast by models and prefabs, received by the terrain (its shader includes three.js's shadow chunks) and by lit models. The shadow camera follows the view, sized to the view distance, and moves in whole texels so shadows do not shimmer. Off by default and on the lowest quality tier; decided before warm-up so its programs compile there (`warmUpReport.newResourcesDuringTest` stays 0).
+- **Per model**: asset.json `style` defaults, map `modelSettings[id].style` overrides; outline scale is a shared uniform (live), the rest decides batches (the editor rebuilds).
+- **Measured** (production, 45 pines and 15 rocks in view while panning): frame p95 16.7 ms in both looks; engine CPU 1.4-1.5 ms per frame with toon and outlines, 1.7-2.0 ms with shadows and wind; 64 / 76 draw calls.
+- Perf test: on-demand scenarios run with the wind held still; a wind scenario records `wind.*` when something sways at the arrival view.
+
+### Creatures (the style lab's crow)
+
+`lib/engine/actor.ts` is the lab's crow controller without React or its own materials (toon and outline come from the entity layer): idle, walking, running, taking off, a quadratic flight arc at `flightHeight`, landing (take-off reversed when there is no landing clip) and clip preview, with crossfades and eased turning. Clips are matched by name; long ambient loops are passed over. Root motion is removed by the model pipeline, not at load.
+
+- **Placement**: the entity layer gives every placed instance of a model with `actor` settings an `Actor`, which owns a position and a heading; the layer turns them into the model's matrix after the pop-up.
+- **World**: a click on a creature chooses it (`bridge.actor`, a HUD with its state and the movement modes Auto, Walk, Run, Fly), a click on the ground sends it (the ground height comes from the world query, voxels or bake), Esc or the button lets it go. The camera follows it until the visitor pans (`CameraRig.onUserPan`).
+- **Frames**: skeletons out of view are not animated and do not ask for frames; a travelling creature keeps frames coming. This also fixes every animated model drawing frames while off screen.
+- **Settings**: asset.json `actor` defaults, map `modelSettings[id].actor` overrides, applied live in the editor.
+
 ## Editor
 
 The editor is at `/editor` (`/editor?map=<id>`) and exists only in development.
@@ -485,3 +518,34 @@ The first bake smoothed the terrain (density, blur, Surface Nets, simplification
 - `pnpm perf`: production build, real GPU, 25 budgets in `perf/budgets.json` covering load, entry, pan, idle, hover and digging with the CPU slowed 4×. Shown to fail when a known regression is put back.
 - The entry-start and entry-end hitches are gone (worst entry frame 16.8 ms).
 - `lib/benchmark` reduced to the frame statistics the test uses (`lib/perf/frame-statistics.ts`).
+
+### Style-lab port, point 2: wind
+
+- Global wind with presets in the map, per-model response in `asset.json` and the map, GPU sway on instanced batches, frames only while wind blows in view, reduced motion respected. Editor panels for all of it, debug views included.
+- The model pipeline now keeps the attributes asset.json asks for: gltf-transform's `prune` dropped `COLOR_1` before.
+
+### Style-lab port, point 3: toon, outlines, lighting, shadows
+
+- Toon shading with hatching, pipeline-computed outlines (pixels or world units, scale per model), contact patches, sun and sky light with the lab preset, view-following shadow maps received by the terrain. Every lab control in the editor, plus shadow on/off, strength and map size.
+- The perf test holds the wind still for its on-demand checks and measures wind separately.
+
+### Style-lab port, point 4: scatter
+
+- The Scene Lab's "Multiple" placement as a mode of the Place tool (`lib/editor/scatter.ts`): count, radius, minimum spacing, seed (same seed, same scatter), random rotation and scale range, ground only, one undo step; a ring previews the area; Clear all removes every instance of the chosen object. The lab's individual-versus-instanced choice does not apply: the engine always instances models.
+
+### Style-lab port, point 5: the crow as a creature
+
+- The lab's crow controller on the engine (`Actor`), chosen and sent in the world with a following camera, its motion and clip preview in the editor. Animated models animate only in view.
+- Editor shortcuts (Ctrl+S, Ctrl+Z) work after using a slider: both copies of the "is the visitor typing" check now leave sliders and checkboxes out.
+
+### Style-lab port, point 6: the engine stays free of React
+
+- `eslint.config.mjs` forbids React, Next.js, zustand's React entry, `@/components/*` and the two React hooks in `lib/` (the hooks themselves and the design system's fonts excepted). `lib/engine/EngineBoundary.test.ts` checks that the rule is there and bites. The monorepo plan's package-boundary checks are not ported: this repository is one app.
+
+### Style-lab port: follow-ups
+
+- **Crow scale** 0.03 (about one block tall; the lab's 0.015 was under half a block, hard to see from the visitor's camera).
+- **Wind at 30 frames per second** when it is the only thing moving (camera still, nothing else animating); input brings back full rate at once. Measured on the default map with pines in view: 30 frames per second idle in the wind, about 60 while panning.
+- **First content panel**: the panel opened with a 50-133 ms frame the first time in a browser. Two causes, both fixed: an effect re-applied `data-world` and `inert` on every URL change (cleanup, then set again), re-styling the whole document right before the panel heading takes focus; and the first raster of the panel (its large blurred shadow and text). The phase attributes are now written only when they change, and a shell of the panel is drawn at 1 % opacity while the loader waits (as the world's controls are). Measured in fresh browsers: worst frame 16.7-33 ms, GPU raster 18-35 ms (was 47-120), forced layout 7-13 ms (was 21).
+- **View buttons** (the original's, top right): lock the camera's tilt (turning and zooming stay free), and Reset view back to where the entry ended.
+- **Perf test**: draw calls and triangles are recorded without a budget (they follow the default map's growing content; frame times and CPU catch their cost); a first-open content panel scenario (`panel.*`); dig budgets widened after many runs showed 17-83 ms one-run noise at 4x CPU slowdown.
