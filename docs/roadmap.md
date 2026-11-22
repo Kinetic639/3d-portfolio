@@ -97,19 +97,27 @@ Jeden darmowy model do portretu i do świata (vision.md, rozdział 5).
   - Po drodze: portret prosił o GPU w trybie „low-power”, co przy kontekście świata („high-performance”) trzymało przejście dnia i nocy na 30 klatkach. Teraz oba proszą o ten sam tryb, a płótno portretu znika ze strony, gdy świat jest na pierwszym planie.
   - Testy e2e świata i edytora nie były uruchamiane po ostatnich zmianach portretu.
 
-### B4. Drzwi do świata i animacja ładowania **(razem)**
+### B4. Ekran wejściowy z drzwiami **(razem)**
 
-- [ ] Decyzja: drzwi jako grafika na stronie (SVG lub CSS, lekkie i ostre) czy jako obiekt 3D. Zaproponuję szkic. **(razem)**
-- [ ] Ładowanie świata pokazane na drzwiach albo przy nich, np. światło w szparze rośnie razem z postępem.
-- [ ] Gdy świat jest gotowy: drzwi lekko się uchylają i bije z nich światło. Klik i klawiatura (dostępność).
-- [ ] Drzwi zastępują obecną platformę z kryształem.
+Zmiana koncepcji (2026-11-22): wejście do świata nie prowadzi już z portretu, tylko przez drzwi na ekranie wejściowym. Strona z portretem zostaje jako wersja klasyczna. Rozważane i odrzucone: drzwi w tle portretu, przewijanie jako warunek otwarcia drzwi, mapa jako motyw wejścia, sam świat bez zwykłej strony (za duże ryzyko u rekruterów i na telefonach). Prototyp: `components/site/EntryScreen.tsx`, tylko pod `?entry=door`.
 
-### B5. Przejście: z portretu przez drzwi do świata **(Claude)**
+- [x] Decyzja: ekran wejściowy z drzwiami na środku jako loaderem; drzwi w CSS (wersja 3D, jeśli koncept się sprawdzi). (2026-11-22, prototyp)
+- [x] Ładowanie na drzwiach: zamknięte, światło pulsuje w szparach i rośnie z postępem. (2026-11-22, prototyp)
+- [x] Gotowe: drzwi uchylone, światło stałe i na podłodze; klik i klawiatura. (2026-11-22, prototyp)
+- [x] Kartka „CV” na drzwiach: panel z opisem strony, pobraniem CV, wersją klasyczną i kontaktem; tabliczka z imieniem i rolą; PL | EN. (2026-11-22, prototyp)
+- [x] Drzwi zastępują platformę z kryształem (na stronie nie jest rysowana od B1).
+- [ ] Ekran domyślnie na `/`, z zasadami:
+  - telefon, brak WebGL, ograniczony ruch i oszczędzanie danych trafiają od razu na wersję klasyczną;
+  - linki do konkretnej treści (`/projects/...`) omijają ekran;
+  - wybór jest zapamiętany (powracający odwiedzający);
+  - bez mignięcia zwykłej strony przed ekranem (dziś ekran pojawia się dopiero po wczytaniu skryptów).
 
-- [ ] Postać wychodzi z portretu (animacja do ustalenia na prototypie), idzie do drzwi i przechodzi przez nie.
-- [ ] Kamera przechodzi przez drzwi i świat się otwiera. Obecne wejście (fala terenu, obiekty wyrastające z ziemi) dostosowane do drzwi.
-- [ ] Wyjście ze świata: droga powrotna (postać wraca do portretu).
-- [ ] Gotowe, gdy: przejście jest płynne (budżet wejścia: brak przyciętych klatek i kompilacji), działa na telefonie, a przy ograniczonym ruchu jest cięcie.
+### B5. Przejście przez drzwi i mapa świata **(Claude)**
+
+- [x] Jeden ciągły ruch: drzwi otwierają się, a kamera przyspiesza w otwór, aż jego światło wypełni ekran; pod pełnym światłem zmienia się scena; światło gaśnie nad światem. Wejście świata startuje od najwyższego punktu i tylko opada (nowa opcja `fromTop` polecenia `enter`). (2026-11-22, prototyp)
+- [x] Podczas wejścia sam świat bez kontrolek; na końcu mapa świata na pełnym ekranie (strefa: lot i sekcja, pinezka: projekt, „Zwiedzaj świat” lub Escape: zamknięcie); kontrolki dopiero po jej zamknięciu. (2026-11-22, prototyp)
+- [ ] Wyjście ze świata: dokąd wraca odwiedzający, który wszedł przez drzwi (ekran z drzwiami czy wersja klasyczna). **(razem)**
+- [ ] Gotowe, gdy: budżety `pnpm perf` przechodzą także dla wejścia przez drzwi (dziś mierzone jest tylko zwykłe wejście), pełny zestaw testów przechodzi, a przy ograniczonym ruchu jest cięcie.
 
 ### B6. Przewodnik w świecie **(Claude)**
 

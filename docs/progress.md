@@ -3,11 +3,11 @@
 Krótka lista do odhaczania. Szczegóły każdego punktu (zakres, kryterium „gotowe”, decyzje) są w `docs/roadmap.md` pod tym samym numerem.
 Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 
-**Faza 1:** 15 / 46 (33%) `███████░░░░░░░░░░░░░`
+**Faza 1:** 22 / 48 (46%) `█████████░░░░░░░░░░░`
 
 | Część | Zrobione |
 |---|---|
-| Baza produktu (B0-B9) | 15 / 35 |
+| Baza produktu (B0-B9) | 22 / 37 |
 | Gotowe dla rekruterów (J1-J5) | 0 / 11 |
 
 ---
@@ -37,17 +37,19 @@ Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 - [x] Głowa i oczy za kursorem, bezczynność, telefon (2026-11-22)
 - [x] Bez straty na wydajności i Lighthouse (2026-11-22)
 
-**B4. Drzwi i ładowanie** 0/4
-- [ ] Decyzja: grafika czy 3D, szkic
-- [ ] Postęp ładowania na drzwiach
-- [ ] Uchylenie i światło, gdy świat gotowy
-- [ ] Drzwi zamiast platformy z kryształem
+**B4. Ekran wejściowy z drzwiami** 5/6
+- [x] Decyzja: ekran z drzwiami jako loaderem (prototyp `?entry=door`) (2026-11-22)
+- [x] Postęp ładowania na drzwiach (2026-11-22)
+- [x] Uchylenie i światło, gdy świat gotowy (2026-11-22)
+- [x] Kartka „CV” z panelem, tabliczka, PL | EN (2026-11-22)
+- [x] Drzwi zamiast platformy z kryształem
+- [ ] Ekran domyślnie na `/` (telefon i brak WebGL: wersja klasyczna, linki omijają, wybór zapamiętany)
 
-**B5. Przejście** 0/4
-- [ ] Postać wychodzi z portretu i przechodzi przez drzwi
-- [ ] Kamera przez drzwi, wejście do świata
-- [ ] Powrót: postać wraca do portretu
-- [ ] Płynnie, na telefonie, cięcie przy ograniczonym ruchu
+**B5. Przejście i mapa świata** 2/4
+- [x] Kamera w drzwi, światło, świat od najwyższego punktu (2026-11-22)
+- [x] Świat bez kontrolek, potem mapa świata na pełnym ekranie (2026-11-22)
+- [ ] Wyjście ze świata: dokąd wraca odwiedzający
+- [ ] Budżety perf dla wejścia przez drzwi, pełne testy, cięcie przy ograniczonym ruchu
 
 **B6. Przewodnik w świecie** 0/4
 - [ ] Idzie za kamerą, zostaje w kadrze

@@ -48,8 +48,8 @@ Konsekwencje dla kolejności prac:
 
 **Pierwsze chwile:**
 
-- **10 s:** otwiera się strona z prezentacją mnie i przywitaniem. Portret z animowaną postacią reaguje na kursor. Obok są drzwi, przez których szparę zaczyna bić światło, gdy świat jest gotowy.
-- **1 min:** odwiedzający albo przewija stronę i czyta sekcje, albo klika drzwi. Postać wychodzi z portretu i razem z nim przechodzi przez drzwi do świata.
+- **10 s:** ekran wejściowy: na środku drzwi, nad nimi tabliczka z imieniem i rolą, na drzwiach przypięta kartka „CV”. Drzwi są loaderem świata: zamknięte, a światło pulsuje w szparach; gdy świat jest gotowy, uchylają się i świecą stale.
+- **1 min:** odwiedzający albo klika kartkę „CV” (panel: o stronie, pobierz CV, wersja klasyczna, kontakt) i czyta zwykłą stronę z portretem, albo klika drzwi. Kamera wjeżdża w drzwi, które otwierają się na światło; światło zalewa ekran i gaśnie nad światem, gdzie kamera opada z nieba. Na koniec otwiera się mapa świata na pełnym ekranie: spis całego portfolio. Po jej zamknięciu pojawiają się kontrolki świata.
 - **5 min:** odwiedzający sam eksploruje świat i strefy. Przewodnik podąża za nim, prezentuje świat i ożywia go animacjami i interakcjami.
 
 ## 3. Świat **(do ustalenia)**
@@ -71,11 +71,11 @@ O czym opowiada świat, jak przewodnik prowadzi odkrywanie, czy jest progresja (
 Reprezentuje mnie w świecie.
 
 - **Na stronie:** popiersie w portrecie, w miejscu, gdzie zwykle jest zdjęcie autora. Jest proste, nie ponad miarę, i robi drobne, humorystyczne rzeczy, np. wodzi oczami za kursorem. Interakcje będą dochodzić z czasem.
-- **Wejście do świata:** po kliknięciu drzwi postać znika z portretu z ciekawą animacją, jakby wyszła z obrazu, i przechodzi z odwiedzającym przez drzwi.
+- **Wejście do świata (zmienione 2026-11-22):** wejście prowadzi przez drzwi na ekranie wejściowym (rozdział 9), nie z portretu. Postać nie wychodzi z obrazu; odwiedzający spotyka przewodnika w świecie (B6).
 - **W świecie:** towarzyszy odwiedzającemu. Odwiedzający nadal sam przegląda świat i wchodzi w interakcje, a przewodnik podąża za nim po mapie, prezentuje świat i dodaje animacje i interakcje.
 - **Odwiedzający to kamera:** eksploruje świat, wchodzi w interakcje z jego elementami, odwiedza strefy i miejsca. Później, w niektórych mini-grach, może przejmować sterowanie postacią. Może też zaznaczać niektóre rzeczy albo przewodnika, żeby wydać im polecenie.
 - **Mowa:** na początek tylko animacje i gesty. Później dymki i komentarze, a może nagrany mój głos.
-- **Powrót na stronę:** prosto, bez efektów. Po powrocie portret jest przez chwilę pusty, potem postać wychyla się zza krawędzi i wraca do obrazu.
+- **Powrót na stronę:** prosto, bez efektów. Portret na zwykłej stronie żyje jak wcześniej. (Pomysł „pusty portret, postać wychyla się zza krawędzi” odłożony na fazę 2.)
 - **Telefon:** brak kursora, więc postać potrzebuje innych mikroanimacji i interakcji. Pomysły do wymyślenia.
 - **Wygląd docelowy:** portret i przewodnik mają mnie przypominać, stylizowane. Na początek wystarczą placeholdery do testów.
 - **Model na start:** generyczny, darmowy model z animacjami do testów. Docelowy model później.
@@ -113,15 +113,16 @@ HUD, panele treści, menu, minimapa, przełącznik dnia i nocy, ewentualny dzien
 - **W pełni responsywna, z wysokimi wynikami testów** (Lighthouse: wydajność, dostępność, SEO, dobre praktyki).
 - **Szybki przegląd:** wszystkie sekcje portfolio bez wchodzenia do świata, pobranie CV, kontakt.
 - **Portret:** animowana postać przewodnika (rozdział 5).
-- **Stałe miejsce w układzie:** portret i drzwi mają zarezerwowane miejsce i niczego nie przykrywają, tak jak dziś przykrywa treść platforma z kryształem na dole ekranu.
+- **Ekran wejściowy (zmienione 2026-11-22, prototyp pod `?entry=door`):** drzwi na środku ekranu jako loader i wejście do świata, tabliczka z imieniem i rolą, kartka „CV” na drzwiach z panelem (o stronie, pobierz CV, wersja klasyczna, kontakt), wybór języka. Wzorzec: portfolio Bruno Simona (świat od razu), ale z siatką bezpieczeństwa dla rekruterów: wersja klasyczna zawsze o jedno kliknięcie, telefon i słabe urządzenia trafiają na nią od razu, treść jest w HTML.
+- **Zwykła strona (wersja klasyczna):** strona z portretem, sekcjami i CV, dla tych, którzy nie chcą świata. Portret i małe drzwi mają zarezerwowane miejsce i niczego nie przykrywają.
   - **Komputer:** przypięty sidebar po prawej, duży portret na górze, małe drzwi na dole. Oba zawsze widoczne, także na podstronach.
   - **Telefon:** portret na górze treści (przewija się z nią), drzwi przypięte w dolnym pasku.
 - **Język:** polski i angielski z przełącznikiem. Przy pierwszej wizycie strona może zapytać o język.
 - **Kontakt:** formularz kontaktowy, a do tego e-mail i linki.
 - **Ślad odwiedzających:** odwiedzający mogą zostawić trwały ślad, np. wpis w księdze gości.
-- **Wejście do świata:** futryna z zamkniętymi drzwiami. Gdy świat się załaduje, drzwi lekko się uchylają i bije z nich światło, które zaprasza do kliknięcia. Po kliknięciu postać wychodzi z portretu i przechodzi przez drzwi.
-- **Ładowanie świata:** ma mieć własną animację (szczegóły do ustalenia).
-- **Mapa portfolio:** jest już na stronie jako nawigacja po sekcjach.
+- **Wejście do świata:** jeden ciągły ruch: kamera przyspiesza w stronę drzwi, które otwierają się do końca; światło z otworu wypełnia ekran, pod nim zmienia się scena; światło gaśnie nad światem, gdzie kamera tylko opada (od najwyższego punktu). W tym czasie świat jest bez kontrolek.
+- **Ładowanie świata:** pokazują je drzwi (pulsujące światło w szparach rośnie z postępem).
+- **Mapa świata:** na końcu wejścia na pełnym ekranie, jako spis portfolio: strefa przenosi tam i otwiera sekcję, pinezka otwiera projekt, „Zwiedzaj świat” zamyka mapę i pokazuje kontrolki. Na zwykłej stronie ta sama mapa jest nawigacją po sekcjach.
 
 ## 10. Dźwięk **(do ustalenia)**
 
@@ -148,9 +149,9 @@ HUD, panele treści, menu, minimapa, przełącznik dnia i nocy, ewentualny dzien
 1. Strona ładuje się i otwiera.
 2. Działa szkielet strony (wireframe) ze wszystkimi sekcjami, na razie z treścią zastępczą, w tym pobieranie CV.
 3. Portret z animowaną postacią (generyczny model do testów), np. oczy i głowa za kursorem.
-4. Drzwi do świata: uchylają się i świecą, gdy świat jest gotowy.
-5. Animacja ładowania świata.
-6. Przejście: postać wychodzi z portretu i przechodzi przez drzwi, a odwiedzający razem z nią wchodzi do świata.
+4. Ekran wejściowy z drzwiami: loader świata (światło w szparach), uchylone i świecące, gdy świat jest gotowy, z kartką „CV”.
+5. Wersja klasyczna (strona z portretem) o jedno kliknięcie, a dla telefonów domyślnie.
+6. Przejście: kamera przez drzwi w światło, rozbłysk, opadanie w świecie, potem mapa świata na pełnym ekranie.
 7. W świecie: eksploracja, strefy i przewodnik, który podąża tam, gdzie jest odwiedzający, i dodaje życia animacjami.
 
 **Termin:** brak sztywnego terminu. Ograniczeniem jest dostępny limit sesji AI, więc dokumentacja (ten plik, `roadmap.md`, `architecture.md`) musi pozwalać podjąć pracę w każdej nowej sesji.
