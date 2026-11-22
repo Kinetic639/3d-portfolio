@@ -20,7 +20,8 @@ import type { WorldConfig } from "@/lib/world/world-config";
  * This module is the runtime side (types, encode, decode) and has no
  * dependencies beyond types, so the visitor bundle does not pull in the baker.
  */
-export const BAKE_FORMAT_VERSION = 2;
+/** 3: exact ground heights per column (grounds), for creatures standing on slabs, stairs and by curbs. */
+export const BAKE_FORMAT_VERSION = 3;
 const MAGIC = 0x32574b42; // "BKW2", little-endian
 
 /** The parts of a map the runtime needs once terrain is baked. A `MapDefinition` is also one of these. */
@@ -103,6 +104,8 @@ export type BakedHeader = {
   tiles: BakedTile[];
   /** Int8 per column (x + width * z): world-space height of the terrain surface, -128 where there is none. */
   heights: BufferRef;
+  /** Int16 per column, in 1/64 of a block: where a creature stands (the exact surface at the column's centre); -32768 where there is none. */
+  grounds: BufferRef;
   /** Uint8 per column: numeric zone id, 0 for none. */
   zones: BufferRef;
   voxelZones: BakedVoxelZone[];
@@ -183,3 +186,4 @@ export function decodeBakedWorld(file: ArrayBuffer): BakedWorld {
 export const bakedInt8 = (world: BakedWorld, ref: BufferRef) => new Int8Array(world.data, ref.offset, ref.length);
 export const bakedUint8 = (world: BakedWorld, ref: BufferRef) => new Uint8Array(world.data, ref.offset, ref.length);
 export const bakedUint16 = (world: BakedWorld, ref: BufferRef) => new Uint16Array(world.data, ref.offset, ref.length / 2);
+export const bakedInt16 = (world: BakedWorld, ref: BufferRef) => new Int16Array(world.data, ref.offset, ref.length / 2);

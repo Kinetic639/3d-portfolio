@@ -123,9 +123,14 @@ Zmiana koncepcji (2026-11-22): wejście do świata nie prowadzi już z portretu,
 
 ### B6. Przewodnik w świecie **(Claude)**
 
-- [ ] Przewodnik idzie za odwiedzającym. Gdy kamera odjedzie dalej, przewodnik idzie albo biegnie w miejsce, na które patrzy kamera, i zatrzymuje się w kadrze.
-- [ ] Przy locie do strefy biegnie za kamerą, a przy dalekich skokach pojawia się na miejscu z animacją.
+- [x] Przewodnik idzie za odwiedzającym. Gdy kamera odjedzie dalej, przewodnik idzie albo biegnie w miejsce, na które patrzy kamera, i zatrzymuje się w kadrze. (2026-11-22)
+  - Decyzje w `lib/engine/guide.ts` (czyste, z testami), sterowanie w `lib/engine/guide-driver.ts`. Przewodnik nie jest na mapie: silnik dodaje go do każdego świata przy punkcie startu (mapa i jej wypiek bez zmian).
+  - Rusza, gdy kamera stoi 0,35 s; staje przed punktem, na który patrzy kamera, trochę z boku, i odwraca się do odwiedzającego. Do 7 bloków idzie, dalej biegnie.
+  - Stoi na dokładnej wysokości gruntu: półbloki, schodki i skosy liczone są jak są, a niski pasek krawężnika jest przestępowany (`groundAt` w zapytaniach o świat; wypiek w formacie 3 zapisuje ją na kolumnę, mapa wypieczona ponownie). Wysokość przy krokach wygładzona (ok. 0,1 s); buty 0,05 bloku nad gruntem (`groundOffset`).
+  - Bezczynność rysowana jak wiatr: połowa częstotliwości, a przy ograniczonym ruchu i w testach stoi (budżet „0 klatek w spoczynku” zostaje).
+- [x] Przy dalekich skokach (dalej niż 26 bloków, np. lot do strefy) pojawia się od razu na miejscu i macha. (2026-11-22; animacja pojawienia się, np. błysk, do dopracowania)
 - [ ] Ożywienie: animacje bezczynności, rozglądanie się, reakcje na otwarcie treści (np. gest w stronę obiektu).
+  - Zrobione (2026-11-22): powitanie na końcu wejścia (macha do kamery), gest w stronę otwartego obiektu, bezczynność. Zostało: rozglądanie się i drobne animacje, kiedy odwiedzający nic nie robi.
 - [ ] Omijanie przeszkód: wykorzystanie węzłów nawigacji z formatu mapy (edytor już je przewiduje).
 
 ### B7. Świat bazowy **(razem)**

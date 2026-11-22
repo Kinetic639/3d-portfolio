@@ -141,6 +141,19 @@ describe("bakeMap", () => {
     }
     expect(bakedQuery.surfaceHeight(30, 30)).toBe(voxelQuery.surfaceHeight(30, 30));
     expect(bakedQuery.columnZone(200, 3)).toBe(0);
+
+    // Where creatures stand: the exact surface, the same baked as live at every column's centre;
+    // partial shapes (slabs, stairs, slopes) are lower than the top of their cell.
+    let partial = 0;
+    for (let z = 0; z < 64; z += 1) {
+      for (let x = 0; x < 64; x += 1) {
+        const centre = voxelQuery.cellToWorld(x, 0, z);
+        const live = voxelQuery.groundAt(centre.x, centre.z);
+        expect(bakedQuery.groundAt(centre.x, centre.z)).toBeCloseTo(live, 1);
+        if (live < voxelQuery.surfaceHeight(x, z) - 0.01) partial += 1;
+      }
+    }
+    expect(partial).toBeGreaterThan(0);
   });
 });
 

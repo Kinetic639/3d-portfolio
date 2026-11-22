@@ -1,3 +1,4 @@
+import { getTerrainSurfaceAtWorldPosition } from "@/lib/world/surface-query";
 import { raycastVoxels } from "@/lib/world/voxel-raycast";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
 
@@ -23,6 +24,13 @@ export type WorldQuery = {
   raycast: (origin: Vec3Like, direction: Vec3Like) => TerrainHit | null;
   /** World-space height of the ground in a column; 0 where there is none. */
   surfaceHeight: (x: number, z: number) => number;
+  /**
+   * Where a creature stands at a world position: the height of the surface it can stand on, with partial
+   * shapes counted as what they are (a slab is half a block, stairs and slopes their own height) and
+   * shapes nothing stands on skipped (a curb's thin lip: the ground under it). surfaceHeight, by contrast,
+   * is the top of the highest occupied cell of a column, which is right for picking and labels.
+   */
+  groundAt: (x: number, z: number) => number;
   /** Numeric zone id of a column; 0 for none or outside the map. */
   columnZone: (x: number, z: number) => number;
   /** World position of the centre of a cell. */
@@ -48,6 +56,14 @@ export function createVoxelWorldQuery(world: VoxelWorld): WorldQuery {
       const top = world.getHighestNonAirY(x, z);
       return top === null ? 0 : top + 1;
     },
+    groundAt(x, z) {
+      const surface = getTerrainSurfaceAtWorldPosition(world, { x, z });
+      if (surface.valid) return surface.surfaceY;
+      const column = Math.min(width - 1, Math.max(0, Math.floor(x + width / 2)));
+      const row = Math.min(depth - 1, Math.max(0, Math.floor(z + depth / 2)));
+      const top = world.getHighestNonAirY(column, row);
+      return top === null ? 0 : top + 1;
+    },
     columnZone: (x, z) => (x >= 0 && x < width && z >= 0 && z < depth ? world.zones[x + width * z] : 0),
     cellToWorld: cellToWorld(width, depth),
   };
@@ -59,7 +75,11 @@ export function createVoxelWorldQuery(world: VoxelWorld): WorldQuery {
  * below. Overhangs do not exist in this model; for picking zones and
  * deciding whether a hill hides an object that is exact enough.
  */
-export function createHeightfieldQuery(width: number, depth: number, heights: Int8Array, zones: Uint8Array): WorldQuery {
+/** Ground heights are stored in 1/64 of a block (baked worlds, format 3); this marks a column with none. */
+export const GROUND_UNITS = 64;
+export const NO_GROUND = -32768;
+
+export function createHeightfieldQuery(width: number, depth: number, heights: Int8Array, zones: Uint8Array, grounds?: Int16Array): WorldQuery {
   const heightAt = (x: number, z: number) => {
     const value = heights[x + width * z];
     return value === -128 ? -Infinity : value;
@@ -120,6 +140,15 @@ export function createHeightfieldQuery(width: number, depth: number, heights: In
     },
     surfaceHeight(x, z) {
       const height = x >= 0 && x < width && z >= 0 && z < depth ? heightAt(x, z) : -Infinity;
+      return height === -Infinity ? 0 : height;
+    },
+    groundAt(x, z) {
+      // One exact height per column, sampled at its centre when the world was baked.
+      const column = Math.min(width - 1, Math.max(0, Math.floor(x + width / 2)));
+      const row = Math.min(depth - 1, Math.max(0, Math.floor(z + depth / 2)));
+      const ground = grounds ? grounds[column + width * row] : NO_GROUND;
+      if (ground !== NO_GROUND) return ground / GROUND_UNITS;
+      const height = heightAt(column, row);
       return height === -Infinity ? 0 : height;
     },
     columnZone: (x, z) => (x >= 0 && x < width && z >= 0 && z < depth ? zones[x + width * z] : 0),

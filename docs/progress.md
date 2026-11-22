@@ -3,11 +3,11 @@
 Krótka lista do odhaczania. Szczegóły każdego punktu (zakres, kryterium „gotowe”, decyzje) są w `docs/roadmap.md` pod tym samym numerem.
 Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 
-**Faza 1:** 25 / 48 (52%) `██████████░░░░░░░░░░`
+**Faza 1:** 27 / 48 (56%) `███████████░░░░░░░░░`
 
 | Część | Zrobione |
 |---|---|
-| Baza produktu (B0-B9) | 25 / 37 |
+| Baza produktu (B0-B9) | 27 / 37 |
 | Gotowe dla rekruterów (J1-J5) | 0 / 11 |
 
 ---
@@ -51,9 +51,9 @@ Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 - [x] Wyjście ze świata: powrót na ekran z drzwiami (2026-11-22)
 - [x] Budżety perf dla wejścia przez drzwi, pełne testy, cięcie przy ograniczonym ruchu (2026-11-22, zamknięte decyzją bez ponownego pomiaru)
 
-**B6. Przewodnik w świecie** 0/4
-- [ ] Idzie za kamerą, zostaje w kadrze
-- [ ] Za lotem do strefy, daleki skok z animacją
+**B6. Przewodnik w świecie** 2/4
+- [x] Idzie za kamerą, zostaje w kadrze; stoi na dokładnej wysokości gruntu (2026-11-22)
+- [x] Za lotem do strefy: pojawia się na miejscu i macha (2026-11-22)
 - [ ] Animacje bezczynności i reakcje
 - [ ] Omijanie przeszkód (węzły nawigacji)
 
