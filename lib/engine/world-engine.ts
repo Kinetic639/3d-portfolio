@@ -26,6 +26,7 @@ import { resolveActor, type ActorMovement } from "./actor";
 import type { PlacedActor } from "./entity-meshes";
 import { GUIDE, guideSpot, yawTowards } from "./guide";
 import { GuideDriver } from "./guide-driver";
+import { buildNavGrid, type Footprint, type NavGrid } from "@/lib/navigation/nav-grid";
 import type { PlacedMapEntity } from "@/lib/maps/map-entities";
 import type { ActorHud, ZoneInfo } from "@/lib/bridge/world-bridge";
 import { zoneSection } from "@/lib/content/places";
@@ -139,6 +140,8 @@ export class WorldEngine {
   private chosenActor: PlacedActor | null = null;
   /** The guide (B6): added to every world whose models include it; it follows the camera. */
   private guide: GuideDriver | null = null;
+  /** Where creatures can walk (docs/navigation.md): built from the terrain and the map's blocking objects. */
+  private nav: NavGrid | null = null;
   private cameraWasMoving = false;
   /** Ground of the loaded map, for sending creatures. */
   private query: WorldQuery | null = null;
@@ -229,6 +232,10 @@ export class WorldEngine {
     this.landingLoader = options.landingLoader ?? true;
     this.bridge = bridge;
     this.renderer = new THREE.WebGLRenderer({ canvas, context, antialias: true, alpha: true });
+    // Checking every shader for errors right after it is compiled makes the main thread wait for the GPU
+    // (traced: 110-160 ms waits while the world loads). Development keeps the check; a production build
+    // compiles in the background (the shaders are the same ones development has just checked).
+    this.renderer.debug.checkShaderErrors = process.env.NODE_ENV !== "production";
     this.environment = new Environment(this.scene);
     this.sky = this.scene.background;
     this.scene.add(this.skyDiscs.group);
@@ -427,12 +434,28 @@ export class WorldEngine {
     const entities = guideEntity ? [...definition.entities, guideEntity] : definition.entities;
     this.entities = buildEntityLayer(entities, models, { wind: wind.options(), style: this.modelStyles.options(), actors });
     const guidePlaced = this.entities.actors.find((placed) => placed.entityId === GUIDE.entityId) ?? null;
+    this.nav = buildNavGrid({
+      width: query.width,
+      depth: query.depth,
+      terrainStandable: (column, row) => query.standable(column, row),
+      groundAt: (column, row) => {
+        const centre = query.cellToWorld(column, 0, row);
+        return query.groundAt(centre.x, centre.z);
+      },
+      blockers: definition.entities.flatMap((entity): Footprint[] => entity.collisionMode === "blocking" && entity.footprint
+        ? [{ x: entity.transform.position.x, z: entity.transform.position.z, width: entity.footprint.width, depth: entity.footprint.depth, rotation: entity.transform.rotation.y }]
+        : []),
+    });
     this.guide = guidePlaced && guideEntity
-      ? new GuideDriver(guidePlaced, (x, z) => groundHeight(query, x, z), {
+      ? new GuideDriver(guidePlaced, (x, z) => groundHeight(query, x, z), this.nav, {
         position: new THREE.Vector3(guideEntity.transform.position.x, guideEntity.transform.position.y, guideEntity.transform.position.z),
         yaw: guideEntity.transform.rotation.y,
       })
       : null;
+    if (this.guide) {
+      this.guide.syncFootShadow();
+      this.scene.add(this.guide.footShadow);
+    }
     this.interaction = new InteractionLayer({
       map: definition,
       query,
@@ -864,6 +887,12 @@ export class WorldEngine {
       this.entities.dispose();
       this.entities = null;
     }
+    if (this.guide) {
+      this.scene.remove(this.guide.footShadow);
+      this.guide.dispose();
+      this.guide = null;
+    }
+    this.nav = null;
     this.modelStyles?.dispose();
     this.modelStyles = null;
     this.chosenActor = null;
@@ -1159,12 +1188,25 @@ export class WorldEngine {
       const camera = this.rig.camera.position;
       const paused = this.chosenActor === this.guide.placed || (this.minigames?.playing ?? false);
       this.guide.update(now, cameraMoving, { x: goal.x, z: goal.z }, { x: camera.x, z: camera.z }, paused);
-      // The camera just stopped: one frame after the guide's wait, so it can set off even if nothing else draws.
-      if (this.cameraWasMoving && !cameraMoving) window.setTimeout(() => this.invalidate(), GUIDE.restMs + 30);
+      // The camera just stopped: after the guide's wait, a frame only if it has something to do (a still world stays still).
+      if (this.cameraWasMoving && !cameraMoving) {
+        window.setTimeout(() => {
+          const guide = this.guide;
+          if (!guide || this.disposed) return;
+          const rest = this.rig.getGoal();
+          const at = this.rig.camera.position;
+          if (guide.wantsToAct({ x: rest.x, z: rest.z }, { x: at.x, z: at.z })) this.invalidate();
+        }, GUIDE.restMs + 30);
+      }
     }
     this.cameraWasMoving = cameraMoving;
     // Creatures idling in view are like the wind: half rate, and still when motion is held (reduced motion, still tests).
     const entityFrames = this.entities?.update(delta, this.frustum, !this.environment.wind.isStilled) ?? "none";
+    if (this.guide) {
+      this.guide.syncFootShadow();
+      // Not while the world grows during the entry: the guide pops up with the other objects, then its patch shows.
+      this.guide.footShadow.visible = this.entry === null;
+    }
     const othersAnimating = entityFrames === "full" || waving || bursting || skyChanging;
     const ambient = windy || entityFrames === "ambient";
     const animating = othersAnimating || ambient;

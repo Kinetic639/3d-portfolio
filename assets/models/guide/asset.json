@@ -7,14 +7,14 @@
   "collision": "none",
   "animation": "Idle",
   "animations": ["Idle", "Walk", "Run", "Talk", "Interact", "PickUp", "SitDown", "Sitting", "StandUp", "Yes", "No", "Call", "ArmsFolded"],
-  "maxTextureSize": 1024,
+  "maxTextureSize": 2048,
   "tags": ["character", "guide", "test", "animated"],
   "style": {
     "shading": "toon",
     "outline": true,
     "outlineScale": 0.25,
     "contactShadow": false,
-    "castShadow": true
+    "castShadow": false
   },
   "actor": {
     "walkSpeed": 1.3,

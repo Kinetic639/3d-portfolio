@@ -1,3 +1,4 @@
+import { voxelColumnStandable } from "@/lib/navigation/voxel-standable";
 import { getTerrainSurfaceAt } from "@/lib/world/surface-query";
 import { GROUND_UNITS, NO_GROUND } from "@/lib/engine/world-query";
 import { createLoadedMapState, type MapDefinition } from "@/lib/maps/map-definition";
@@ -90,6 +91,10 @@ export async function bakeMap(definition: MapDefinition): Promise<BakeResult> {
       grounds[x + width * z] = surface.valid ? Math.round(surface.surfaceY * GROUND_UNITS) : NO_GROUND;
     }
   }
+  const standable = new Uint8Array(width * depth);
+  for (let z = 0; z < depth; z += 1) {
+    for (let x = 0; x < width; x += 1) standable[x + width * z] = voxelColumnStandable(world, x, z) ? 1 : 0;
+  }
 
   const stats: BakeStats = { sourceFaces, faces: faceCount, cells: cells.length, tiles: tiles.length, bytes: 0, bakeMs: 0 };
   const header: BakedHeader = {
@@ -112,6 +117,7 @@ export async function bakeMap(definition: MapDefinition): Promise<BakeResult> {
     tiles,
     heights: writer.add(heights),
     grounds: writer.add(grounds),
+    standable: writer.add(standable),
     zones: writer.add(world.zones),
     voxelZones: voxelZones.map((zone) => writeVoxelZone(writer, world, zone)),
     stats,

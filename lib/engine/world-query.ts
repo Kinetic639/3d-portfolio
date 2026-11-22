@@ -1,3 +1,4 @@
+import { voxelColumnStandable } from "@/lib/navigation/voxel-standable";
 import { getTerrainSurfaceAtWorldPosition } from "@/lib/world/surface-query";
 import { raycastVoxels } from "@/lib/world/voxel-raycast";
 import type { VoxelWorld } from "@/lib/world/voxel-world";
@@ -31,6 +32,8 @@ export type WorldQuery = {
    * is the top of the highest occupied cell of a column, which is right for picking and labels.
    */
   groundAt: (x: number, z: number) => number;
+  /** Whether a creature can stand in a column (column and row, like surfaceHeight): the navigation grid's terrain. */
+  standable: (x: number, z: number) => boolean;
   /** Numeric zone id of a column; 0 for none or outside the map. */
   columnZone: (x: number, z: number) => number;
   /** World position of the centre of a cell. */
@@ -56,6 +59,7 @@ export function createVoxelWorldQuery(world: VoxelWorld): WorldQuery {
       const top = world.getHighestNonAirY(x, z);
       return top === null ? 0 : top + 1;
     },
+    standable: (x, z) => voxelColumnStandable(world, x, z),
     groundAt(x, z) {
       const surface = getTerrainSurfaceAtWorldPosition(world, { x, z });
       if (surface.valid) return surface.surfaceY;
@@ -79,7 +83,7 @@ export function createVoxelWorldQuery(world: VoxelWorld): WorldQuery {
 export const GROUND_UNITS = 64;
 export const NO_GROUND = -32768;
 
-export function createHeightfieldQuery(width: number, depth: number, heights: Int8Array, zones: Uint8Array, grounds?: Int16Array): WorldQuery {
+export function createHeightfieldQuery(width: number, depth: number, heights: Int8Array, zones: Uint8Array, grounds?: Int16Array, standable?: Uint8Array): WorldQuery {
   const heightAt = (x: number, z: number) => {
     const value = heights[x + width * z];
     return value === -128 ? -Infinity : value;
@@ -142,6 +146,7 @@ export function createHeightfieldQuery(width: number, depth: number, heights: In
       const height = x >= 0 && x < width && z >= 0 && z < depth ? heightAt(x, z) : -Infinity;
       return height === -Infinity ? 0 : height;
     },
+    standable: (x, z) => x >= 0 && x < width && z >= 0 && z < depth && (standable ? standable[x + width * z] === 1 : heightAt(x, z) !== -Infinity),
     groundAt(x, z) {
       // One exact height per column, sampled at its centre when the world was baked.
       const column = Math.min(width - 1, Math.max(0, Math.floor(x + width / 2)));

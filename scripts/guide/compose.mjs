@@ -12,8 +12,9 @@
  *   - Universal Animation Library 1 and 2 [Standard]: the clips, renamed to
  *     plain roles (the engine finds idle, walk and run by name).
  *
- * Everything shares one humanoid rig, so the parts are bound to the outfit's
- * bones. Composition runs in a browser with three.js (its exporter writes the
+ * Everything shares one humanoid rig and bind pose, so the parts merge into
+ * one mesh with one skeleton (two materials: a colour atlas, and the eyes).
+ * Composition runs in a browser with three.js (its exporter writes the
  * skinned, animated GLB); `pnpm assets` then optimises the result as usual.
  */
 import fs from "node:fs";
@@ -55,7 +56,9 @@ const recipe = {
       clips: { Yes: "Yes", Idle_No_Loop: "No", Idle_Rail_Call: "Call", Idle_FoldArms_Loop: "ArmsFolded" },
     },
   ],
-  maxTextureSize: 1024,
+  /** Colour textures that share one 2048 px atlas (a quadrant each, as large as each texture was before). */
+  atlas: ["MI_Peasant", "MI_Regular_Male", "MI_Superhero_Male", "MI_Hair_1"],
+  maxTextureSize: 2048,
 };
 
 for (const file of [recipe.outfit, ...recipe.parts.map((part) => part.url), ...recipe.libraries.map((library) => library.url)]) {

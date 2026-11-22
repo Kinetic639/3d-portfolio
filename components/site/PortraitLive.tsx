@@ -1,11 +1,25 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useWorldBridge } from "@/lib/bridge/use-world-bridge";
 import { worldBridge } from "@/lib/bridge/world-bridge";
 import { useUiWork } from "@/lib/perf/ui-work";
 import type { PortraitScene } from "@/lib/portrait/portrait-scene";
 import styles from "./Portrait.module.css";
+
+/**
+ * Whether the entry screen with the door covers the page (decided in <head>, then kept by the screen):
+ * the page is hidden under it, though still "on screen" for an IntersectionObserver.
+ */
+const entryCovers = () => {
+  const data = document.documentElement.dataset;
+  return "entryScreen" in data || "entryOpen" in data;
+};
+function subscribeEntry(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-entry-screen", "data-entry-open"] });
+  return () => observer.disconnect();
+}
 
 /** How long the page has to be quiet (world ready, portrait on screen) before the living portrait loads. */
 const QUIET_MS = 2000;
@@ -27,7 +41,9 @@ export default function PortraitLive({ modelUrl, placement }: { modelUrl: string
   const phase = useWorldBridge((state) => state.phase);
   const [visible, setVisible] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const worldFree = phase === "ready";
+  const covered = useSyncExternalStore(subscribeEntry, entryCovers, () => false);
+  // Free: the world is ready (not in front) and no entry screen hides the page.
+  const worldFree = phase === "ready" && !covered;
   const wanted = useRef(false);
   const unmounted = useRef(false);
 
@@ -58,7 +74,7 @@ export default function PortraitLive({ modelUrl, placement }: { modelUrl: string
     };
 
     function start() {
-      if (wanted.current || worldBridge.store.getState().phase !== "ready") return;
+      if (wanted.current || worldBridge.store.getState().phase !== "ready" || entryCovers()) return;
       wanted.current = true;
       load(canvasRef.current!);
     }

@@ -85,6 +85,8 @@ export class Actor {
   private state: ActorState = "idle";
   /** A heading to turn to in place, while idle (the guide facing the visitor); null when there is none. */
   private facing: number | null = null;
+  /** The rest of a path being walked (after the current target). */
+  private waypoints: THREE.Vector3[] = [];
   private readonly mixer: THREE.AnimationMixer;
   private readonly actions = new Map<string, THREE.AnimationAction>();
   private readonly roles: ReturnType<typeof resolveActorClips>;
@@ -143,9 +145,17 @@ export class Actor {
     this.config = config;
   }
 
+  /** Walks (or runs) through points on the ground, one after another, without stopping between them. */
+  followPath(points: THREE.Vector3[], movement: "walk" | "run") {
+    if (points.length === 0) return;
+    this.goTo(points[0], movement);
+    this.waypoints = points.slice(1).map((point) => point.clone().add(new THREE.Vector3(0, this.config.groundOffset, 0)));
+  }
+
   /** Sends it to a point on the ground. */
   goTo(destination: THREE.Vector3, movement: ActorMovement) {
     this.facing = null;
+    this.waypoints = [];
     this.target = destination.clone().add(new THREE.Vector3(0, this.config.groundOffset, 0));
     this.sequence = null;
     if (movement === "flight") {
@@ -217,6 +227,12 @@ export class Actor {
     const remaining = this.step.length();
     const distance = (this.state === "running" ? this.config.runSpeed : this.config.walkSpeed) * delta;
     if (remaining <= distance) {
+      // On to the next point of a path, carrying on with the same gait.
+      const next = this.waypoints.shift();
+      if (next) {
+        this.target = next;
+        return;
+      }
       this.position.copy(target);
       this.rest();
       return;
