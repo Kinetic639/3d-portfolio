@@ -1,29 +1,13 @@
-import WorldLayer from "@/components/world/WorldLayer";
-import { listFreshBakes } from "@/lib/bake/bake-records";
-import { readMapIndex } from "@/lib/maps/map-store";
-import { readAllMinimaps } from "@/lib/minimap/minimap-store";
+import type { Metadata } from "next";
+import SiteShell from "@/components/site/SiteShell";
+import { messages } from "@/lib/i18n/messages";
 
-/**
- * Whether visitors get a map's bake (when it is fresh) instead of its voxels:
- * SERVE_BAKED_WORLDS=1 in the build environment. Off until the bake has been
- * checked against the voxels and approved; development builds load the bake
- * with ?world=baked either way.
- */
-const SERVE_BAKED_WORLDS = process.env.SERVE_BAKED_WORLDS === "1";
+export const metadata: Metadata = {
+  title: messages("en").meta.title,
+  description: messages("en").meta.description,
+};
 
-/**
- * Layout for every page that belongs to the portfolio proper. The world layer
- * lives here, not in the pages, so moving between landing pages never
- * restarts the world that is loading (or already warm) behind them.
- */
+/** Root layout of the English site (the bare paths: /, /projects...). The Polish one is app/(pl)/layout.tsx. */
 export default function SiteLayout({ children }: { children: React.ReactNode }) {
-  // Read at build time: the default map is whatever maps/index.json names in the deployed commit.
-  const { defaultMapId } = readMapIndex();
-
-  return (
-    <>
-      {children}
-      <WorldLayer defaultMapId={defaultMapId} bakes={listFreshBakes()} serveBakes={SERVE_BAKED_WORLDS} minimaps={readAllMinimaps()} />
-    </>
-  );
+  return <SiteShell locale="en">{children}</SiteShell>;
 }

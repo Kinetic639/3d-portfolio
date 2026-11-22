@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import PortfolioMap, { type MapPlace } from "@/components/content/PortfolioMap";
 import ThemeToggle from "@/components/site/ThemeToggle";
+import { useLocale } from "@/components/site/locale-context";
+import { messages } from "@/lib/i18n/messages";
 import { useWorldBridge } from "@/lib/bridge/use-world-bridge";
 import { worldBridge } from "@/lib/bridge/world-bridge";
 import type { MinimapData } from "@/lib/minimap/minimap";
@@ -30,6 +32,8 @@ export default function WorldMinimap({ data, hidden, onPlace, onPin }: {
   const place = useWorldBridge((state) => state.place);
   const [open, setOpen] = useState(true);
   const markerRef = useRef<SVGGElement>(null);
+  const locale = useLocale();
+  const text = messages(locale).world;
   const active = phase === "world" && !hidden && open;
 
   useEffect(() => {
@@ -55,15 +59,16 @@ export default function WorldMinimap({ data, hidden, onPlace, onPin }: {
       <div className={styles.minimapBar}>
         <ThemeToggle />
         <button type="button" className={styles.minimapToggle} aria-expanded={open} onClick={() => setOpen(!open)}>
-          {open ? "Hide map" : "Map"}
+          {open ? text.hideMap : text.map}
         </button>
       </div>
       {open ? (
         <PortfolioMap
           data={data}
+          locale={locale}
           compact
           current={place}
-          label="Map of the world: go to a zone or open an item"
+          label={text.mapLabel}
           markerRef={markerRef}
           onPlace={(event, target) => {
             if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;

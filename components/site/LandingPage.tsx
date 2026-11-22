@@ -5,10 +5,14 @@ import PortfolioMap from "@/components/content/PortfolioMap";
 import ThemeToggle from "./ThemeToggle";
 import Door from "./Door";
 import Portrait from "./Portrait";
+import LanguageSwitch from "./LanguageSwitch";
+import LanguagePrompt from "./LanguagePrompt";
 import type { MinimapData } from "@/lib/minimap/minimap";
 import { readMinimapData } from "@/lib/minimap/minimap-store";
 import { readMapIndex } from "@/lib/maps/map-store";
-import { PORTFOLIO_CONTENT } from "@/content/portfolio";
+import { portfolioContent } from "@/content/localized";
+import { localizePath, type Locale } from "@/lib/i18n/locale";
+import { messages } from "@/lib/i18n/messages";
 import { CONTENT_SECTIONS, getContentPath, listContentByKind, type ContentItem, type ContentSection } from "@/lib/content/content";
 import { getSectionPath } from "@/lib/content/places";
 import styles from "./LandingPage.module.css";
@@ -29,78 +33,86 @@ export const CV_PATH = "/cv/michal-stepien-cv.pdf";
  *
  * On an item's or a section's own URL that item or section is shown first,
  * as the page's main heading, followed by the rest of the portfolio.
+ *
+ * Every word comes in the page's language: the interface from lib/i18n, the
+ * portfolio's copy from content/ (one file per language).
  */
-export default function LandingPage({ featured, featuredSection, minimap }: { featured?: ContentItem; featuredSection?: ContentSection; minimap?: MinimapData | null }) {
-  const { owner } = PORTFOLIO_CONTENT;
+export default function LandingPage({ locale, featured, featuredSection, minimap }: { locale: Locale; featured?: ContentItem; featuredSection?: ContentSection; minimap?: MinimapData | null }) {
+  const content = portfolioContent(locale);
+  const text = messages(locale);
+  const { owner } = content;
+  const home = localizePath("/", locale);
+  const href = (path: string) => localizePath(path, locale);
   // The default map's, unless a page names another (a map preview). Read at build time.
   const map = minimap === undefined ? readMinimapData(readMapIndex().defaultMapId) : minimap;
   const inner = featured !== undefined || featuredSection !== undefined;
 
   return (
     <div id="landing" className={styles.page}>
-      <a className={styles.skip} href="#content">Skip to content</a>
+      <a className={styles.skip} href="#content">{text.page.skip}</a>
 
       <div className={styles.column}>
         <header className={styles.bar}>
-          <p className={styles.brand}><Link href="/">{owner.name}</Link></p>
-          <nav aria-label="Sections" className={styles.navWrap}>
+          <p className={styles.brand}><Link href={home}>{owner.name}</Link></p>
+          <nav aria-label={text.page.sectionsNav} className={styles.navWrap}>
             <ul className={styles.nav}>
               {CONTENT_SECTIONS.map((section) => (
-                <li key={section.kind}><a href={`${inner ? "/" : ""}#${section.segment}`}>{section.label}</a></li>
+                <li key={section.kind}><a href={`${inner ? home : ""}#${section.segment}`}>{text.sections[section.kind]}</a></li>
               ))}
             </ul>
           </nav>
+          <LanguageSwitch />
           <ThemeToggle />
         </header>
 
       <main id="content" className={styles.main}>
         <Portrait placement="inline" />
-        <section className={styles.hero} aria-label="Introduction">
+        <section className={styles.hero} aria-label={text.page.introduction}>
           {inner ? <p className={styles.heroName}>{owner.name}</p> : <h1 className={styles.heroName}>{owner.name}</h1>}
           <p className={styles.role}>{owner.role}</p>
           {inner ? null : <p className={styles.tagline}>{owner.tagline}</p>}
           <p className={styles.actions}>
-            <a className={styles.primary} href={CV_PATH} download>Download CV</a>
-            <a className={styles.secondary} href={`${inner ? "/" : ""}#contact`}>Contact</a>
+            <a className={styles.primary} href={CV_PATH} download>{text.page.downloadCv}</a>
+            <a className={styles.secondary} href={`${inner ? home : ""}#contact`}>{text.page.contact}</a>
           </p>
         </section>
 
         {featured ? (
           <section className={styles.featured} aria-label={featured.title}>
-            <ContentArticle item={featured} headingLevel={1} />
+            <ContentArticle item={featured} locale={locale} headingLevel={1} />
           </section>
         ) : null}
         {featuredSection ? (
-          <section className={styles.featured} aria-label={featuredSection.label}>
-            <SectionArticle section={featuredSection} items={listContentByKind(PORTFOLIO_CONTENT, featuredSection.kind)} headingLevel={1} />
+          <section className={styles.featured} aria-label={text.sections[featuredSection.kind]}>
+            <SectionArticle section={featuredSection} locale={locale} items={listContentByKind(content, featuredSection.kind)} headingLevel={1} />
           </section>
         ) : null}
 
         {map ? (
           <section id="map" className={styles.section} aria-labelledby="map-heading">
-            <h2 id="map-heading" className={styles.sectionTitle}>Map</h2>
-            <p className={styles.mapIntro}>Every zone of the 3D world is a section of this site. Choose one to read it here, or enter the world from its page to go there.</p>
-            <PortfolioMap data={map} current={featuredSection ? map.zones.find((zone) => zone.contentReference?.contentType === featuredSection.kind)?.id : null} />
+            <h2 id="map-heading" className={styles.sectionTitle}>{text.page.map}</h2>
+            <p className={styles.mapIntro}>{text.page.mapIntro}</p>
+            <PortfolioMap data={map} locale={locale} label={text.page.mapLabel} current={featuredSection ? map.zones.find((zone) => zone.contentReference?.contentType === featuredSection.kind)?.id : null} />
           </section>
         ) : null}
 
         {CONTENT_SECTIONS.map((section) => {
-          const items = listContentByKind(PORTFOLIO_CONTENT, section.kind);
+          const items = listContentByKind(content, section.kind);
           if (items.length === 0) return null;
           return (
             <section key={section.kind} id={section.segment} className={styles.section} aria-labelledby={`${section.segment}-heading`}>
               <h2 id={`${section.segment}-heading`} className={styles.sectionTitle}>
-                {section.singleton ? section.label : <Link href={getSectionPath(section)}>{section.label}</Link>}
+                {section.singleton ? text.sections[section.kind] : <Link href={href(getSectionPath(section))}>{text.sections[section.kind]}</Link>}
               </h2>
               <ul className={section.singleton ? styles.single : styles.grid}>
                 {items.map((item) => (
                   <li key={item.id} className={styles.card}>
                     <h3 className={styles.cardTitle}>
-                      <Link href={getContentPath(item)}>{item.title}</Link>
+                      <Link href={href(getContentPath(item))}>{item.title}</Link>
                     </h3>
                     <p className={styles.cardSummary}>{item.summary}</p>
                     {item.tags && item.tags.length > 0 ? (
-                      <ul className={styles.tags} aria-label="Technologies">
+                      <ul className={styles.tags} aria-label={text.page.technologies}>
                         {item.tags.map((tag) => <li key={tag}>{tag}</li>)}
                       </ul>
                     ) : null}
@@ -119,7 +131,7 @@ export default function LandingPage({ featured, featuredSection, minimap }: { fe
       </footer>
       </div>
 
-      <aside className={styles.sidebar} aria-label="Portrait and the way into the 3D world">
+      <aside className={styles.sidebar} aria-label={text.page.sidebar}>
         <div className={styles.sidebarTop}>
           <Portrait placement="sidebar" />
           <p className={styles.sidebarName}>{owner.name}</p>
@@ -127,6 +139,8 @@ export default function LandingPage({ featured, featuredSection, minimap }: { fe
         </div>
         <Door />
       </aside>
+
+      <LanguagePrompt />
     </div>
   );
 }
