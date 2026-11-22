@@ -60,8 +60,20 @@
   transition: opacity 400ms ease-out;
 }
 
-.canvas:has(.live[data-loaded="true"]) .poster {
+:global(html:not([data-world="entering"]):not([data-world="world"]):not([data-world="leaving"])) .canvas:has(.live[data-loaded="true"]) .poster {
   opacity: 0;
+}
+
+/*
+ * While the world is in front, the living guide's canvas is taken out of the
+ * page altogether and the poster stands in (the page is hidden anyway): a
+ * paused canvas still left the browser something to redraw when the theme
+ * changed under the world, and the world's frames paid for it.
+ */
+:global(html[data-world="entering"]) .live,
+:global(html[data-world="world"]) .live,
+:global(html[data-world="leaving"]) .live {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
