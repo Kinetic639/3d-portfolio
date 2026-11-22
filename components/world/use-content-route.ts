@@ -2,9 +2,10 @@
 
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { PORTFOLIO_CONTENT } from "@/content/portfolio";
+import { portfolioContent } from "@/content/localized";
 import { findContentByPath, getContentPath, type ContentItem } from "@/lib/content/content";
 import { findSectionByPath } from "@/lib/content/places";
+import { localizePath, splitLocale, type Locale } from "@/lib/i18n/locale";
 
 /**
  * History entries created while the visitor is inside the world carry this
@@ -30,11 +31,14 @@ export function isWorldHistoryEntry() {
  * Closing goes back when this session pushed the entry (so Back and the close
  * button agree) and otherwise pushes the world's own URL, which is what
  * happens after entering the world from an item's page.
+ *
+ * Paths given to `openPath` are full URLs, with the language's prefix (/pl/projects).
  */
-export function useContentRoute(worldPath: string) {
+export function useContentRoute(worldPath: string, locale: Locale) {
   const pathname = usePathname();
-  const item = useMemo(() => findContentByPath(PORTFOLIO_CONTENT, pathname), [pathname]);
-  const section = useMemo(() => findSectionByPath(pathname), [pathname]);
+  const path = splitLocale(pathname).path;
+  const item = useMemo(() => findContentByPath(portfolioContent(locale), path), [locale, path]);
+  const section = useMemo(() => findSectionByPath(path), [path]);
   /** How many of the entries up to the current one this hook pushed: a section, then an item opened from it, is two. */
   const ownedDepth = useRef(0);
 
@@ -49,7 +53,7 @@ export function useContentRoute(worldPath: string) {
 
   const openPath = useCallback((path: string) => {
     if (path === window.location.pathname) return;
-    if (ownedDepth.current > 0 && !findSectionByPath(window.location.pathname)) {
+    if (ownedDepth.current > 0 && !findSectionByPath(splitLocale(window.location.pathname).path)) {
       // Switching items while the panel is open keeps a single entry, so one Back returns to where the panel was opened from.
       window.history.replaceState(worldHistoryState(), "", path);
     } else {
@@ -58,7 +62,7 @@ export function useContentRoute(worldPath: string) {
       ownedDepth.current += 1;
     }
   }, []);
-  const open = useCallback((next: ContentItem) => openPath(getContentPath(next)), [openPath]);
+  const open = useCallback((next: ContentItem) => openPath(localizePath(getContentPath(next), locale)), [openPath, locale]);
 
   const close = useCallback(() => {
     if (ownedDepth.current > 0) {

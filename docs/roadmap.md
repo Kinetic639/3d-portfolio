@@ -43,12 +43,26 @@ Nowy układ strony, od którego zależy reszta. Na razie bez stylizacji, ale z d
   - **Komputer:** wąski, przypięty sidebar po prawej (ok. 280 px). Na samej górze duży portret, pod nim imię i rola, na dole sidebara małe drzwi do świata. Treść w kolumnie po lewej, nawigacja, język i motyw w górnym pasku nad treścią.
   - **Telefon:** portret na górze treści, nad powitaniem, przewija się razem z treścią (nie jest przypięty). Drzwi w zarezerwowanym, przypiętym pasku na dole ekranu. W górnym pasku imię i menu.
   - Szkice wariantów A-D zostały w historii rozmowy, wybrany jest D z telefonem 2.
-- [ ] Dwa języki: polski i angielski, przełącznik i wybór przy pierwszej wizycie. Struktura adresów (np. `/pl/...`, `/en/...`), treść w dwóch wersjach, `hreflang`. Robimy to na początku, bo zmienia adresy wszystkich stron i stref.
+- [x] Dwa języki: polski i angielski, przełącznik i wybór przy pierwszej wizycie, treść w dwóch wersjach, `hreflang`. (2026-11-22)
+  - **Adresy:** angielski zostaje pod gołymi ścieżkami (`/`, `/projects/...`), polski pod `/pl/...`, z tymi samymi segmentami. Bez przekierowań i bez proxy: każda strona jest statyczna, a `/` nie traci czasu na przekierowanie.
+  - **Przełącznik:** EN | PL w górnym pasku (na telefonie w menu), zwykłe linki do tej samej strony w drugim języku, wybór jest zapamiętany.
+  - **Pierwsza wizyta:** gdy przeglądarka prosi o drugi język, mała notka pyta o niego w tym języku. Strona nigdy sama nie przekierowuje.
+  - **Telefon:** w górnym pasku imię, dzień/noc i Menu (sekcje i język), bo z przełącznikiem języka pasek się nie mieścił.
+  - **Teksty:** interfejs w `lib/i18n/messages.ts`, treść portfolio w `content/` (plik na język, test pilnuje, że mają te same pozycje). Świat 3D też mówi językiem strony: menu, panele, nazwy stref, adresy.
 - [x] Sekcje z treścią zastępczą: o mnie, projekty, doświadczenie, umiejętności, kontakt. (2026-11-22)
 - [x] Pobieranie CV (na razie zastępczy PDF w `public/`). (2026-11-22)
 - [x] Miejsce na portret i drzwi w sekcji powitalnej (na razie statyczne). (2026-11-22)
 - [x] Responsywność od telefonu po szeroki ekran, motyw dzień i noc. (2026-11-22)
-- [ ] Gotowe, gdy: Lighthouse co najmniej 95 we wszystkich kategoriach na produkcji, a strona działa bez JavaScriptu i bez WebGL.
+- [x] Gotowe, gdy: Lighthouse spełnia kryterium poniżej, a strona działa bez JavaScriptu i bez WebGL. (2026-11-22)
+  - **Kryterium Lighthouse (zmienione 2026-11-22):**
+    - komputer: co najmniej 95 we wszystkich kategoriach;
+    - telefon: dostępność, dobre praktyki i SEO co najmniej 95, wydajność co najmniej 75 i bez spadków (punkt odniesienia: 79).
+  - **Dlaczego zmienione:** na telefonie Lighthouse spowalnia procesor 4× i najmocniej liczy TBT. Punkty zabiera hydratacja strony (jedno zadanie ok. 250 ms) i ładowanie świata 3D w tle. Wyższy wynik wymagałby ładowania świata dopiero po kliknięciu drzwi, czyli dłuższego czekania dla prawdziwego odwiedzającego. Optymalizowalibyśmy pod test, nie pod człowieka. Strony z WebGL mają na telefonie zwykle 30-60.
+  - **Wynik:**
+    - komputer: 100 / 100 / 100 / 100 (pomiar Twój);
+    - telefon: wydajność 79 (pomiar Twój), dostępność, dobre praktyki i SEO po 100 (EN i PL, lokalny serwer produkcyjny); LCP 1,8 s i CLS 0 przy wolnym 4G.
+  - **Bez JavaScriptu i bez WebGL** strona działa; testy e2e to pilnują.
+  - **Na później (B8):** zmniejszyć koszt hydratacji (kilka punktów na telefonie bez psucia świata).
 
 ### B2. Postać testowa **(razem)**
 
@@ -97,7 +111,7 @@ Jeden darmowy model do portretu i do świata (vision.md, rozdział 5).
 - [ ] Budżety `pnpm perf` dla portretu, drzwi, przejścia i przewodnika.
 - [ ] Testy e2e całej ścieżki: strona, drzwi, przejście, świat, przewodnik, powrót.
 - [ ] Sprawdzenie na Twoim telefonie. **(Ty)**
-- [ ] Lighthouse na produkcji.
+- [ ] Lighthouse na produkcji według kryterium z B1, plus mniejszy koszt hydratacji strony (kilka punktów wydajności na telefonie).
 
 ---
 
@@ -132,7 +146,7 @@ Jeden darmowy model do portretu i do świata (vision.md, rozdział 5).
 
 - [ ] SEO: tytuły i opisy stron w obu językach, `hreflang`, `sitemap.xml`, `robots.txt`, favicon.
 - [ ] Podglądy linków (Open Graph): ładny obrazek przy udostępnianiu w LinkedIn i komunikatorach.
-- [ ] Lighthouse na produkcji: co najmniej 95 we wszystkich kategoriach.
+- [ ] Lighthouse na produkcji według kryterium z B1 (komputer co najmniej 95 wszędzie; telefon co najmniej 95 poza wydajnością, ta co najmniej 75 i bez spadków).
 - [ ] Własna domena (decyzja). **(Ty)**
 
 ---

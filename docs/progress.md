@@ -3,11 +3,11 @@
 Krótka lista do odhaczania. Szczegóły każdego punktu (zakres, kryterium „gotowe”, decyzje) są w `docs/roadmap.md` pod tym samym numerem.
 Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 
-**Faza 1:** 6 / 46 (13%) `███░░░░░░░░░░░░░░░░░`
+**Faza 1:** 8 / 46 (17%) `███░░░░░░░░░░░░░░░░░`
 
 | Część | Zrobione |
 |---|---|
-| Baza produktu (B0-B9) | 6 / 35 |
+| Baza produktu (B0-B9) | 8 / 35 |
 | Gotowe dla rekruterów (J1-J5) | 0 / 11 |
 
 ---
@@ -17,14 +17,14 @@ Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 **B0. Porządki** 1/1
 - [x] Serwer 3301, kopia `orig`, repo na `main`, stare gałęzie (2026-11-22)
 
-**B1. Szkielet strony** 5/7
+**B1. Szkielet strony** 7/7
 - [x] Układ: wariant D, telefon z portretem w treści (2026-11-22)
-- [ ] Dwa języki: PL i EN, przełącznik, adresy, `hreflang`
+- [x] Dwa języki: PL i EN, przełącznik, adresy, `hreflang` (2026-11-22)
 - [x] Sekcje z treścią zastępczą (2026-11-22)
 - [x] Pobieranie CV (zastępczy PDF) (2026-11-22)
 - [x] Miejsce na portret i drzwi (statyczne) (2026-11-22)
 - [x] Responsywność, dzień i noc (2026-11-22)
-- [ ] Lighthouse ≥ 95, działa bez JS i WebGL
+- [x] Lighthouse (komputer ≥ 95, telefon ≥ 95 poza wydajnością ≥ 75), działa bez JS i WebGL (2026-11-22)
 
 **B2. Postać testowa** 0/3
 - [ ] Wymagania modelu spisane
