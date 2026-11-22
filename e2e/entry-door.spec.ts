@@ -45,4 +45,12 @@ test("the door is the world's loader; its note offers the CV and the classic pag
   await map.getByRole("button", { name: "Explore the world" }).click();
   await expect(map).toHaveCount(0);
   expect(await menuOpacity()).toBe(1);
+
+  // Leaving the world comes back to the door screen, ready, with the focus on its door.
+  await page.getByRole("button", { name: "Back to page" }).click();
+  await waitForPhase(page, "ready");
+  const back = page.getByRole("dialog", { name: "The way into the 3D world" });
+  await expect(back).toBeVisible();
+  await expect(back.getByRole("status")).toHaveText("The door is open. Step in.");
+  await expect(back.getByRole("button", { name: "Enter the 3D world" })).toBeFocused();
 });

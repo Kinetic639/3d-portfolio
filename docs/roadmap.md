@@ -116,7 +116,7 @@ Zmiana koncepcji (2026-11-22): wejście do świata nie prowadzi już z portretu,
 
 - [x] Jeden ciągły ruch: drzwi otwierają się, a kamera przyspiesza w otwór, aż jego światło wypełni ekran; pod pełnym światłem zmienia się scena; światło gaśnie nad światem. Wejście świata startuje od najwyższego punktu i tylko opada (nowa opcja `fromTop` polecenia `enter`). (2026-11-22, prototyp)
 - [x] Podczas wejścia sam świat bez kontrolek; na końcu mapa świata na pełnym ekranie (strefa: lot i sekcja, pinezka: projekt, „Zwiedzaj świat” lub Escape: zamknięcie); kontrolki dopiero po jej zamknięciu. (2026-11-22, prototyp)
-- [ ] Wyjście ze świata: dokąd wraca odwiedzający, który wszedł przez drzwi (ekran z drzwiami czy wersja klasyczna). **(razem)**
+- [x] Wyjście ze świata: kto wszedł przez drzwi, wraca na ekran z drzwiami, tym samym ruchem odwrotnie (ze światła, z otworu drzwi, drzwi przymykają się do uchylenia; fokus na drzwiach). (2026-11-22, prototyp)
 - [ ] Gotowe, gdy: budżety `pnpm perf` przechodzą także dla wejścia przez drzwi (dziś mierzone jest tylko zwykłe wejście), pełny zestaw testów przechodzi, a przy ograniczonym ruchu jest cięcie.
 
 ### B6. Przewodnik w świecie **(Claude)**

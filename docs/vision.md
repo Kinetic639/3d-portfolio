@@ -75,7 +75,7 @@ Reprezentuje mnie w świecie.
 - **W świecie:** towarzyszy odwiedzającemu. Odwiedzający nadal sam przegląda świat i wchodzi w interakcje, a przewodnik podąża za nim po mapie, prezentuje świat i dodaje animacje i interakcje.
 - **Odwiedzający to kamera:** eksploruje świat, wchodzi w interakcje z jego elementami, odwiedza strefy i miejsca. Później, w niektórych mini-grach, może przejmować sterowanie postacią. Może też zaznaczać niektóre rzeczy albo przewodnika, żeby wydać im polecenie.
 - **Mowa:** na początek tylko animacje i gesty. Później dymki i komentarze, a może nagrany mój głos.
-- **Powrót na stronę:** prosto, bez efektów. Portret na zwykłej stronie żyje jak wcześniej. (Pomysł „pusty portret, postać wychyla się zza krawędzi” odłożony na fazę 2.)
+- **Powrót ze świata (2026-11-22):** kto wszedł przez drzwi, wraca na ekran z drzwiami, tym samym ruchem odwrotnie. Portret na zwykłej stronie żyje jak wcześniej. (Pomysł „pusty portret, postać wychyla się zza krawędzi” odłożony na fazę 2.)
 - **Telefon:** brak kursora, więc postać potrzebuje innych mikroanimacji i interakcji. Pomysły do wymyślenia.
 - **Wygląd docelowy:** portret i przewodnik mają mnie przypominać, stylizowane. Na początek wystarczą placeholdery do testów.
 - **Model na start:** generyczny, darmowy model z animacjami do testów. Docelowy model później.

@@ -18,7 +18,7 @@ const ENTRY_VALUE = "door";
 /** The entry's beats, in milliseconds from the click: one move into the light, then the light lifts off the world. */
 const TIMING = { enterAt: 1300, fade: 900 };
 
-type Stage = "hidden" | "door" | "going" | "fading";
+type Stage = "hidden" | "door" | "going" | "fading" | "returning";
 
 /**
  * The entry screen (prototype): a door in the middle of the screen that is
@@ -27,6 +27,9 @@ type Stage = "hidden" | "door" | "going" | "fading";
  * moves the "camera" to the door, which opens fully onto light; the light
  * floods the screen and, under it, the world's own entry begins (the camera
  * coming down from the sky).
+ *
+ * Leaving the world brings the visitor back here, the same move in reverse:
+ * from the light, out of the doorway, the door swinging back to ajar.
  *
  * A note pinned to the door says CV: it opens a panel with what the site
  * is, the CV, contact, and the classic version (the page underneath, which
@@ -46,6 +49,10 @@ export default function EntryScreen() {
   const sceneRef = useRef<HTMLDivElement>(null);
   const doorwayRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  /** Where the "camera" went into the doorway (CSS variables), kept for the way back. */
+  const [zoom, setZoom] = useState<Record<string, string>>({});
+  const enteredRef = useRef(false);
+  const [returned, setReturned] = useState(false);
 
   // Shown only for the prototype's address; read after mount (the server renders the page without it).
   useEffect(() => {
@@ -62,19 +69,49 @@ export default function EntryScreen() {
     return () => window.clearTimeout(timer);
   }, [phase, stage]);
 
+  // Focus on this door (also after the world layer, back from the world, focused the sidebar's).
   useEffect(() => {
     if (stage === "door" && !noteOpen) doorRef.current?.focus({ preventScroll: true });
-  }, [stage, noteOpen]);
+  }, [stage, noteOpen, phase]);
   useEffect(() => {
     if (noteOpen) panelRef.current?.querySelector<HTMLElement>("h2")?.focus({ preventScroll: true });
   }, [noteOpen]);
 
   const ready = phase === "ready";
   const held = phase === "idle";
+  // While the world fades out behind the returning screen, the door already looks ready.
+  const looksReady = ready || phase === "leaving";
+
+  // Back from the world: the screen comes back in the light, at the doorway, and moves out of it.
+  useEffect(() => {
+    if (phase !== "leaving" || !enteredRef.current) return;
+    enteredRef.current = false;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let frame = 0;
+    const timer = window.setTimeout(() => {
+      setNoteOpen(false);
+      setReturned(true);
+      if (reduced || Object.keys(zoom).length === 0) {
+        setStage("door");
+        return;
+      }
+      setStage("returning");
+      // Two frames: the returning pose is painted before the move out starts.
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => setStage("door"));
+      });
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      cancelAnimationFrame(frame);
+    };
+  }, [phase, zoom]);
 
   const go = useCallback(() => {
     if (!ready || stage !== "door") return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      enteredRef.current = true;
+      setZoom({});
       enterWorld();
       setStage("hidden");
       return;
@@ -89,12 +126,19 @@ export default function EntryScreen() {
       const cx = door.left + door.width / 2;
       const cy = door.top + door.height / 2;
       const scale = Math.max(window.innerWidth / door.width, window.innerHeight / door.height) * 1.6;
-      scene.style.setProperty("--origin-x", `${cx - box.left}px`);
-      scene.style.setProperty("--origin-y", `${cy - box.top}px`);
-      scene.style.setProperty("--shift-x", `${window.innerWidth / 2 - cx}px`);
-      scene.style.setProperty("--shift-y", `${window.innerHeight / 2 - cy}px`);
-      scene.style.setProperty("--zoom", String(scale));
+      const vars = {
+        "--origin-x": `${cx - box.left}px`,
+        "--origin-y": `${cy - box.top}px`,
+        "--shift-x": `${window.innerWidth / 2 - cx}px`,
+        "--shift-y": `${window.innerHeight / 2 - cy}px`,
+        "--zoom": String(scale),
+      };
+      // Set at once (the move starts this frame) and kept in state for the way back.
+      for (const [name, value] of Object.entries(vars)) scene.style.setProperty(name, value);
+      setZoom(vars);
     }
+    enteredRef.current = true;
+    setReturned(false);
     setStage("going");
     // Under the full flash the world's own entry starts; then the light fades off it.
     window.setTimeout(() => {
@@ -126,11 +170,11 @@ export default function EntryScreen() {
   }, [noteOpen]);
 
   if (stage === "hidden") return null;
-  const doorState = stage !== "door" ? "open" : ready ? "ready" : "loading";
+  const doorState = stage !== "door" ? "open" : looksReady ? "ready" : "loading";
   const path = typeof window === "undefined" ? "/" : splitLocale(window.location.pathname).path;
 
   return (
-    <div className={styles.screen} data-stage={stage} role="dialog" aria-modal="true" aria-label={text.dialog}>
+    <div className={styles.screen} data-stage={stage} data-returned={returned || undefined} role="dialog" aria-modal="true" aria-label={text.dialog}>
       <nav className={styles.languages} aria-label={messages(locale).language.label}>
         {LOCALES.map((candidate) => (
           <a key={candidate} href={`${localizePath(path, candidate)}?${ENTRY_PARAM}=${ENTRY_VALUE}`} hrefLang={candidate} lang={candidate} aria-current={candidate === locale ? "page" : undefined}>
@@ -140,7 +184,7 @@ export default function EntryScreen() {
       </nav>
 
       <div className={styles.stage}>
-        <div ref={sceneRef} className={styles.scene} data-door={doorState} style={{ "--progress": percent / 100 } as React.CSSProperties}>
+        <div ref={sceneRef} className={styles.scene} data-door={doorState} style={{ "--progress": looksReady ? 1 : percent / 100, ...zoom } as React.CSSProperties}>
           <p className={styles.plate}>
             <strong>{content.owner.name}</strong>
             <span>{content.owner.role}</span>
@@ -169,7 +213,7 @@ export default function EntryScreen() {
         </div>
       </div>
 
-      <p className={styles.status} role="status">{ready ? text.ready : held ? messages(locale).door.load : text.loading(percent)}</p>
+      <p className={styles.status} role="status">{looksReady ? text.ready : held ? messages(locale).door.load : text.loading(percent)}</p>
       <button type="button" className={styles.classic} onClick={classic}>{text.classic}</button>
 
       <span className={styles.flash} aria-hidden="true" />

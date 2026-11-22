@@ -482,3 +482,37 @@
     transition: none;
   }
 }
+
+/* Back from the world: the screen starts in the light, at the doorway, then moves out of it. */
+.screen[data-stage="returning"] .scene {
+  transform: translate(var(--shift-x), var(--shift-y)) scale(var(--zoom));
+  transition: none;
+}
+
+.screen[data-stage="returning"] .flash {
+  opacity: 1;
+  transition: none;
+}
+
+.screen[data-stage="returning"] .status,
+.screen[data-stage="returning"] .classic,
+.screen[data-stage="returning"] .languages {
+  opacity: 0;
+}
+
+/* The way out decelerates (the way in accelerated), and the light thins as the doorway shrinks. */
+.screen[data-returned] .scene {
+  transition: transform 1300ms cubic-bezier(0.15, 0.7, 0.3, 1);
+}
+
+.screen[data-returned][data-stage="door"] .flash {
+  opacity: 0;
+  transition: opacity 700ms ease-out;
+}
+
+.screen[data-returned][data-stage="door"] .status,
+.screen[data-returned][data-stage="door"] .classic,
+.screen[data-returned][data-stage="door"] .languages {
+  opacity: 1;
+  transition: opacity 400ms ease 900ms;
+}
