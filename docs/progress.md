@@ -3,11 +3,11 @@
 Krótka lista do odhaczania. Szczegóły każdego punktu (zakres, kryterium „gotowe”, decyzje) są w `docs/roadmap.md` pod tym samym numerem.
 Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 
-**Faza 1:** 11 / 46 (24%) `█████░░░░░░░░░░░░░░░`
+**Faza 1:** 14 / 46 (30%) `██████░░░░░░░░░░░░░░`
 
 | Część | Zrobione |
 |---|---|
-| Baza produktu (B0-B9) | 11 / 35 |
+| Baza produktu (B0-B9) | 14 / 35 |
 | Gotowe dla rekruterów (J1-J5) | 0 / 11 |
 
 ---
@@ -31,10 +31,10 @@ Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 - [x] Wybór: Quaternius, strój Peasant z głową Superhero (2026-11-22)
 - [x] Model w `pnpm assets` (`guide`, 882 KB, 18,8 tys. trójkątów, 13 klipów) (2026-11-22)
 
-**B3. Portret** 0/4
-- [ ] Decyzja techniczna (osobna scena czy kanwas świata)
-- [ ] Najpierw statyczny obraz, potem żywa postać
-- [ ] Głowa i oczy za kursorem, bezczynność, telefon
+**B3. Portret** 3/4
+- [x] Decyzja techniczna: osobna scena w ramce (2026-11-22)
+- [x] Najpierw statyczny obraz, potem żywa postać (2026-11-22)
+- [x] Głowa i oczy za kursorem, bezczynność, telefon (2026-11-22)
 - [ ] Bez straty na wydajności i Lighthouse
 
 **B4. Drzwi i ładowanie** 0/4

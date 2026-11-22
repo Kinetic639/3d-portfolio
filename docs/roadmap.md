@@ -78,10 +78,21 @@ Jeden darmowy model do portretu i do świata (vision.md, rozdział 5).
 
 ### B3. Portret z żywą postacią **(Claude)**
 
-- [ ] Decyzja techniczna: osobna mała scena 3D w ramce portretu albo postać rysowana przez już działający kanwas świata dokładnie w miejscu ramki (jeden kontekst WebGL, łatwiejsze „wyjście z obrazu”). Zrobię krótki test obu podejść i pokażę pomiary.
-- [ ] Najpierw statyczny obraz (szybkie pierwsze wyświetlenie), potem żywa postać.
-- [ ] Głowa i oczy podążają za kursorem (na telefonie za dotykiem albo spokojna animacja), animacja bezczynności. Z ograniczonym ruchem tylko spokojne ujęcie.
+- [x] Decyzja techniczna (2026-11-22): **osobna mała scena w ramce** (`lib/portrait/portrait-scene.ts`).
+  - Dlaczego: na telefonie portret przewija się z treścią. Kanwas świata jest przypięty do ekranu, więc musiałby przerysowywać postać przy każdym przewinięciu i by się spóźniał.
+  - Scenę montuje warstwa świata (portal React do ramki na stronie), a silnik świata i scena portretu są w jednym dynamicznym module `lib/engine/runtime.ts`. Inaczej Turbopack wstawiał three.js dwa razy (dodatkowe 670 KB).
+- [x] Najpierw statyczny obraz, potem żywa postać (2026-11-22).
+  - Poster `public/portrait/guide.webp` (16 KB), renderowany z żywego portretu skryptem `scripts/guide/portrait-poster.mjs` (uruchomić po każdej zmianie modelu).
+  - Żywa postać ładuje się po 2 s spokoju od gotowości świata, tylko gdy portret jest na ekranie. Szybkie wejście do świata niczego więc nie pobiera.
+- [x] Głowa i oczy podążają za kursorem, animacja bezczynności (2026-11-22).
+  - Głowa i szyja obracają się za kursorem; oczy przesuwają się teksturą, bo model nie ma kości oczu.
+  - Bez kursora (telefon albo kursor w spoczynku) postać co kilka sekund spokojnie się rozgląda. Kliknięcie lub dotknięcie portretu to machanie („Call”).
+  - Mruganie działa samo, gdy model ma kształt `blink`.
+  - Przy ograniczonym ruchu i oszczędzaniu danych zostaje sam poster.
+  - Rysuje najwyżej 30 klatek na sekundę i tylko wtedy, gdy portret jest na ekranie, karta jest widoczna, a świat nie jest na pierwszym planie.
 - [ ] Gotowe, gdy: portret nie pogarsza pierwszego wyświetlenia i wyników Lighthouse, nie rysuje klatek, gdy nic się nie dzieje, a budżety `pnpm perf` przechodzą.
+  - **Stan (2026-11-22):** budżety portretu są w `perf/budgets.json` (`portrait.afterReadyMs`, `portrait.longTaskMs`). Pomiary przy opóźnieniu 1 s mieściły się w nich, ale po zmianie na 2 s nie było nowego pomiaru.
+  - Do sprawdzenia: `pnpm perf`, Lighthouse oraz testy e2e świata i edytora.
 
 ### B4. Drzwi do świata i animacja ładowania **(razem)**
 

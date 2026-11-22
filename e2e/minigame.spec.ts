@@ -28,7 +28,7 @@ async function digPoint(page: Page, index: number) {
     const centre = item.focus.clone();
     centre.y = 4;
     const ndc = centre.project(engine.rig.camera);
-    const rect = document.querySelector("canvas")!.getBoundingClientRect();
+    const rect = document.querySelector("canvas[data-world]")!.getBoundingClientRect();
     return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
   }, MINE);
   return { x: point.x + (index % 4) * 14 - 21, y: point.y + 8 };

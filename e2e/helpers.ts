@@ -82,7 +82,7 @@ export async function iconPosition(page: Page, id: string, below = 0) {
     const point = item.anchor.clone();
     point.y -= drop;
     const ndc = point.project(engine.rig.camera);
-    const rect = document.querySelector("canvas")!.getBoundingClientRect();
+    const rect = document.querySelector("canvas[data-world]")!.getBoundingClientRect();
     return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
   }, [id, below] as const);
 }

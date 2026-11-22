@@ -105,7 +105,7 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
             return voxelMap();
           });
       const [{ WorldEngine }, source] = await Promise.all([
-        import("@/lib/engine/world-engine"),
+        import("@/lib/engine/runtime"),
         bakeHash && wantsBake(serveBakes) ? bakedWorld(bakeHash) : voxelMap(),
       ]);
       if (signal.aborted) return;

@@ -120,6 +120,14 @@
     "dig4x.programsCompiled": {
       "max": 0,
       "why": "The outline and burst were compiled during warm-up."
+    },
+    "portrait.afterReadyMs": {
+      "max": 4000,
+      "why": "The living portrait loads after a quiet 2 s once the world is ready. Set 2026-11-22 from runs with a 1 s wait (1250-1410 ms), plus the second added since; not yet re-measured."
+    },
+    "portrait.longTaskMs": {
+      "max": 250,
+      "why": "Main-thread blocking while the portrait loads (model, shaders). Measured 0-152 ms."
     }
   }
 }

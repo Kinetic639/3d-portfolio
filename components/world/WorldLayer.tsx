@@ -26,6 +26,7 @@ import { useWorldBoot } from "./use-world-boot";
 import PerfHud from "./PerfHud";
 import WorldMinimap from "./WorldMinimap";
 import SkySwitch from "./SkySwitch";
+import PortraitPortals from "@/components/site/PortraitPortals";
 import { registerWorldEntry, WORLD_DOOR_ID } from "./entry-control";
 import type { MinimapData } from "@/lib/minimap/minimap";
 import { useUiWork } from "@/lib/perf/ui-work";
@@ -60,12 +61,14 @@ function panelInset() {
  * This is where bridge state meets the DOM and the router. The engine knows
  * nothing about URLs, history or the landing page.
  */
-export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }: {
+export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps, portraitModelUrl }: {
   defaultMapId: string;
   bakes: Record<string, string>;
   serveBakes: boolean;
   /** Each map's minimap data, drawn at build time; a map without one has no corner map. */
   minimaps: Record<string, MinimapData>;
+  /** The guide for the living portrait in the page's frames; null keeps the posters. */
+  portraitModelUrl: string | null;
 }) {
   useUiWork();
   // Fixed for the layer's whole life: each language has its own root layout.
@@ -328,7 +331,7 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
           </aside>
         ) : null}
       </div>
-
+      {portraitModelUrl ? <PortraitPortals modelUrl={portraitModelUrl} /> : null}
     </>
   );
 }

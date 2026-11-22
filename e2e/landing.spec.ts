@@ -43,7 +43,7 @@ test("the entry element appears only after warm-up has verified the world", asyn
   expect(await page.evaluate(() => window.__worldEngine!.stats.frames)).toBe(0);
   await page.waitForTimeout(500);
   expect(await page.evaluate(() => (window.__worldEngine as unknown as { stats: { loaderFrames: number } }).stats.loaderFrames)).toBe(0);
-  expect(await page.evaluate(() => getComputedStyle(document.querySelector("canvas")!.parentElement!).pointerEvents)).toBe("none");
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector("canvas[data-world]")!.parentElement!).pointerEvents)).toBe("none");
   // The world's own controls stay out of the page: not reachable, not clickable, and
   // drawn at a fraction of a percent of opacity only so they are rasterized before the visitor enters.
   await expect(page.getByRole("button", { name: "Back to page" })).toHaveCount(0);
@@ -104,9 +104,9 @@ test("entering loads nothing, compiles nothing and runs smoothly", async ({ page
     expect(sorted[Math.floor(sorted.length * 0.95)]).toBeLessThan(34);
   }
 
-  await expect(page.locator("canvas")).toBeVisible();
+  await expect(page.locator("canvas[data-world]")).toBeVisible();
   await expect(page.locator("#landing")).not.toBeVisible();
-  await expect(page.locator("canvas")).toBeFocused();
+  await expect(page.locator("canvas[data-world]")).toBeFocused();
 });
 
 test("the visitor can leave the world and come back with Back and Forward", async ({ page }) => {
@@ -126,7 +126,7 @@ test("the visitor can leave the world and come back with Back and Forward", asyn
   await expect(page.locator("#landing")).toBeVisible();
   await page.goForward();
   await waitForPhase(page, "world");
-  await expect(page.locator("canvas")).toBeVisible();
+  await expect(page.locator("canvas[data-world]")).toBeVisible();
 });
 
 test("a direct link starts on the landing page and entering goes straight to that content", async ({ page, request }) => {

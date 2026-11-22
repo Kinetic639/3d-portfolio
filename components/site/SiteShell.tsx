@@ -1,4 +1,5 @@
 import WorldLayer from "@/components/world/WorldLayer";
+import { guideModelUrl } from "@/lib/assets/guide-model";
 import { listFreshBakes } from "@/lib/bake/bake-records";
 import type { Locale } from "@/lib/i18n/locale";
 import { readMapIndex } from "@/lib/maps/map-store";
@@ -27,7 +28,7 @@ export default function SiteShell({ locale, children }: { locale: Locale; childr
     <RootDocument lang={locale}>
       <LocaleProvider locale={locale}>
         {children}
-        <WorldLayer defaultMapId={defaultMapId} bakes={listFreshBakes()} serveBakes={SERVE_BAKED_WORLDS} minimaps={readAllMinimaps()} />
+        <WorldLayer defaultMapId={defaultMapId} bakes={listFreshBakes()} serveBakes={SERVE_BAKED_WORLDS} minimaps={readAllMinimaps()} portraitModelUrl={guideModelUrl()} />
       </LocaleProvider>
     </RootDocument>
   );

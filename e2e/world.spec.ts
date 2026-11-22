@@ -133,7 +133,7 @@ test("the camera turns, and its tilt follows the zoom curve", async ({ page }) =
   await page.mouse.click(640, 360, { button: "right" });
   expect(new URL(page.url()).pathname).toBe("/");
 
-  await page.locator("canvas").focus();
+  await page.locator("canvas[data-world]").focus();
   const before = await view(page);
   await page.keyboard.down("KeyQ");
   await page.waitForTimeout(300);
@@ -145,7 +145,7 @@ test("the camera turns, and its tilt follows the zoom curve", async ({ page }) =
 test("keyboard moves and zooms the camera", async ({ page }) => {
   await openWorld(page);
   const start = await view(page);
-  await page.locator("canvas").focus();
+  await page.locator("canvas[data-world]").focus();
   await page.keyboard.down("ArrowRight");
   await page.waitForTimeout(300);
   await page.keyboard.up("ArrowRight");
@@ -167,7 +167,7 @@ test("hovering an object signals it and clicking opens its content at its own UR
 
   await page.mouse.move(icon.x, icon.y);
   await expect(page.getByText("Click to open")).toBeVisible();
-  await expect(page.locator("canvas")).toHaveCSS("cursor", "pointer");
+  await expect(page.locator("canvas[data-world]")).toHaveCSS("cursor", "pointer");
 
   const clickedAt = Date.now();
   await page.mouse.click(icon.x, icon.y);
@@ -188,7 +188,7 @@ test("hovering an object signals it and clicking opens its content at its own UR
   // The return move starts a moment after the URL change, so poll for the destination.
   await expect.poll(async () => (await view(page)).distance).toBeCloseTo(start.distance, 1);
   await expect.poll(async () => (await view(page)).x).toBeCloseTo(start.x, 1);
-  await expect(page.locator("canvas")).toBeFocused();
+  await expect(page.locator("canvas[data-world]")).toBeFocused();
 
   // The world was never remounted by the URL changes.
   expect(await page.evaluate(() => (window.__worldEngine as unknown as { e2eTag?: boolean }).e2eTag === true)).toBe(true);
@@ -386,7 +386,7 @@ test("zone names show when zoomed out, and a click on one goes to its section", 
     const engine = window.__worldEngine as unknown as PlacesProbe & { zoneLabels: { visible: boolean } };
     const sprite = engine.zoneLabels.group.children.find((child) => child.userData.zoneId === "zone-4")!;
     const ndc = sprite.position.clone().project(engine.rig.camera);
-    const rect = document.querySelector("canvas")!.getBoundingClientRect();
+    const rect = document.querySelector("canvas[data-world]")!.getBoundingClientRect();
     return { visible: engine.zoneLabels.visible, x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
   });
   // Close up the names are hidden.

@@ -583,7 +583,7 @@ test("creatures: the crow's motion and clips in the editor; in the world, choose
     const placed = engine.entities.actors[0];
     const point = which === "crow" ? placed.bounds().center.clone() : placed.actor.position.clone();
     const ndc = which === "crow" ? point.project(engine.rig.camera) : (() => { const p = placed.actor.position.clone() as unknown as { x: number; add: (v: object) => { project: (c: unknown) => { x: number; y: number } } }; return p.add({ x: 4, y: 0, z: 0 }).project(engine.rig.camera); })();
-    const rect = document.querySelector("canvas")!.getBoundingClientRect();
+    const rect = document.querySelector("canvas[data-world]")!.getBoundingClientRect();
     return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
   }, kind);
   const crowAt = await toScreen("crow");
