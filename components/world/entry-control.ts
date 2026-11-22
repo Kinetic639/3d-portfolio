@@ -5,7 +5,8 @@
  * the world. The world layer registers what entering and loading mean (a new
  * history entry, then the engine's entry); the door only asks for them.
  */
-type Handlers = { enter: () => void; load: () => void };
+export type EnterOptions = { fromTop?: boolean };
+type Handlers = { enter: (options?: EnterOptions) => void; load: () => void };
 
 let handlers: Handlers | null = null;
 
@@ -17,8 +18,8 @@ export function registerWorldEntry(next: Handlers) {
 }
 
 /** Enters the world (the door's click). Ignored until the world layer is mounted. */
-export function enterWorld() {
-  handlers?.enter();
+export function enterWorld(options?: EnterOptions) {
+  handlers?.enter(options);
 }
 
 /** Starts loading the world when it was held back (data saver). */

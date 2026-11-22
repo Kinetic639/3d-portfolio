@@ -27,9 +27,17 @@
   transition: opacity 700ms ease-out;
 }
 
+/* Under the full light the door and the dusk go at once; only the light lifts, off the world. */
 .screen[data-stage="fading"] {
-  opacity: 0;
+  background: transparent;
   pointer-events: none;
+}
+
+.screen[data-stage="fading"] .stage,
+.screen[data-stage="fading"] .status,
+.screen[data-stage="fading"] .classic,
+.screen[data-stage="fading"] .languages {
+  visibility: hidden;
 }
 
 .languages {
@@ -63,16 +71,21 @@
 
 .scene {
   --progress: 0;
+  --origin-x: 50%;
+  --origin-y: 58%;
+  --shift-x: 0px;
+  --shift-y: 0px;
+  --zoom: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  transform-origin: 50% 58%;
-  transition: transform 1100ms cubic-bezier(0.55, 0, 0.25, 1);
+  transform-origin: var(--origin-x) var(--origin-y);
+  /* Accelerating into the doorway, like a step through it. */
+  transition: transform 1300ms cubic-bezier(0.5, 0, 0.85, 0.3);
 }
 
-.screen[data-stage="going"] .scene,
-.screen[data-stage="fading"] .scene {
-  transform: translateY(6%) scale(3.4);
+.screen[data-stage="going"] .scene {
+  transform: translate(var(--shift-x), var(--shift-y)) scale(var(--zoom));
 }
 
 .plate {
@@ -160,7 +173,7 @@
 
 .scene[data-door="open"] .leaf {
   transform: rotateY(-102deg);
-  transition-duration: 900ms;
+  transition-duration: 800ms;
 }
 
 .panelTop,
@@ -333,9 +346,15 @@
   pointer-events: none;
 }
 
+/* The light thickens over the last part of the move, so the doorway's light and the flash are one. */
 .screen[data-stage="going"] .flash {
   opacity: 1;
-  transition: opacity 450ms ease-in 650ms;
+  transition: opacity 500ms ease-in 800ms;
+}
+
+.screen[data-stage="fading"] .flash {
+  opacity: 0;
+  transition: opacity 900ms ease-out;
 }
 
 /* The note's panel. */

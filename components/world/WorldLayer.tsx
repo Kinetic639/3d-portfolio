@@ -27,7 +27,7 @@ import PerfHud from "./PerfHud";
 import WorldMinimap from "./WorldMinimap";
 import SkySwitch from "./SkySwitch";
 import PortraitPortals from "@/components/site/PortraitPortals";
-import { registerWorldEntry, WORLD_DOOR_ID } from "./entry-control";
+import { registerWorldEntry, WORLD_DOOR_ID, type EnterOptions } from "./entry-control";
 import type { MinimapData } from "@/lib/minimap/minimap";
 import { useUiWork } from "@/lib/perf/ui-work";
 import styles from "./WorldLayer.module.css";
@@ -95,22 +95,23 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps, 
   const headingId = useId();
   const panelRef = useRef<HTMLElement>(null);
 
-  const requestEnter = useCallback(() => {
+  const requestEnter = useCallback((options?: EnterOptions) => {
     const target = findContentByPath(content, splitLocale(window.location.pathname).path);
     worldBridge.commands.emit({
       type: "enter",
       focus: target ? toContentReference(target) : undefined,
       inset: target ? panelInset() : undefined,
       reducedMotion: prefersReducedMotion(),
+      fromTop: options?.fromTop,
     });
   }, [content]);
 
-  const enter = useCallback(() => {
+  const enter = useCallback((options?: EnterOptions) => {
     // A new entry for the world, at the same URL: Back returns to the page the visitor was reading.
     window.history.pushState(worldHistoryState(), "", window.location.pathname);
     // The router reacts to the new entry synchronously. Start the transition on the
     // next frame so that work is finished before anything begins to move.
-    requestAnimationFrame(requestEnter);
+    requestAnimationFrame(() => requestEnter(options));
   }, [requestEnter]);
 
   const exit = useCallback(() => {

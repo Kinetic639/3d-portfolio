@@ -15,8 +15,8 @@ import styles from "./EntryScreen.module.css";
 export const ENTRY_PARAM = "entry";
 const ENTRY_VALUE = "door";
 
-/** The entry's beats, in milliseconds from the click. */
-const TIMING = { approach: 1100, flash: 950, enterAt: 1150, fade: 700 };
+/** The entry's beats, in milliseconds from the click: one move into the light, then the light lifts off the world. */
+const TIMING = { enterAt: 1300, fade: 900 };
 
 type Stage = "hidden" | "door" | "going" | "fading";
 
@@ -43,6 +43,8 @@ export default function EntryScreen() {
   const [stage, setStage] = useState<Stage>("hidden");
   const [noteOpen, setNoteOpen] = useState(false);
   const doorRef = useRef<HTMLButtonElement>(null);
+  const sceneRef = useRef<HTMLDivElement>(null);
+  const doorwayRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Shown only for the prototype's address; read after mount (the server renders the page without it).
@@ -82,12 +84,28 @@ export default function EntryScreen() {
       setStage("hidden");
       return;
     }
+    // The "camera" goes into the doorway: scaled around the doorway's centre, moved to the screen's,
+    // until its light covers the whole screen.
+    const scene = sceneRef.current;
+    const doorway = doorwayRef.current;
+    if (scene && doorway) {
+      const box = scene.getBoundingClientRect();
+      const door = doorway.getBoundingClientRect();
+      const cx = door.left + door.width / 2;
+      const cy = door.top + door.height / 2;
+      const scale = Math.max(window.innerWidth / door.width, window.innerHeight / door.height) * 1.6;
+      scene.style.setProperty("--origin-x", `${cx - box.left}px`);
+      scene.style.setProperty("--origin-y", `${cy - box.top}px`);
+      scene.style.setProperty("--shift-x", `${window.innerWidth / 2 - cx}px`);
+      scene.style.setProperty("--shift-y", `${window.innerHeight / 2 - cy}px`);
+      scene.style.setProperty("--zoom", String(scale));
+    }
     setStage("going");
     // Under the full flash the world's own entry starts; then the light fades off it.
     window.setTimeout(() => {
       // The page goes at once, under the full light: the world shows through as the light fades.
       document.documentElement.dataset.entry = "door";
-      enterWorld();
+      enterWorld({ fromTop: true });
       setStage("fading");
       window.setTimeout(() => setStage("hidden"), TIMING.fade);
     }, TIMING.enterAt);
@@ -126,12 +144,12 @@ export default function EntryScreen() {
       </nav>
 
       <div className={styles.stage}>
-        <div className={styles.scene} data-door={doorState} style={{ "--progress": percent / 100 } as React.CSSProperties}>
+        <div ref={sceneRef} className={styles.scene} data-door={doorState} style={{ "--progress": percent / 100 } as React.CSSProperties}>
           <p className={styles.plate}>
             <strong>{content.owner.name}</strong>
             <span>{content.owner.role}</span>
           </p>
-          <div className={styles.doorway}>
+          <div ref={doorwayRef} className={styles.doorway}>
             <span className={styles.light} aria-hidden="true" />
             <button
               ref={doorRef}

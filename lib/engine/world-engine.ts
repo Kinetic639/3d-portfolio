@@ -912,7 +912,7 @@ export class WorldEngine {
     this.active = true;
     this.entering = true;
     this.bridge.set({ phase: "entering" });
-    this.entry = { elapsed: 0, reducedMotion: command.reducedMotion === true, focus: command.focus, inset: command.inset };
+    this.entry = { elapsed: command.fromTop ? FOCUS_SECONDS : 0, reducedMotion: command.reducedMotion === true, focus: command.focus, inset: command.inset };
     this.lastTickAt = 0;
     this.lastFrameAt = 0;
     this.resetFramePacing();

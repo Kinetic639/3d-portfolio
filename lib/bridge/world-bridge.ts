@@ -96,7 +96,7 @@ export type WorldBridgeState = {
 };
 
 export type WorldCommand =
-  | { type: "enter"; focus?: MapContentReference; inset?: { right?: number; bottom?: number }; reducedMotion?: boolean }
+  | { type: "enter"; focus?: MapContentReference; inset?: { right?: number; bottom?: number }; reducedMotion?: boolean; /** Start at the top of the descent, skipping the glide from the landing view (the door's light already took the visitor there). */ fromTop?: boolean }
   | { type: "exit"; reducedMotion?: boolean }
   | { type: "focus-content"; content: MapContentReference; inset?: { right?: number; bottom?: number } }
   | { type: "clear-focus" }
