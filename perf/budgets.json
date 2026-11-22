@@ -50,8 +50,8 @@
       "why": "Measured 0."
     },
     "pan.engineCpuMeanMs": {
-      "max": 2,
-      "why": "Engine update + render per frame. Measured 0.6-0.7 ms."
+      "max": 2.3,
+      "why": "Engine update + render per frame. Measured 0.6-0.7 ms. Raised 2 -> 2.3 on 2026-11-22 for the guide in the world (an animated, outlined character updated every frame; measured 2.16 ms), by decision; frame times are unchanged (p95 16.7 ms)."
     },
     "idle.framesIn2s": {
       "max": 0,
