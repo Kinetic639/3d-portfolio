@@ -38,13 +38,14 @@ test("the entry element appears only after warm-up has verified the world", asyn
   expect(report!.ok).toBe(true);
   expect(report!.newResourcesDuringTest).toBe(0);
   expect(report!.testFrames).toBeGreaterThan(5);
-  // Before they enter, the visitor sees only the loader: the world draws no frame of its own,
-  // and the canvas lets every click through to the page.
+  // Before they enter, the world draws nothing on the page (the door in the sidebar is the way
+  // in, not a loader drawn over the page), and the canvas lets every click through to the page.
   expect(await page.evaluate(() => window.__worldEngine!.stats.frames)).toBe(0);
-  await expect.poll(() => page.evaluate(() => (window.__worldEngine as unknown as { stats: { loaderFrames: number } }).stats.loaderFrames)).toBeGreaterThan(0);
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => (window.__worldEngine as unknown as { stats: { loaderFrames: number } }).stats.loaderFrames)).toBe(0);
   expect(await page.evaluate(() => getComputedStyle(document.querySelector("canvas")!.parentElement!).pointerEvents)).toBe("none");
   // The world's own controls stay out of the page: not reachable, not clickable, and
-  // drawn at 1 % opacity only so they are rasterized before the visitor enters.
+  // drawn at a fraction of a percent of opacity only so they are rasterized before the visitor enters.
   await expect(page.getByRole("button", { name: "Back to page" })).toHaveCount(0);
   const backToPage = page.getByText("Back to page");
   expect(await backToPage.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe("none");
@@ -198,7 +199,7 @@ test("the landing page is navigable by keyboard", async ({ page }) => {
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Skip to content" })).toBeFocused();
   // The hidden world must not be reachable while the landing page is in front.
-  for (let step = 0; step < 40; step += 1) {
+  for (let step = 0; step < 80; step += 1) {
     await page.keyboard.press("Tab");
     const inWorld = await page.evaluate(() => Boolean(document.activeElement?.closest("[aria-hidden='true']")) || document.activeElement?.tagName === "CANVAS");
     expect(inWorld).toBe(false);
@@ -254,4 +255,36 @@ test("the map is site navigation: zones lead to their sections and pins to their
   await expect(page.getByRole("heading", { level: 1, name: "Experience" })).toBeVisible();
   // The section shown is marked on its page's map.
   await expect(page.getByRole("group", { name: "Map of the portfolio" }).getByRole("link", { name: "Experience" })).toHaveAttribute("aria-current", "location");
+});
+
+test("layout: the portrait and the door are pinned in the sidebar; on phones the portrait scrolls and the door stays", async ({ page, request }) => {
+  await openLanding(page);
+  const sidebar = page.getByRole("complementary", { name: /way into the 3D world/ });
+  const door = page.getByRole("button", { name: "Enter the world" });
+  await expect(sidebar).toBeVisible();
+  // The door is in the sidebar and ready: open a little, with light behind it.
+  await expect(sidebar.getByRole("button", { name: "Enter the world" })).toBeVisible();
+  await expect(page.locator("[data-state=ready]")).toHaveCount(1);
+  // Pinned: still on screen at the end of the page, and over nothing of the content.
+  await page.evaluate(() => scrollTo(0, document.body.scrollHeight));
+  await expect(door).toBeInViewport();
+  const content = await page.locator("#content").boundingBox();
+  const aside = await sidebar.boundingBox();
+  expect(content!.x + content!.width).toBeLessThanOrEqual(aside!.x + 1);
+  // The CV downloads.
+  expect((await request.get("/cv/michal-stepien-cv.pdf")).headers()["content-type"]).toContain("application/pdf");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => scrollTo(0, 0));
+  // Phones: the portrait leads the content and scrolls away; the door keeps its bar at the bottom.
+  const inline = page.locator("#content figure[data-placement=inline]");
+  await expect(inline).toBeVisible();
+  await page.evaluate(() => scrollTo(0, document.body.scrollHeight));
+  await expect(inline).not.toBeInViewport();
+  await expect(door).toBeInViewport();
+  const bar = await door.boundingBox();
+  expect(bar!.y + bar!.height).toBeLessThanOrEqual(844);
+  // The page keeps room for the bar: its last line is above it.
+  const footer = await page.locator("#landing footer").boundingBox();
+  expect(footer!.y + footer!.height).toBeLessThanOrEqual((await sidebar.boundingBox())!.y + 1);
 });

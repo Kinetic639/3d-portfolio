@@ -176,6 +176,7 @@ export class WorldEngine {
   /** Where the camera rests at the start of a visit. */
   private spawn = { x: 0, z: 0 };
   private landing = false;
+  private readonly landingLoader: boolean;
   /** Shaders are compiled (warm-up step 1): the loader may draw without compiling anything on the main thread. */
   private loaderReady = false;
   /** Warm-up is running; it draws the loader itself after each of its own renders. */
@@ -210,8 +211,13 @@ export class WorldEngine {
    * creates it so that a missing WebGL can be handled quietly before any
    * engine code runs.
    */
-  constructor(canvas: HTMLCanvasElement, bridge: WorldBridge, context: WebGL2RenderingContext) {
+  /**
+   * `landingLoader`: draw the original loader (platform and crystal) at the bottom of the landing
+   * page while the visitor reads. Off on the site, where the door in the page's sidebar is the way in.
+   */
+  constructor(canvas: HTMLCanvasElement, bridge: WorldBridge, context: WebGL2RenderingContext, options: { landingLoader?: boolean } = {}) {
     this.canvas = canvas;
+    this.landingLoader = options.landingLoader ?? true;
     this.bridge = bridge;
     this.renderer = new THREE.WebGLRenderer({ canvas, context, antialias: true, alpha: true });
     this.environment = new Environment(this.scene);
@@ -477,7 +483,7 @@ export class WorldEngine {
   }
 
   private startLanding() {
-    if (this.disposed) return;
+    if (this.disposed || !this.landingLoader) return;
     this.landing = true;
     this.lastLandingAt = 0;
     if (this.landingHandle === 0) this.landingHandle = requestAnimationFrame(this.landingFrame);
@@ -525,9 +531,21 @@ export class WorldEngine {
    */
   private drawLoader() {
     const width = this.canvas.clientWidth;
-    if (width === 0 || !this.landing) return;
-    this.syncTerrainSky();
+    if (width === 0) return;
     const renderer = this.renderer;
+    if (!this.landingLoader) {
+      // No loader on the page: the canvas stays transparent, and warm-up's own renders never show.
+      if (!this.active) {
+        const scissorWas = renderer.getScissorTest();
+        renderer.setScissorTest(false);
+        renderer.setClearAlpha(0);
+        renderer.clear();
+        renderer.setScissorTest(scissorWas);
+      }
+      return;
+    }
+    if (!this.landing) return;
+    this.syncTerrainSky();
     const scissorWas = renderer.getScissorTest();
     const scissor = renderer.getScissor(new THREE.Vector4());
     const hidden = this.loaderMeshes.filter((mesh) => !mesh.visible);
