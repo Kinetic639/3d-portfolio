@@ -87,4 +87,14 @@ describe("the guide waiting", () => {
     expect(actor.position.x).toBeGreaterThan(190);
     expect(actor.size).toBeLessThan(0.01);
   });
+
+  it("stays in the middle of the central platform while the camera looks at it", () => {
+    const actor = new Actor(new THREE.Object3D(), clips, DEFAULT_ACTOR, { position: new THREE.Vector3(10, 0, 10), yaw: 0 });
+    const placed: PlacedActor = { entityId: "guide", modelId: "guide", name: "Guide", actor, bounds: () => new THREE.Sphere() };
+    const driver = new GuideDriver(placed, () => 0, null, { position: new THREE.Vector3(10, 0, 10), yaw: 0 });
+    // The arrival view looks half a block off the middle; the guide does not step aside to the edge.
+    driver.update(1000, false, { x: 10.5, z: 10.5 }, { x: 10.5, z: 30 }, false);
+    expect(actor.status.state).toBe("idle");
+    expect([actor.position.x, actor.position.z]).toEqual([10, 10]);
+  });
 });

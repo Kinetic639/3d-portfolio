@@ -11,7 +11,6 @@ import {
   getSurfaceTextureKind,
   getTextureVariation,
   SURFACE_BLOCK_SIZE,
-  SURFACE_TEXTURE_KINDS,
   SurfaceEmitter,
   type SurfaceCell,
 } from "./surface-faces";
@@ -227,8 +226,8 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
         const grassTopCovered = full && blockId === BLOCK_IDS.Ground && isCellTopFullyCovered(world, x, y, z);
 
         // Position-based, not block/material-based — see isLoaderPlatformTopCell.
-        // The loader platform keeps its own fixed look below regardless of
-        // whatever block or material ends up painted onto that cell.
+        // The loader platform looks like whatever block is built there; only
+        // its faces and its reveal (it bobs, the world grows from it) are its own.
         const isLoaderPlatformCell =
           x >= centreMinX && x <= centreMinX + 1 && z >= centreMinZ && z <= centreMinZ + 1 && isLoaderPlatformTopCell(world, x, y, z);
         let revealDelay = -1;
@@ -251,7 +250,7 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
 
           worldPosition ??= world.gridToWorld(x, y, z);
           const vertexOffset = positions.length / 3;
-          const color = getBlockColor(isLoaderPlatformCell ? BLOCK_IDS.LoaderOrigin : blockId);
+          const color = getBlockColor(blockId);
           const [nx, ny, nz] = face.normal;
           for (const corner of face.corners) {
             positions.push(
@@ -265,9 +264,7 @@ export function buildSurfaceChunkMesh(world: VoxelWorld, chunkX: number, chunkZ:
 
           if (full) {
             const variation = ((x * 37 + z * 17 + y * 11) % 100) / 100;
-            const textureKind = isLoaderPlatformCell
-              ? SURFACE_TEXTURE_KINDS.None
-              : getSurfaceTextureKind(blockId, face.direction, grassTopCovered);
+            const textureKind = getSurfaceTextureKind(blockId, face.direction, grassTopCovered);
             const textureVariation = getTextureVariation(x, y, z, textureKind);
             const faceUvs = getFaceUvs(face);
             // Per cell, computed on its first visible face: most cells are buried and never need it.

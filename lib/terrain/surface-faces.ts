@@ -173,7 +173,8 @@ export class SurfaceEmitter {
     const cx = (x - (width - 1) / 2) * blockSize;
     const cy = (y + 0.5) * blockSize;
     const cz = (z - (depth - 1) / 2) * blockSize;
-    const color = getBlockColor(loader ? BLOCK_IDS.LoaderOrigin : blockId);
+    // The loader platform looks like whatever is built there (its role is its place, not its colour).
+    const color = getBlockColor(blockId);
     const variationByte = Math.round((((x * 37 + z * 17 + y * 11) % 100) / 100) * 255);
     const delay = loader ? -1 : revealDelayAt(this.config, x, z);
 
@@ -181,7 +182,7 @@ export class SurfaceEmitter {
       const face = shapeFaces[faceIndex];
       const vertexOffset = this.positions.length / 3;
       const [nx, ny, nz] = face.normal;
-      const textureKind = loader ? SURFACE_TEXTURE_KINDS.None : getSurfaceTextureKind(blockId, face.direction, covered);
+      const textureKind = getSurfaceTextureKind(blockId, face.direction, covered);
       const variation = getTextureVariation(x, y, z, textureKind);
       const turn = variation.rotation + (variation.mirror > 0 ? 4 : 0);
       const faceUvs = getFaceUvs(face);
