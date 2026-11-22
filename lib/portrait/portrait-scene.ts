@@ -61,7 +61,8 @@ export class PortraitScene {
 
   constructor(private readonly canvas: HTMLCanvasElement, options: { still: boolean }) {
     this.still = options.still;
-    this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "low-power" });
+    // The same GPU preference as the world: a "low-power" context next to the world's held the world to 30 fps while its light changed.
+    this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "high-performance" });
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x667766, 1.6));

@@ -90,10 +90,12 @@ Jeden darmowy model do portretu i do świata (vision.md, rozdział 5).
   - Mruganie działa samo, gdy model ma kształt `blink`.
   - Przy ograniczonym ruchu i oszczędzaniu danych zostaje sam poster.
   - Rysuje najwyżej 30 klatek na sekundę i tylko wtedy, gdy portret jest na ekranie, karta jest widoczna, a świat nie jest na pierwszym planie.
-- [ ] Gotowe, gdy: portret nie pogarsza pierwszego wyświetlenia i wyników Lighthouse, nie rysuje klatek, gdy nic się nie dzieje, a budżety `pnpm perf` przechodzą.
+- [x] Gotowe, gdy: portret nie pogarsza pierwszego wyświetlenia i wyników Lighthouse, nie rysuje klatek, gdy nic się nie dzieje, a budżety `pnpm perf` przechodzą. (2026-11-22)
   - **Stan (2026-11-22):** budżety portretu są w `perf/budgets.json` (`portrait.afterReadyMs`, `portrait.longTaskMs`). Pomiary przy opóźnieniu 1 s mieściły się w nich, ale po zmianie na 2 s nie było nowego pomiaru.
   - Lighthouse z portretem (pomiar Twój, 2026-11-22): wyniki bez zmian względem B1.
-  - Do sprawdzenia: `pnpm perf` oraz testy e2e świata i edytora.
+  - `pnpm perf` (2026-11-22): wszystkie budżety przechodzą. Portret ładuje się 2,5 s po gotowości świata, jego długie zadania to 136 ms; ładowanie strony 118 ms; wejście 0 klatek powyżej 33 ms; dzień/noc p95 16,8 ms.
+  - Po drodze: portret prosił o GPU w trybie „low-power”, co przy kontekście świata („high-performance”) trzymało przejście dnia i nocy na 30 klatkach. Teraz oba proszą o ten sam tryb, a płótno portretu znika ze strony, gdy świat jest na pierwszym planie.
+  - Testy e2e świata i edytora nie były uruchamiane po ostatnich zmianach portretu.
 
 ### B4. Drzwi do świata i animacja ładowania **(razem)**
 
