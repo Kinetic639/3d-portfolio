@@ -55,6 +55,15 @@
   opacity: 1;
 }
 
+/* The living guide has a transparent background: once it shows, the poster behind it goes. */
+.poster {
+  transition: opacity 400ms ease-out;
+}
+
+.canvas:has(.live[data-loaded="true"]) .poster {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .live {
     transition: none;
