@@ -10,6 +10,9 @@ export default defineConfig({
   testIgnore: ["../temp/**"],
   use: {
     baseURL,
+    // Tests open the classic page unless they ask for the entry screen with the door (e2e/entry-door.spec.ts):
+    // its rules (components/site/entry-boot.ts) would put it over the page every test reads.
+    storageState: { cookies: [], origins: [{ origin: baseURL, localStorage: [{ name: "entry-choice", value: "classic" }] }] },
     trace: "on-first-retry",
     // Use the real GPU when there is one: software WebGL makes frame-pacing checks meaningless.
     launchOptions: {

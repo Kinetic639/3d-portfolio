@@ -11,9 +11,7 @@ import { CV_PATH } from "./cv";
 import { useLocale } from "./locale-context";
 import styles from "./EntryScreen.module.css";
 
-/** The prototype is shown only with ?entry=door (docs/roadmap.md, B4): the page is unchanged without it. */
-export const ENTRY_PARAM = "entry";
-const ENTRY_VALUE = "door";
+import { ENTRY_CHOICE_KEY, ENTRY_PARAM } from "./entry-boot";
 
 /** The entry's beats, in milliseconds from the click: one move into the light, then the light lifts off the world. */
 const TIMING = { enterAt: 1300, fade: 900 };
@@ -21,7 +19,7 @@ const TIMING = { enterAt: 1300, fade: 900 };
 type Stage = "hidden" | "door" | "going" | "fading" | "returning";
 
 /**
- * The entry screen (prototype): a door in the middle of the screen that is
+ * The entry screen (docs/roadmap.md, B4; who gets it: entry-boot.ts): a door in the middle of the screen that is
  * the world's loader. Closed, with light pulsing through its gaps, while the
  * world loads; open a little, the light steady, once it is ready. A click
  * moves the "camera" to the door, which opens fully onto light; the light
@@ -54,10 +52,10 @@ export default function EntryScreen() {
   const enteredRef = useRef(false);
   const [returned, setReturned] = useState(false);
 
-  // Shown only for the prototype's address; read after mount (the server renders the page without it).
+  // Opens when the boot script in <head> decided this visitor gets it (entry-boot.ts).
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      if (new URLSearchParams(window.location.search).get(ENTRY_PARAM) === ENTRY_VALUE) setStage("door");
+      if ("entryScreen" in document.documentElement.dataset) setStage("door");
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -65,6 +63,7 @@ export default function EntryScreen() {
   // Without WebGL there is no world: the classic page is the site.
   useEffect(() => {
     if (phase !== "unavailable" || stage !== "door") return;
+    delete document.documentElement.dataset.entryScreen;
     const timer = window.setTimeout(() => setStage("hidden"), 0);
     return () => window.clearTimeout(timer);
   }, [phase, stage]);
@@ -110,9 +109,11 @@ export default function EntryScreen() {
   const go = useCallback(() => {
     if (!ready || stage !== "door") return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      // Reduced motion: a cut, straight to the world at rest.
       enteredRef.current = true;
       setZoom({});
-      enterWorld();
+      delete document.documentElement.dataset.entryScreen;
+      enterWorld({ fromTop: true });
       setStage("hidden");
       return;
     }
@@ -145,6 +146,7 @@ export default function EntryScreen() {
       // The page goes at once, under the full light: the world shows through as the light fades.
       // The door's mode (data-entry) also keeps the world's controls away until its map is closed (WorldLayer).
       document.documentElement.dataset.entry = "door";
+      delete document.documentElement.dataset.entryScreen;
       enterWorld({ fromTop: true });
       setStage("fading");
       window.setTimeout(() => setStage("hidden"), TIMING.fade);
@@ -154,7 +156,14 @@ export default function EntryScreen() {
   const classic = useCallback(() => {
     setNoteOpen(false);
     setStage("hidden");
-    // The classic page at the same address, without the prototype's parameter.
+    delete document.documentElement.dataset.entryScreen;
+    try {
+      // Remembered: the next visit opens on the classic page.
+      localStorage.setItem(ENTRY_CHOICE_KEY, "classic");
+    } catch {
+      // Private mode or blocked storage: the choice holds for this visit.
+    }
+    // The classic page at the same address, without a forcing parameter.
     const url = new URL(window.location.href);
     url.searchParams.delete(ENTRY_PARAM);
     window.history.replaceState(window.history.state, "", url);
@@ -177,7 +186,7 @@ export default function EntryScreen() {
     <div className={styles.screen} data-stage={stage} data-returned={returned || undefined} role="dialog" aria-modal="true" aria-label={text.dialog}>
       <nav className={styles.languages} aria-label={messages(locale).language.label}>
         {LOCALES.map((candidate) => (
-          <a key={candidate} href={`${localizePath(path, candidate)}?${ENTRY_PARAM}=${ENTRY_VALUE}`} hrefLang={candidate} lang={candidate} aria-current={candidate === locale ? "page" : undefined}>
+          <a key={candidate} href={`${localizePath(path, candidate)}?${ENTRY_PARAM}=door`} hrefLang={candidate} lang={candidate} aria-current={candidate === locale ? "page" : undefined}>
             {candidate.toUpperCase()}
           </a>
         ))}
