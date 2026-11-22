@@ -52,6 +52,13 @@ export default function EntryScreen() {
   const enteredRef = useRef(false);
   const [returned, setReturned] = useState(false);
 
+  // While the screen shows, the page under it is not seen: html[data-entry-open] tells it (the living portrait stops).
+  useEffect(() => {
+    const root = document.documentElement;
+    if (stage === "hidden") delete root.dataset.entryOpen;
+    else root.dataset.entryOpen = "";
+  }, [stage]);
+
   // Opens when the boot script in <head> decided this visitor gets it (entry-boot.ts).
   useEffect(() => {
     const timer = window.setTimeout(() => {

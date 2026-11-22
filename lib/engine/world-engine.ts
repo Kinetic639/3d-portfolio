@@ -232,6 +232,10 @@ export class WorldEngine {
     this.landingLoader = options.landingLoader ?? true;
     this.bridge = bridge;
     this.renderer = new THREE.WebGLRenderer({ canvas, context, antialias: true, alpha: true });
+    // Checking every shader for errors right after it is compiled makes the main thread wait for the GPU
+    // (traced: 110-160 ms waits while the world loads). Development keeps the check; a production build
+    // compiles in the background (the shaders are the same ones development has just checked).
+    this.renderer.debug.checkShaderErrors = process.env.NODE_ENV !== "production";
     this.environment = new Environment(this.scene);
     this.sky = this.scene.background;
     this.scene.add(this.skyDiscs.group);

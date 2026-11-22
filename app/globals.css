@@ -106,6 +106,8 @@ html {
    The page is hidden (not removed: it is the whole portfolio in HTML) until the screen closes. */
 html[data-entry-screen] #landing {
   visibility: hidden;
+  /* Skipped by style and layout as well while covered (the whole page was restyled at the entry: traced 32 ms). */
+  content-visibility: hidden;
 }
 
 html[data-entry-screen] body {
@@ -115,6 +117,7 @@ html[data-entry-screen] body {
 /* Through the door: the page goes under the full light, before the world's own entry fades it. */
 html[data-entry="door"] #landing {
   visibility: hidden;
+  content-visibility: hidden;
 }
 
 html[data-world="entering"] #landing,
