@@ -55,11 +55,6 @@ export default function EntryScreen() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  // Once the world is in front, the page is hidden by the world layer itself; the door's hold on it ends.
-  useEffect(() => {
-    if (phase === "world") delete document.documentElement.dataset.entry;
-  }, [phase]);
-
   // Without WebGL there is no world: the classic page is the site.
   useEffect(() => {
     if (phase !== "unavailable" || stage !== "door") return;
@@ -104,6 +99,7 @@ export default function EntryScreen() {
     // Under the full flash the world's own entry starts; then the light fades off it.
     window.setTimeout(() => {
       // The page goes at once, under the full light: the world shows through as the light fades.
+      // The door's mode (data-entry) also keeps the world's controls away until its map is closed (WorldLayer).
       document.documentElement.dataset.entry = "door";
       enterWorld({ fromTop: true });
       setStage("fading");

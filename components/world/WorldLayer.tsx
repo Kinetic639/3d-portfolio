@@ -27,6 +27,7 @@ import PerfHud from "./PerfHud";
 import WorldMinimap from "./WorldMinimap";
 import SkySwitch from "./SkySwitch";
 import PortraitPortals from "@/components/site/PortraitPortals";
+import WorldMapOverlay from "./WorldMapOverlay";
 import { registerWorldEntry, WORLD_DOOR_ID, type EnterOptions } from "./entry-control";
 import type { MinimapData } from "@/lib/minimap/minimap";
 import { useUiWork } from "@/lib/perf/ui-work";
@@ -152,6 +153,28 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps, 
     const landing = document.getElementById("landing");
     if (landing) landing.inert = false;
   }, []);
+
+  // The door's entry (prototype): the world alone while the camera comes down, then its map over the
+  // whole screen; the world's controls come when the map is closed (CSS, html[data-entry="door"]).
+  const [worldMapOpen, setWorldMapOpen] = useState(false);
+  const closeWorldMap = useCallback(() => {
+    setWorldMapOpen(false);
+    delete document.documentElement.dataset.entry;
+    canvasRef.current?.focus({ preventScroll: true });
+  }, []);
+  useEffect(() => {
+    const door = document.documentElement.dataset.entry === "door";
+    if (!door) return;
+    if (phase === "world") {
+      const timer = window.setTimeout(() => setWorldMapOpen(true), 0);
+      return () => window.clearTimeout(timer);
+    }
+    if (phase === "leaving" || phase === "ready") {
+      delete document.documentElement.dataset.entry;
+      const timer = window.setTimeout(() => setWorldMapOpen(false), 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, [phase]);
 
   // Keyboard focus follows the visitor between page and world.
   const previousPhase = useRef(phase);
@@ -294,6 +317,21 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps, 
         <ActorHud text={text} />
         <SkySwitch />
         <PerfHud active={phase === "world"} />
+        {worldMapOpen && minimaps[mapId] ? (
+          <WorldMapOverlay
+            data={minimaps[mapId]}
+            onClose={closeWorldMap}
+            onPlace={(target) => {
+              closeWorldMap();
+              const zone = zones.find((candidate) => candidate.id === target.zone.id);
+              if (zone) goToZone(zone);
+            }}
+            onPin={(href) => {
+              closeWorldMap();
+              openPath(href);
+            }}
+          />
+        ) : null}
         {minimaps[mapId] ? (
           <WorldMinimap
             data={minimaps[mapId]}

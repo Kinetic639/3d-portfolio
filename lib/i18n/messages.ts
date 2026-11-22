@@ -83,6 +83,9 @@ const en = {
     map: "Map",
     hideMap: "Hide map",
     mapLabel: "Map of the world: go to a zone or open an item",
+    mapTitle: "Map of the world",
+    mapHint: "Every zone is a part of the portfolio. Choose one to go there, or close the map and explore on your own.",
+    explore: "Explore the world",
     actorStates: {
       idle: "waiting", walking: "walking", running: "running", "taking-off": "taking off", flying: "flying", landing: "landing", preview: "showing a move",
     } as Record<string, string>,
@@ -175,6 +178,9 @@ const pl: Messages = {
     map: "Mapa",
     hideMap: "Ukryj mapę",
     mapLabel: "Mapa świata: przejdź do strefy albo otwórz pozycję",
+    mapTitle: "Mapa świata",
+    mapHint: "Każda strefa to część portfolio. Wybierz jedną, żeby się tam przenieść, albo zamknij mapę i zwiedzaj sam.",
+    explore: "Zwiedzaj świat",
     actorStates: {
       idle: "czeka", walking: "idzie", running: "biegnie", "taking-off": "startuje", flying: "leci", landing: "ląduje", preview: "pokazuje ruch",
     },
