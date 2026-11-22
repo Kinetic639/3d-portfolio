@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<script type="importmap">
+{ "imports": { "three": "/node_modules/three/build/three.module.js", "three/addons/": "/node_modules/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<script type="module">
+// Composes the test guide in the browser (three.js), driven by compose.mjs.
+// See compose.mjs for what goes in and why.
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+
+const loader = new GLTFLoader();
+const load = (url) => loader.loadAsync(url);
+
+window.compose = async (recipe) => {
+  const outfit = await load(recipe.outfit);
+  const root = outfit.scene;
+
+  // The outfit's skeleton drives everything: its bones by name.
+  let outfitMesh = null;
+  root.traverse((object) => { if (!outfitMesh && object.isSkinnedMesh) outfitMesh = object; });
+  const bones = new Map(outfitMesh.skeleton.bones.map((bone) => [bone.name, bone]));
+  const report = { meshes: [], clips: [], headTriangles: 0 };
+
+  for (const part of recipe.parts) {
+    const gltf = await load(part.url);
+    const meshes = [];
+    gltf.scene.traverse((object) => { if (object.isSkinnedMesh && !(part.skip ?? []).includes(object.name)) meshes.push(object); });
+    for (const mesh of meshes) {
+      if (part.headOnly === mesh.name) report.headTriangles = keepHead(mesh, part.headBones);
+      // Same joints, the outfit's bones; the part keeps its own bind matrices.
+      const skeleton = new THREE.Skeleton(mesh.skeleton.bones.map((bone) => bones.get(bone.name)), mesh.skeleton.boneInverses);
+      outfitMesh.parent.add(mesh);
+      mesh.bind(skeleton, mesh.bindMatrix);
+    }
+  }
+
+  // Colour only: normal, roughness and occlusion maps are left out (the world draws its own style).
+  root.traverse((object) => {
+    if (!object.isMesh) return;
+    object.frustumCulled = true;
+    for (const material of [object.material].flat()) {
+      for (const key of ["normalMap", "roughnessMap", "metalnessMap", "aoMap", "emissiveMap"]) material[key] = null;
+      material.roughness = 1;
+      material.metalness = 0;
+    }
+    report.meshes.push(`${object.name}:${object.material.name}`);
+  });
+
+  // Clips from the animation libraries, renamed to plain roles.
+  const clips = [];
+  for (const library of recipe.libraries) {
+    const gltf = await load(library.url);
+    for (const [from, to] of Object.entries(library.clips)) {
+      const source = gltf.animations.find((clip) => clip.name === from);
+      if (!source) throw new Error(`No clip ${from} in ${library.url}`);
+      const clip = source.clone();
+      clip.name = to;
+      // Only bones the guide has; translations only on the pelvis (the rest is rotation), so bone lengths stay the outfit's.
+      clip.tracks = clip.tracks.filter((track) => {
+        const [node, property] = track.name.split(".");
+        return bones.has(node) && (property !== "position" || node === "pelvis") && property !== "scale";
+      });
+      clips.push(clip);
+      report.clips.push(`${to}<-${from} ${clip.duration.toFixed(2)}s`);
+    }
+  }
+
+  const exporter = new GLTFExporter();
+  const glb = await exporter.parseAsync(root, { binary: true, animations: clips, maxTextureSize: recipe.maxTextureSize, onlyVisible: true });
+  const bytes = new Uint8Array(glb);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return { report, base64: btoa(binary) };
+};
+
+/** Keeps the triangles whose three corners mostly follow the given bones (the head and neck). */
+function keepHead(mesh, headBones) {
+  const keep = new Set(mesh.skeleton.bones.flatMap((bone, i) => (headBones.includes(bone.name) ? [i] : [])));
+  const geometry = mesh.geometry;
+  const joints = geometry.attributes.skinIndex;
+  const weights = geometry.attributes.skinWeight;
+  const index = geometry.index.array;
+  const onHead = (v) => {
+    let weight = 0;
+    for (let k = 0; k < 4; k++) if (keep.has(joints.getComponent(v, k))) weight += weights.getComponent(v, k);
+    return weight > 0.5;
+  };
+  const kept = [];
+  for (let i = 0; i < index.length; i += 3) {
+    if (onHead(index[i]) && onHead(index[i + 1]) && onHead(index[i + 2])) kept.push(index[i], index[i + 1], index[i + 2]);
+  }
+  geometry.setIndex(kept);
+  return kept.length / 3;
+}
+
+window.__ready = true;
+</script>
+</body>
+</html>

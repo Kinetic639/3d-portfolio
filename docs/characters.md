@@ -153,3 +153,31 @@ Pobrane (wersje Standard, CC0) do `temp/models/quaternius/`, poza repozytorium:
 **Wniosek:** wariant A się sprawdza jako **Peasant z głową z modelu Superhero**. Do zrobienia w B2, punkt 3:
 - skrypt w `pnpm assets`, który składa to w jeden plik GLB (wycięcie głowy, pominięcie zbędnych map, wybrane klipy);
 - usunięcie testowego żołnierza.
+
+## 7. Decyzje (2026-11-22)
+
+**Model testowy jest w `pnpm assets`:**
+- `assets/models/guide`, składany przez `node scripts/guide/compose.mjs` z paczek w `temp/models/quaternius`;
+- strój Peasant, głowa, oczy i brwi z modelu Superhero, fryzura SimpleParted;
+- 13 klipów pod prostymi nazwami (silnik rozpoznaje bezczynność, chód i bieg po nazwie);
+- `Call` wygląda jak machanie, więc będzie powitaniem.
+
+**Jeden model do portretu i świata.** Portret to ta sama postać w kadrze od pasa w górę (B3):
+- najpierw statyczny obraz WebP wyrenderowany z modelu;
+- potem żywa postać, gdy przeglądarka jest bezczynna.
+
+**Mimika:** model testowy jej nie ma (brak kształtów twarzy i kości twarzy). W portrecie ruszają się głowa i szyja, a oczy przesuwają się teksturą. Kod portretu (B3) sam użyje kształtów twarzy, jeśli model je ma, więc docelowa postać zadziała bez zmian w kodzie.
+
+**Lista kształtów twarzy (shape keys) dla docelowej postaci z Blendera:**
+
+| Kształt | Po co |
+|---|---|
+| `blink` (albo `blinkLeft` i `blinkRight`) | mruganie co kilka sekund, mrugnięcie do odwiedzającego |
+| `happy` | uśmiech przy powitaniu i przy powrocie ze świata |
+| `surprised` | reakcja na kliknięcie portretu albo wejście do strefy |
+| `sad` | gdy odwiedzający wychodzi ze świata albo strony |
+| `browUp`, `browDown` | ciekawość i skupienie |
+| `aa`, `ih`, `ou`, `ee`, `oh` | ruch ust przy „mówieniu” (dymki, później głos) |
+| `lookUp`, `lookDown`, `lookLeft`, `lookRight` | opcjonalnie, jeśli oczy nie mają własnych kości |
+
+Nazwy jak w VRM, więc ta sama lista pasuje też do postaci z VRoid Studio. Do tego rig zgodny z obecnym (kości w układzie Unreal, `neck_01`, `Head`), wtedy animacje z biblioteki zadziałają bez zmian.

@@ -70,8 +70,11 @@ Jeden darmowy model do portretu i do świata (vision.md, rozdział 5).
 
 - [x] Wymagania i porównanie kandydatów: `docs/characters.md` (2026-11-22). Rekomendacja: Quaternius Universal Base Characters z Universal Animation Library (CC0), rezerwa: KayKit.
   - Pierwotne wymagania: zrigowany humanoid, kość głowy (i najlepiej oczu), animacje bezczynności, chodu, biegu i machania, do około 20 tys. trójkątów, licencja pozwalająca na publiczne użycie (najlepiej CC0).
-- [ ] Wybór modelu spośród kandydatów. Przygotuję porównanie: źródło, licencja, wygląd, rozmiar, animacje. Kandydaci do sprawdzenia: paczki CC0 Quaternius i Kenney, postacie i animacje z Mixamo. **(razem)**
-- [ ] Model w pipeline'ie `pnpm assets` (optymalizacja, klipy animacji, ustawienia aktora).
+- [x] Wybór modelu spośród kandydatów (2026-11-22): Quaternius (CC0), strój Peasant z głową modelu Superhero, animacje z Universal Animation Library 1 i 2. Szczegóły i zrzuty: `docs/characters.md`. Bez mimiki (decyzja: mimika przyjdzie z docelowym modelem z Blendera).
+- [x] Model w pipeline'ie `pnpm assets` (2026-11-22): `assets/models/guide`, złożony skryptem `scripts/guide/compose.mjs` z paczek w `temp/models/quaternius`.
+  - Po optymalizacji: 882 KB, 18,8 tys. trójkątów, 5 tekstur WebP po 1024 px.
+  - 13 klipów: Idle, Walk, Run, Talk, Interact, PickUp, SitDown, Sitting, StandUp, Yes, No, Call, ArmsFolded.
+  - Ustawienia aktora: chód 1,3, bieg 3. Testowy żołnierz (niepewne pochodzenie) usunięty.
 
 ### B3. Portret z żywą postacią **(Claude)**
 
