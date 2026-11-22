@@ -92,7 +92,8 @@ Jeden darmowy model do portretu i do świata (vision.md, rozdział 5).
   - Rysuje najwyżej 30 klatek na sekundę i tylko wtedy, gdy portret jest na ekranie, karta jest widoczna, a świat nie jest na pierwszym planie.
 - [ ] Gotowe, gdy: portret nie pogarsza pierwszego wyświetlenia i wyników Lighthouse, nie rysuje klatek, gdy nic się nie dzieje, a budżety `pnpm perf` przechodzą.
   - **Stan (2026-11-22):** budżety portretu są w `perf/budgets.json` (`portrait.afterReadyMs`, `portrait.longTaskMs`). Pomiary przy opóźnieniu 1 s mieściły się w nich, ale po zmianie na 2 s nie było nowego pomiaru.
-  - Do sprawdzenia: `pnpm perf`, Lighthouse oraz testy e2e świata i edytora.
+  - Lighthouse z portretem (pomiar Twój, 2026-11-22): wyniki bez zmian względem B1.
+  - Do sprawdzenia: `pnpm perf` oraz testy e2e świata i edytora.
 
 ### B4. Drzwi do świata i animacja ładowania **(razem)**
 
