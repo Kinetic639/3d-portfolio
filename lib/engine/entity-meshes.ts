@@ -424,7 +424,7 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
       const pose = () => poseMatrix.compose(
         actor.position,
         scratchQuaternion.setFromEuler(scratchEuler.set(0, actor.yaw, 0)),
-        scratchScale.set(s.x * scale, s.y * scale, s.z * scale),
+        scratchScale.set(s.x * scale * actor.size, s.y * scale * actor.size, s.z * scale * actor.size),
       ).multiply(model.normalise);
       animated[animated.length - 1].actor = actor;
       animated[animated.length - 1].pose = pose;

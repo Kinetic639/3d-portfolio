@@ -3,11 +3,11 @@
 Krótka lista do odhaczania. Szczegóły każdego punktu (zakres, kryterium „gotowe”, decyzje) są w `docs/roadmap.md` pod tym samym numerem.
 Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 
-**Faza 1:** 27 / 48 (56%) `███████████░░░░░░░░░`
+**Faza 1:** 29 / 48 (60%) `████████████░░░░░░░░`
 
 | Część | Zrobione |
 |---|---|
-| Baza produktu (B0-B9) | 27 / 37 |
+| Baza produktu (B0-B9) | 29 / 37 |
 | Gotowe dla rekruterów (J1-J5) | 0 / 11 |
 
 ---
@@ -51,11 +51,11 @@ Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 - [x] Wyjście ze świata: powrót na ekran z drzwiami (2026-11-22)
 - [x] Budżety perf dla wejścia przez drzwi, pełne testy, cięcie przy ograniczonym ruchu (2026-11-22, zamknięte decyzją bez ponownego pomiaru)
 
-**B6. Przewodnik w świecie** 2/4
+**B6. Przewodnik w świecie** 4/4
 - [x] Idzie za kamerą, zostaje w kadrze; stoi na dokładnej wysokości gruntu (2026-11-22)
 - [x] Za lotem do strefy: pojawia się na miejscu i macha (2026-11-22)
-- [ ] Animacje bezczynności i reakcje
-- [ ] Omijanie przeszkód (węzły nawigacji)
+- [x] Animacje bezczynności i reakcje: rozgląda się, krzyżuje ręce, po długiej ciszy macha; pojawia się z „pop” zamiast skoku (2026-11-22)
+- [x] Omijanie przeszkód: siatka nawigacji, A* z wygładzaniem, `docs/navigation.md` warstwy 1-3 (2026-11-22; zachowanie przyjęte, dynamika do dopracowania później)
 
 **B7. Świat bazowy** 0/3
 - [ ] Strefy zgodne z sekcjami (Ty)

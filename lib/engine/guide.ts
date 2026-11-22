@@ -62,6 +62,38 @@ export function planGuideMove(guide: Point, target: Point, camera: Point): Guide
   return { kind: distance > GUIDE.runFrom ? "run" : "walk", spot };
 }
 
+/**
+ * Life while it waits (B6): now and then it looks around or folds its arms,
+ * and after a long quiet it waves at the visitor once. Seconds.
+ */
+export const IDLE = {
+  /** The first fidget, this long after it settles. */
+  firstAfter: 4,
+  /** Then one every so often, at random between these. */
+  between: [6, 11] as const,
+  /** After this long with the camera still, one wave ("still there?"); once per rest. */
+  waveAfter: 22,
+  /** A look aside: this far (radians, either way) for this long. */
+  lookAngle: [0.6, 1.0] as const,
+  lookHold: [1.8, 3] as const,
+  /** Arms folded, for this long. */
+  armsHold: [6, 9] as const,
+};
+
+export type Fidget = { kind: "look"; offset: number; seconds: number } | { kind: "arms"; seconds: number };
+
+const between = (random: () => number, [low, high]: readonly [number, number]) => low + (high - low) * random();
+
+/** The next thing it does while it waits; folding its arms twice in a row looks stuck, so not after arms. */
+export function pickFidget(random: () => number, previous: Fidget["kind"] | null): Fidget {
+  if (previous !== "arms" && random() < 0.35) return { kind: "arms", seconds: between(random, IDLE.armsHold) };
+  const side = random() < 0.5 ? -1 : 1;
+  return { kind: "look", offset: side * between(random, IDLE.lookAngle), seconds: between(random, IDLE.lookHold) };
+}
+
+/** Seconds until the next fidget. */
+export const fidgetGap = (random: () => number) => between(random, IDLE.between);
+
 /** The heading (yaw, radians, three.js convention: 0 looks along +z) from one point towards another. */
 export function yawTowards(from: Point, to: Point) {
   return Math.atan2(to.x - from.x, to.z - from.z);

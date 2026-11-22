@@ -1187,7 +1187,9 @@ export class WorldEngine {
       const goal = this.rig.getGoal();
       const camera = this.rig.camera.position;
       const paused = this.chosenActor === this.guide.placed || (this.minigames?.playing ?? false);
-      this.guide.update(now, cameraMoving, { x: goal.x, z: goal.z }, { x: camera.x, z: camera.z }, paused);
+      // Its fidgets only where they are seen, and never with motion held (they would keep frames coming).
+      const quiet = this.environment.wind.isStilled || !this.frustum.intersectsSphere(this.guide.placed.bounds());
+      this.guide.update(now, cameraMoving, { x: goal.x, z: goal.z }, { x: camera.x, z: camera.z }, paused, quiet);
       // The camera just stopped: after the guide's wait, a frame only if it has something to do (a still world stays still).
       if (this.cameraWasMoving && !cameraMoving) {
         window.setTimeout(() => {
