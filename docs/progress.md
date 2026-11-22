@@ -3,11 +3,11 @@
 Krótka lista do odhaczania. Szczegóły każdego punktu (zakres, kryterium „gotowe”, decyzje) są w `docs/roadmap.md` pod tym samym numerem.
 Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 
-**Faza 1:** 8 / 46 (17%) `███░░░░░░░░░░░░░░░░░`
+**Faza 1:** 9 / 46 (20%) `████░░░░░░░░░░░░░░░░`
 
 | Część | Zrobione |
 |---|---|
-| Baza produktu (B0-B9) | 8 / 35 |
+| Baza produktu (B0-B9) | 9 / 35 |
 | Gotowe dla rekruterów (J1-J5) | 0 / 11 |
 
 ---
@@ -26,8 +26,8 @@ Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 - [x] Responsywność, dzień i noc (2026-11-22)
 - [x] Lighthouse (komputer ≥ 95, telefon ≥ 95 poza wydajnością ≥ 75), działa bez JS i WebGL (2026-11-22)
 
-**B2. Postać testowa** 0/3
-- [ ] Wymagania modelu spisane
+**B2. Postać testowa** 1/3
+- [x] Wymagania modelu spisane, kandydaci porównani w `docs/characters.md` (2026-11-22)
 - [ ] Porównanie kandydatów i wybór
 - [ ] Model w `pnpm assets`
 
