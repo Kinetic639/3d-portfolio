@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, type RefObject } from "react";
-import { PORTFOLIO_CONTENT } from "@/content/portfolio";
+import { portfolioContent } from "@/content/localized";
+import type { Locale } from "@/lib/i18n/locale";
+import { messages } from "@/lib/i18n/messages";
 import { worldBridge, type QualityTier } from "@/lib/bridge/world-bridge";
 import { uiWork } from "@/lib/perf/ui-work";
-import { resolveContentReference } from "@/lib/content/content";
+import { resolveContentReference, type ContentSection } from "@/lib/content/content";
 import { migrateMapDefinition, type MapContentReference } from "@/lib/maps/map-definition";
 
 type Disposable = { dispose: () => void };
@@ -66,7 +68,7 @@ function prefersSavingData() {
  * initial JavaScript. With the Save-Data preference, loading waits for the
  * visitor to ask for it (the returned `start`).
  */
-export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasElement | null>, bakeHash?: string, serveBakes = false) {
+export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasElement | null>, bakeHash?: string, serveBakes = false, locale: Locale = "en") {
   const startRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
@@ -103,7 +105,7 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
             return voxelMap();
           });
       const [{ WorldEngine }, source] = await Promise.all([
-        import("@/lib/engine/world-engine"),
+        import("@/lib/engine/runtime"),
         bakeHash && wantsBake(serveBakes) ? bakedWorld(bakeHash) : voxelMap(),
       ]);
       if (signal.aborted) return;
@@ -122,7 +124,8 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
 
       const loadOptions = {
         signal,
-        describeContent: (reference: MapContentReference) => resolveContentReference(PORTFOLIO_CONTENT, reference)?.title ?? null,
+        describeContent: (reference: MapContentReference) => resolveContentReference(portfolioContent(locale), reference)?.title ?? null,
+        describeSection: (section: ContentSection) => messages(locale).sections[section.kind],
         onProgress: (fraction: number) => worldBridge.set({ progress: fraction * 0.6 }),
       };
       if (source instanceof ArrayBuffer) await instance.loadBaked(source, loadOptions);
@@ -167,7 +170,7 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
       engine?.dispose();
       worldBridge.reset();
     };
-  }, [mapId, canvasRef, bakeHash, serveBakes]);
+  }, [mapId, canvasRef, bakeHash, serveBakes, locale]);
 
   /** Starts loading now. Only needed when automatic loading was held back. */
   return useCallback(() => startRef.current(), []);

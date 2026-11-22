@@ -17,13 +17,6 @@
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
-.figure {
-  display: block;
-  width: 100%;
-  height: 100%;
-  fill: var(--muted);
-  opacity: 0.35;
-}
 
 .portrait[data-placement="sidebar"] {
   width: 100%;
@@ -32,4 +25,59 @@
 .portrait[data-placement="inline"] {
   width: min(180px, 48vw);
   margin: 0 auto 20px;
+}
+
+/* The poster and the living guide over it fill the frame's inside. */
+.canvas {
+  position: relative;
+}
+
+.poster,
+.live {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.poster {
+  object-fit: cover;
+}
+
+/* The living guide fades in over its poster once it has drawn its first frame. */
+.live {
+  opacity: 0;
+  transition: opacity 400ms ease-out;
+}
+
+.live[data-loaded="true"] {
+  opacity: 1;
+}
+
+/* The living guide has a transparent background: once it shows, the poster behind it goes. */
+.poster {
+  transition: opacity 400ms ease-out;
+}
+
+:global(html:not([data-world="entering"]):not([data-world="world"]):not([data-world="leaving"])) .canvas:has(.live[data-loaded="true"]) .poster {
+  opacity: 0;
+}
+
+/*
+ * While the world is in front, the living guide's canvas is taken out of the
+ * page altogether and the poster stands in (the page is hidden anyway): a
+ * paused canvas still left the browser something to redraw when the theme
+ * changed under the world, and the world's frames paid for it.
+ */
+:global(html[data-world="entering"]) .live,
+:global(html[data-world="world"]) .live,
+:global(html[data-world="leaving"]) .live {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live {
+    transition: none;
+  }
 }

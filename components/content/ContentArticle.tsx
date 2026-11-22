@@ -1,4 +1,6 @@
 import type { ContentItem } from "@/lib/content/content";
+import type { Locale } from "@/lib/i18n/locale";
+import { messages } from "@/lib/i18n/messages";
 import styles from "./ContentArticle.module.css";
 
 /**
@@ -8,8 +10,9 @@ import styles from "./ContentArticle.module.css";
  * To give a content kind its own layout, add a case to `renderMeta` or branch
  * on `item.kind` here.
  */
-export default function ContentArticle({ item, headingId, headingLevel = 2 }: {
+export default function ContentArticle({ item, locale, headingId, headingLevel = 2 }: {
   item: ContentItem;
+  locale: Locale;
   headingId?: string;
   headingLevel?: 1 | 2;
 }) {
@@ -35,7 +38,7 @@ export default function ContentArticle({ item, headingId, headingLevel = 2 }: {
       ) : null}
 
       {item.tags && item.tags.length > 0 ? (
-        <ul className={styles.tags} aria-label="Technologies">
+        <ul className={styles.tags} aria-label={messages(locale).page.technologies}>
           {item.tags.map((tag) => <li key={tag}>{tag}</li>)}
         </ul>
       ) : null}

@@ -1,4 +1,6 @@
-import { PORTFOLIO_CONTENT } from "@/content/portfolio";
+import { portfolioContent } from "@/content/localized";
+import { localizePath, type Locale } from "@/lib/i18n/locale";
+import { messages } from "@/lib/i18n/messages";
 import { getContentPath, listContentByKind, resolveContentReference } from "@/lib/content/content";
 import { getSectionPath, zoneSection } from "@/lib/content/places";
 import type { MinimapData, MinimapZone } from "@/lib/minimap/minimap";
@@ -8,17 +10,18 @@ export type MapPlace = {
   zone: MinimapZone;
   /** Its name: the section's when it stands for one. */
   label: string;
-  /** The section's URL (or its one item's), or null for a zone that is no section. */
+  /** The section's URL (or its one item's) in the page's language, or null for a zone that is no section. */
   href: string | null;
 };
 
 /** Zones that are sections of the site (or mini-games), with where they lead. */
-export function mapPlaces(data: MinimapData): MapPlace[] {
+export function mapPlaces(data: MinimapData, locale: Locale): MapPlace[] {
+  const content = portfolioContent(locale);
   return data.zones.flatMap((zone) => {
     const section = zoneSection(zone);
     if (!section) return [];
-    const single = section.singleton ? listContentByKind(PORTFOLIO_CONTENT, section.kind)[0] : null;
-    return [{ zone, label: section.label, href: single ? getContentPath(single) : getSectionPath(section) }];
+    const single = section.singleton ? listContentByKind(content, section.kind)[0] : null;
+    return [{ zone, label: messages(locale).sections[section.kind], href: localizePath(single ? getContentPath(single) : getSectionPath(section), locale) }];
   });
 }
 
@@ -30,8 +33,9 @@ export function mapPlaces(data: MinimapData): MapPlace[] {
  * reuses it as its corner map, where `onPlace` and `onPin` keep the visitor
  * in the world.
  */
-export default function PortfolioMap({ data, current, compact = false, label = "Map of the portfolio", onPlace, onPin, markerRef }: {
+export default function PortfolioMap({ data, locale, current, compact = false, label, onPlace, onPin, markerRef }: {
   data: MinimapData;
+  locale: Locale;
   /** Id of the zone to mark as the one shown. */
   current?: string | null;
   compact?: boolean;
@@ -41,15 +45,16 @@ export default function PortfolioMap({ data, current, compact = false, label = "
   /** The world writes the camera's position into this element, without React. */
   markerRef?: React.Ref<SVGGElement>;
 }) {
-  const places = mapPlaces(data);
+  const places = mapPlaces(data, locale);
+  const content = portfolioContent(locale);
   const pins = data.pins.flatMap((pin) => {
-    const item = resolveContentReference(PORTFOLIO_CONTENT, pin.contentReference);
-    return item ? [{ ...pin, title: item.title, href: getContentPath(item) }] : [];
+    const item = resolveContentReference(content, pin.contentReference);
+    return item ? [{ ...pin, title: item.title, href: localizePath(getContentPath(item), locale) }] : [];
   });
   const { width, depth } = data;
   return (
     <figure className={compact ? `${styles.map} ${styles.compact}` : styles.map}>
-      <svg className={styles.svg} viewBox={`0 0 ${width} ${depth}`} role="group" aria-label={label}>
+      <svg className={styles.svg} viewBox={`0 0 ${width} ${depth}`} role="group" aria-label={label ?? messages(locale).page.mapLabel}>
         <image href={data.image} x={0} y={0} width={width} height={depth} preserveAspectRatio="none" aria-hidden="true" />
         {places.map((place) => {
           const { zone } = place;

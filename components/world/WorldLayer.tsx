@@ -5,7 +5,10 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import ContentArticle from "@/components/content/ContentArticle";
 import SectionArticle from "@/components/content/SectionArticle";
-import { PORTFOLIO_CONTENT } from "@/content/portfolio";
+import { portfolioContent } from "@/content/localized";
+import { useLocale } from "@/components/site/locale-context";
+import { localizePath, splitLocale } from "@/lib/i18n/locale";
+import { messages, type Messages } from "@/lib/i18n/messages";
 import { useWorldBridge } from "@/lib/bridge/use-world-bridge";
 import { worldBridge, type WorldPhase, type ZoneInfo } from "@/lib/bridge/world-bridge";
 import { getSectionPath, sectionByKind } from "@/lib/content/places";
@@ -23,7 +26,9 @@ import { useWorldBoot } from "./use-world-boot";
 import PerfHud from "./PerfHud";
 import WorldMinimap from "./WorldMinimap";
 import SkySwitch from "./SkySwitch";
-import { registerWorldEntry, WORLD_DOOR_ID } from "./entry-control";
+import PortraitPortals from "@/components/site/PortraitPortals";
+import WorldMapOverlay from "./WorldMapOverlay";
+import { registerWorldEntry, WORLD_DOOR_ID, type EnterOptions } from "./entry-control";
 import type { MinimapData } from "@/lib/minimap/minimap";
 import { useUiWork } from "@/lib/perf/ui-work";
 import styles from "./WorldLayer.module.css";
@@ -57,26 +62,33 @@ function panelInset() {
  * This is where bridge state meets the DOM and the router. The engine knows
  * nothing about URLs, history or the landing page.
  */
-export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }: {
+export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps, portraitModelUrl }: {
   defaultMapId: string;
   bakes: Record<string, string>;
   serveBakes: boolean;
   /** Each map's minimap data, drawn at build time; a map without one has no corner map. */
   minimaps: Record<string, MinimapData>;
+  /** The guide for the living portrait in the page's frames; null keeps the posters. */
+  portraitModelUrl: string | null;
 }) {
   useUiWork();
+  // Fixed for the layer's whole life: each language has its own root layout.
+  const locale = useLocale();
+  const content = portfolioContent(locale);
+  const text = messages(locale);
+  const href = useCallback((path: string) => localizePath(path, locale), [locale]);
   const pathname = usePathname();
   const previewMapId = MAP_PATH.exec(pathname)?.[1];
   // A map preview URL switches the map; other pages keep whichever map is loaded.
   const [mapId, setMapId] = useState(previewMapId ?? defaultMapId);
   if (previewMapId && previewMapId !== mapId) setMapId(previewMapId);
-  const worldPath = mapId === defaultMapId ? "/" : `/map/${mapId}`;
+  const worldPath = mapId === defaultMapId ? localizePath("/", locale) : `/map/${mapId}`;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const startLoading = useWorldBoot(mapId, canvasRef, bakes[mapId], serveBakes);
+  const startLoading = useWorldBoot(mapId, canvasRef, bakes[mapId], serveBakes, locale);
   const phase = useWorldBridge((state) => state.phase);
   const shown = phase === "entering" || phase === "world" || phase === "leaving";
-  const { item, section, open, openPath, close } = useContentRoute(worldPath);
+  const { item, section, open, openPath, close } = useContentRoute(worldPath, locale);
   const openItem = shown ? item : null;
   const openSection = shown && !item ? section : null;
   const panelOpen = openItem !== null || openSection !== null;
@@ -84,22 +96,23 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
   const headingId = useId();
   const panelRef = useRef<HTMLElement>(null);
 
-  const requestEnter = useCallback(() => {
-    const target = findContentByPath(PORTFOLIO_CONTENT, window.location.pathname);
+  const requestEnter = useCallback((options?: EnterOptions) => {
+    const target = findContentByPath(content, splitLocale(window.location.pathname).path);
     worldBridge.commands.emit({
       type: "enter",
       focus: target ? toContentReference(target) : undefined,
       inset: target ? panelInset() : undefined,
       reducedMotion: prefersReducedMotion(),
+      fromTop: options?.fromTop,
     });
-  }, []);
+  }, [content]);
 
-  const enter = useCallback(() => {
+  const enter = useCallback((options?: EnterOptions) => {
     // A new entry for the world, at the same URL: Back returns to the page the visitor was reading.
     window.history.pushState(worldHistoryState(), "", window.location.pathname);
     // The router reacts to the new entry synchronously. Start the transition on the
     // next frame so that work is finished before anything begins to move.
-    requestAnimationFrame(requestEnter);
+    requestAnimationFrame(() => requestEnter(options));
   }, [requestEnter]);
 
   const exit = useCallback(() => {
@@ -141,6 +154,28 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
     if (landing) landing.inert = false;
   }, []);
 
+  // The door's entry (prototype): the world alone while the camera comes down, then its map over the
+  // whole screen; the world's controls come when the map is closed (CSS, html[data-entry="door"]).
+  const [worldMapOpen, setWorldMapOpen] = useState(false);
+  const closeWorldMap = useCallback(() => {
+    setWorldMapOpen(false);
+    delete document.documentElement.dataset.entry;
+    canvasRef.current?.focus({ preventScroll: true });
+  }, []);
+  useEffect(() => {
+    const door = document.documentElement.dataset.entry === "door";
+    if (!door) return;
+    if (phase === "world") {
+      const timer = window.setTimeout(() => setWorldMapOpen(true), 0);
+      return () => window.clearTimeout(timer);
+    }
+    if (phase === "leaving" || phase === "ready") {
+      delete document.documentElement.dataset.entry;
+      const timer = window.setTimeout(() => setWorldMapOpen(false), 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, [phase]);
+
   // Keyboard focus follows the visitor between page and world.
   const previousPhase = useRef(phase);
   useEffect(() => {
@@ -161,18 +196,18 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
       worldBridge.commands.emit({ type: "fly-to-zone", zoneId: zone.id, reducedMotion: prefersReducedMotion() });
       return;
     }
-    const single = target.singleton ? listContentByKind(PORTFOLIO_CONTENT, target.kind)[0] : null;
-    openPath(single ? getContentPath(single) : getSectionPath(target));
-  }, [openPath]);
+    const single = target.singleton ? listContentByKind(content, target.kind)[0] : null;
+    openPath(href(single ? getContentPath(single) : getSectionPath(target)));
+  }, [openPath, content, href]);
   useEffect(() => worldBridge.events.subscribe((event) => {
     if (event.type === "content-activated") {
-      const target = resolveContentReference(PORTFOLIO_CONTENT, event.content);
+      const target = resolveContentReference(content, event.content);
       if (target) open(target);
     } else if (event.type === "zone-activated") {
       const zone = worldBridge.store.getState().zones.find((candidate) => candidate.id === event.zoneId);
       if (zone) goToZone(zone);
     }
-  }), [open, goToZone]);
+  }), [open, goToZone, content]);
 
   // UI -> world: whatever the URL says is open is what the camera looks at:
   // an item's object, or the whole zone of a section.
@@ -235,31 +270,31 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
           className={styles.canvas}
           data-world
           tabIndex={0}
-          aria-label="Interactive 3D world. Drag or use arrow keys to move, scroll or use plus and minus to zoom. Use the menu to open content with the keyboard."
+          aria-label={text.world.canvas}
         />
 
         <div className={styles.hudTop}>
           <details className={styles.menu}>
-            <summary>Menu</summary>
-            <nav aria-label="Portfolio sections">
+            <summary>{text.world.menu}</summary>
+            <nav aria-label={text.world.menuNav}>
               {CONTENT_SECTIONS.map((entrySection) => (
                 <section key={entrySection.kind}>
                   <h2>
-                    {entrySection.singleton ? entrySection.label : (
+                    {entrySection.singleton ? text.sections[entrySection.kind] : (
                       <a
-                        href={getSectionPath(entrySection)}
+                        href={href(getSectionPath(entrySection))}
                         aria-current={openSection?.kind === entrySection.kind ? "page" : undefined}
-                        onClick={(event) => onNavigatePath(event, getSectionPath(entrySection))}
+                        onClick={(event) => onNavigatePath(event, href(getSectionPath(entrySection)))}
                       >
-                        {entrySection.label}
+                        {text.sections[entrySection.kind]}
                       </a>
                     )}
                   </h2>
                   <ul>
-                    {listContentByKind(PORTFOLIO_CONTENT, entrySection.kind).map((entry) => (
+                    {listContentByKind(content, entrySection.kind).map((entry) => (
                       <li key={entry.id}>
                         <a
-                          href={getContentPath(entry)}
+                          href={href(getContentPath(entry))}
                           aria-current={openItem?.id === entry.id && openItem.kind === entry.kind ? "page" : undefined}
                           onClick={(event) => onNavigate(event, entry)}
                         >
@@ -272,16 +307,31 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
               ))}
             </nav>
           </details>
-          <button type="button" className={styles.exit} onClick={exit}>Back to page</button>
+          <button type="button" className={styles.exit} onClick={exit}>{text.world.back}</button>
         </div>
 
-        <ViewButtons hidden={panelOpen} />
-        <PlaceIndicator onGo={goToZone} hidden={panelOpen} />
-        <HoverLabel />
-        <MinigameHud />
-        <ActorHud />
+        <ViewButtons hidden={panelOpen} text={text} />
+        <PlaceIndicator onGo={goToZone} hidden={panelOpen} text={text} />
+        <HoverLabel text={text} />
+        <MinigameHud text={text} />
+        <ActorHud text={text} />
         <SkySwitch />
         <PerfHud active={phase === "world"} />
+        {worldMapOpen && minimaps[mapId] ? (
+          <WorldMapOverlay
+            data={minimaps[mapId]}
+            onClose={closeWorldMap}
+            onPlace={(target) => {
+              closeWorldMap();
+              const zone = zones.find((candidate) => candidate.id === target.zone.id);
+              if (zone) goToZone(zone);
+            }}
+            onPin={(href) => {
+              closeWorldMap();
+              openPath(href);
+            }}
+          />
+        ) : null}
         {minimaps[mapId] ? (
           <WorldMinimap
             data={minimaps[mapId]}
@@ -294,33 +344,33 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
           />
         ) : null}
 
-        {layerView(phase) === "loader" && PORTFOLIO_CONTENT.items[0] ? (
+        {layerView(phase) === "loader" && content.items[0] ? (
           <div className={styles.panel} aria-hidden="true">
-            <div className={styles.panelBody}><ContentArticle item={PORTFOLIO_CONTENT.items[0]} headingId={`${headingId}-warm`} /></div>
+            <div className={styles.panelBody}><ContentArticle item={content.items[0]} locale={locale} headingId={`${headingId}-warm`} /></div>
           </div>
         ) : null}
         {openSection && !openItem ? (
           <aside ref={panelRef} className={styles.panel} role="dialog" aria-modal="false" aria-labelledby={headingId}>
-            <button type="button" className={styles.close} onClick={close} aria-label="Close and return to the world">
-              Close
+            <button type="button" className={styles.close} onClick={close} aria-label={text.world.closeLabel}>
+              {text.world.close}
             </button>
             <div className={styles.panelBody}>
-              <SectionArticle section={openSection} items={listContentByKind(PORTFOLIO_CONTENT, openSection.kind)} headingId={headingId} onOpen={onNavigate} />
+              <SectionArticle section={openSection} locale={locale} items={listContentByKind(content, openSection.kind)} headingId={headingId} onOpen={onNavigate} />
             </div>
           </aside>
         ) : null}
         {openItem ? (
           <aside ref={panelRef} className={styles.panel} role="dialog" aria-modal="false" aria-labelledby={headingId}>
-            <button type="button" className={styles.close} onClick={close} aria-label="Close and return to the world">
-              Close
+            <button type="button" className={styles.close} onClick={close} aria-label={text.world.closeLabel}>
+              {text.world.close}
             </button>
             <div className={styles.panelBody}>
-              <ContentArticle item={openItem} headingId={headingId} />
+              <ContentArticle item={openItem} locale={locale} headingId={headingId} />
             </div>
           </aside>
         ) : null}
       </div>
-
+      {portraitModelUrl ? <PortraitPortals modelUrl={portraitModelUrl} /> : null}
     </>
   );
 }
@@ -330,7 +380,7 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
  * is a section of the site is a button to it. Re-renders only when the
  * camera crosses a zone's edge.
  */
-function PlaceIndicator({ onGo, hidden }: { onGo: (zone: ZoneInfo) => void; hidden: boolean }) {
+function PlaceIndicator({ onGo, hidden, text }: { onGo: (zone: ZoneInfo) => void; hidden: boolean; text: Messages }) {
   useUiWork();
   const place = useWorldBridge((state) => state.place);
   const zones = useWorldBridge((state) => state.zones);
@@ -339,7 +389,7 @@ function PlaceIndicator({ onGo, hidden }: { onGo: (zone: ZoneInfo) => void; hidd
   if (hidden || playing || !zone) return null;
   return (
     <p className={styles.place} aria-live="polite">
-      <span className={styles.placeLead}>You are in</span>
+      <span className={styles.placeLead}>{text.world.youAreIn}</span>
       <button type="button" className={styles.placeName} onClick={() => onGo(zone)}>
         <span className={styles.placeDot} style={{ background: zone.color }} aria-hidden="true" />
         {zone.label}
@@ -349,43 +399,40 @@ function PlaceIndicator({ onGo, hidden }: { onGo: (zone: ZoneInfo) => void; hidd
 }
 
 /** Names what the pointer is over. Re-renders only when the hovered interactable changes. */
-function HoverLabel() {
+function HoverLabel({ text }: { text: Messages }) {
   useUiWork();
   const label = useWorldBridge((state) => state.hovered?.label ?? null);
   const action = useWorldBridge((state) => state.hovered?.action ?? null);
   if (!label) return null;
-  return <p className={styles.hover} aria-hidden="true">{label} <span>{action === "play" ? "Click to play" : "Click to open"}</span></p>;
+  return <p className={styles.hover} aria-hidden="true">{label} <span>{action === "play" ? text.world.clickPlay : text.world.clickOpen}</span></p>;
 }
 
 /** The original's view controls, top right: lock the camera's tilt, and go back to the start view. */
-function ViewButtons({ hidden }: { hidden: boolean }) {
+function ViewButtons({ hidden, text }: { hidden: boolean; text: Messages }) {
   useUiWork();
   const locked = useWorldBridge((state) => state.angleLocked);
   if (hidden) return null;
   return (
     <div className={styles.viewButtons}>
-      <button type="button" className={styles.iconButton} aria-pressed={locked} aria-label={locked ? "Unlock camera angle" : "Lock camera angle"} title={locked ? "Unlock camera angle" : "Lock camera angle"}
+      <button type="button" className={styles.iconButton} aria-pressed={locked} aria-label={locked ? text.world.unlock : text.world.lock} title={locked ? text.world.unlock : text.world.lock}
         onClick={() => worldBridge.commands.emit({ type: "set-angle-lock", locked: !locked })}>
         {locked ? <UnlockKeyhole aria-hidden="true" size={16} /> : <LockKeyhole aria-hidden="true" size={16} />}
       </button>
-      <button type="button" className={styles.iconButton} aria-label="Reset view" title="Reset view" onClick={() => worldBridge.commands.emit({ type: "reset-view" })}>
+      <button type="button" className={styles.iconButton} aria-label={text.world.reset} title={text.world.reset} onClick={() => worldBridge.commands.emit({ type: "reset-view" })}>
         <RotateCcw aria-hidden="true" size={16} />
       </button>
     </div>
   );
 }
 
-const ACTOR_STATES: Record<string, string> = {
-  idle: "waiting", walking: "walking", running: "running", "taking-off": "taking off", flying: "flying", landing: "landing", preview: "showing a move",
-};
-const MOVEMENTS = [["auto", "Auto"], ["walk", "Walk"], ["run", "Run"], ["flight", "Fly"]] as const;
+const MOVEMENTS = ["auto", "walk", "run", "flight"] as const;
 
 /**
  * The chosen creature: what it is doing, how a click on the ground sends it
  * (the style lab's movement mode, plus Auto), whether the camera follows it,
  * and the way to let it go (the button or Escape).
  */
-function ActorHud() {
+function ActorHud({ text }: { text: Messages }) {
   useUiWork();
   const actor = useWorldBridge((state) => state.actor);
   const chosen = actor !== null;
@@ -402,14 +449,14 @@ function ActorHud() {
     <section className={styles.minigame} aria-label={`${actor.name}`}>
       <header>
         <strong>{actor.name}</strong>
-        <button type="button" onClick={() => worldBridge.commands.emit({ type: "release-actor" })}>Let go <kbd>Esc</kbd></button>
+        <button type="button" onClick={() => worldBridge.commands.emit({ type: "release-actor" })}>{text.world.letGo} <kbd>Esc</kbd></button>
       </header>
-      <p role="status" aria-live="polite">{ACTOR_STATES[actor.state] ?? actor.state}. Click the ground to send it there.</p>
-      <div className={styles.actorModes} role="group" aria-label="How it moves">
-        {MOVEMENTS.map(([movement, label]) => (
-          <button key={movement} type="button" aria-pressed={actor.movement === movement} onClick={() => worldBridge.commands.emit({ type: "set-actor-movement", movement })}>{label}</button>
+      <p role="status" aria-live="polite">{text.world.actorStates[actor.state] ?? actor.state}. {text.world.sendHint}</p>
+      <div className={styles.actorModes} role="group" aria-label={text.world.howItMoves}>
+        {MOVEMENTS.map((movement) => (
+          <button key={movement} type="button" aria-pressed={actor.movement === movement} onClick={() => worldBridge.commands.emit({ type: "set-actor-movement", movement })}>{text.world.movements[movement]}</button>
         ))}
-        <button type="button" aria-pressed={actor.following} disabled={actor.following} onClick={() => worldBridge.commands.emit({ type: "follow-actor" })}>{actor.following ? "Following" : "Follow"}</button>
+        <button type="button" aria-pressed={actor.following} disabled={actor.following} onClick={() => worldBridge.commands.emit({ type: "follow-actor" })}>{actor.following ? text.world.following : text.world.follow}</button>
       </div>
     </section>
   );
@@ -419,7 +466,7 @@ function ActorHud() {
  * The HUD of a running mini-game: what it is, its counters, what to do, and
  * the way out (the button or Escape). Re-renders only when a counter changes.
  */
-function MinigameHud() {
+function MinigameHud({ text }: { text: Messages }) {
   useUiWork();
   const hud = useWorldBridge((state) => state.minigame);
   const playing = hud !== null;
@@ -433,10 +480,10 @@ function MinigameHud() {
   }, [playing]);
   if (!hud) return null;
   return (
-    <section className={styles.minigame} aria-label={`${hud.title} mini-game`}>
+    <section className={styles.minigame} aria-label={text.world.minigame(hud.title)}>
       <header>
         <strong>{hud.title}</strong>
-        <button type="button" onClick={() => worldBridge.commands.emit({ type: "leave-minigame" })}>Leave <kbd>Esc</kbd></button>
+        <button type="button" onClick={() => worldBridge.commands.emit({ type: "leave-minigame" })}>{text.world.leave} <kbd>Esc</kbd></button>
       </header>
       <dl role="status" aria-live="polite">
         {Object.entries(hud.counters).map(([label, value]) => (

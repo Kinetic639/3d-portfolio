@@ -14,5 +14,5 @@ export function generateStaticParams() {
 export default async function MapPage({ params }: { params: Promise<{ mapId: string }> }) {
   const { mapId } = await params;
   if (!mapExists(mapId)) notFound();
-  return <LandingPage minimap={readMinimapData(mapId)} />;
+  return <LandingPage locale="en" minimap={readMinimapData(mapId)} />;
 }

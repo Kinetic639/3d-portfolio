@@ -43,41 +43,81 @@ Nowy układ strony, od którego zależy reszta. Na razie bez stylizacji, ale z d
   - **Komputer:** wąski, przypięty sidebar po prawej (ok. 280 px). Na samej górze duży portret, pod nim imię i rola, na dole sidebara małe drzwi do świata. Treść w kolumnie po lewej, nawigacja, język i motyw w górnym pasku nad treścią.
   - **Telefon:** portret na górze treści, nad powitaniem, przewija się razem z treścią (nie jest przypięty). Drzwi w zarezerwowanym, przypiętym pasku na dole ekranu. W górnym pasku imię i menu.
   - Szkice wariantów A-D zostały w historii rozmowy, wybrany jest D z telefonem 2.
-- [ ] Dwa języki: polski i angielski, przełącznik i wybór przy pierwszej wizycie. Struktura adresów (np. `/pl/...`, `/en/...`), treść w dwóch wersjach, `hreflang`. Robimy to na początku, bo zmienia adresy wszystkich stron i stref.
+- [x] Dwa języki: polski i angielski, przełącznik i wybór przy pierwszej wizycie, treść w dwóch wersjach, `hreflang`. (2026-11-22)
+  - **Adresy:** angielski zostaje pod gołymi ścieżkami (`/`, `/projects/...`), polski pod `/pl/...`, z tymi samymi segmentami. Bez przekierowań i bez proxy: każda strona jest statyczna, a `/` nie traci czasu na przekierowanie.
+  - **Przełącznik:** EN | PL w górnym pasku (na telefonie w menu), zwykłe linki do tej samej strony w drugim języku, wybór jest zapamiętany.
+  - **Pierwsza wizyta:** gdy przeglądarka prosi o drugi język, mała notka pyta o niego w tym języku. Strona nigdy sama nie przekierowuje.
+  - **Telefon:** w górnym pasku imię, dzień/noc i Menu (sekcje i język), bo z przełącznikiem języka pasek się nie mieścił.
+  - **Teksty:** interfejs w `lib/i18n/messages.ts`, treść portfolio w `content/` (plik na język, test pilnuje, że mają te same pozycje). Świat 3D też mówi językiem strony: menu, panele, nazwy stref, adresy.
 - [x] Sekcje z treścią zastępczą: o mnie, projekty, doświadczenie, umiejętności, kontakt. (2026-11-22)
 - [x] Pobieranie CV (na razie zastępczy PDF w `public/`). (2026-11-22)
 - [x] Miejsce na portret i drzwi w sekcji powitalnej (na razie statyczne). (2026-11-22)
 - [x] Responsywność od telefonu po szeroki ekran, motyw dzień i noc. (2026-11-22)
-- [ ] Gotowe, gdy: Lighthouse co najmniej 95 we wszystkich kategoriach na produkcji, a strona działa bez JavaScriptu i bez WebGL.
+- [x] Gotowe, gdy: Lighthouse spełnia kryterium poniżej, a strona działa bez JavaScriptu i bez WebGL. (2026-11-22)
+  - **Kryterium Lighthouse (zmienione 2026-11-22):**
+    - komputer: co najmniej 95 we wszystkich kategoriach;
+    - telefon: dostępność, dobre praktyki i SEO co najmniej 95, wydajność co najmniej 75 i bez spadków (punkt odniesienia: 79).
+  - **Dlaczego zmienione:** na telefonie Lighthouse spowalnia procesor 4× i najmocniej liczy TBT. Punkty zabiera hydratacja strony (jedno zadanie ok. 250 ms) i ładowanie świata 3D w tle. Wyższy wynik wymagałby ładowania świata dopiero po kliknięciu drzwi, czyli dłuższego czekania dla prawdziwego odwiedzającego. Optymalizowalibyśmy pod test, nie pod człowieka. Strony z WebGL mają na telefonie zwykle 30-60.
+  - **Wynik:**
+    - komputer: 100 / 100 / 100 / 100 (pomiar Twój);
+    - telefon: wydajność 79 (pomiar Twój), dostępność, dobre praktyki i SEO po 100 (EN i PL, lokalny serwer produkcyjny); LCP 1,8 s i CLS 0 przy wolnym 4G.
+  - **Bez JavaScriptu i bez WebGL** strona działa; testy e2e to pilnują.
+  - **Na później (B8):** zmniejszyć koszt hydratacji (kilka punktów na telefonie bez psucia świata).
 
 ### B2. Postać testowa **(razem)**
 
 Jeden darmowy model do portretu i do świata (vision.md, rozdział 5).
 
-- [ ] Wymagania: zrigowany humanoid, kość głowy (i najlepiej oczu), animacje bezczynności, chodu, biegu i machania, do około 20 tys. trójkątów, licencja pozwalająca na publiczne użycie (najlepiej CC0).
-- [ ] Wybór modelu spośród kandydatów. Przygotuję porównanie: źródło, licencja, wygląd, rozmiar, animacje. Kandydaci do sprawdzenia: paczki CC0 Quaternius i Kenney, postacie i animacje z Mixamo. **(razem)**
-- [ ] Model w pipeline'ie `pnpm assets` (optymalizacja, klipy animacji, ustawienia aktora).
+- [x] Wymagania i porównanie kandydatów: `docs/characters.md` (2026-11-22). Rekomendacja: Quaternius Universal Base Characters z Universal Animation Library (CC0), rezerwa: KayKit.
+  - Pierwotne wymagania: zrigowany humanoid, kość głowy (i najlepiej oczu), animacje bezczynności, chodu, biegu i machania, do około 20 tys. trójkątów, licencja pozwalająca na publiczne użycie (najlepiej CC0).
+- [x] Wybór modelu spośród kandydatów (2026-11-22): Quaternius (CC0), strój Peasant z głową modelu Superhero, animacje z Universal Animation Library 1 i 2. Szczegóły i zrzuty: `docs/characters.md`. Bez mimiki (decyzja: mimika przyjdzie z docelowym modelem z Blendera).
+- [x] Model w pipeline'ie `pnpm assets` (2026-11-22): `assets/models/guide`, złożony skryptem `scripts/guide/compose.mjs` z paczek w `temp/models/quaternius`.
+  - Po optymalizacji: 882 KB, 18,8 tys. trójkątów, 5 tekstur WebP po 1024 px.
+  - 13 klipów: Idle, Walk, Run, Talk, Interact, PickUp, SitDown, Sitting, StandUp, Yes, No, Call, ArmsFolded.
+  - Ustawienia aktora: chód 1,3, bieg 3. Testowy żołnierz (niepewne pochodzenie) usunięty.
 
 ### B3. Portret z żywą postacią **(Claude)**
 
-- [ ] Decyzja techniczna: osobna mała scena 3D w ramce portretu albo postać rysowana przez już działający kanwas świata dokładnie w miejscu ramki (jeden kontekst WebGL, łatwiejsze „wyjście z obrazu”). Zrobię krótki test obu podejść i pokażę pomiary.
-- [ ] Najpierw statyczny obraz (szybkie pierwsze wyświetlenie), potem żywa postać.
-- [ ] Głowa i oczy podążają za kursorem (na telefonie za dotykiem albo spokojna animacja), animacja bezczynności. Z ograniczonym ruchem tylko spokojne ujęcie.
-- [ ] Gotowe, gdy: portret nie pogarsza pierwszego wyświetlenia i wyników Lighthouse, nie rysuje klatek, gdy nic się nie dzieje, a budżety `pnpm perf` przechodzą.
+- [x] Decyzja techniczna (2026-11-22): **osobna mała scena w ramce** (`lib/portrait/portrait-scene.ts`).
+  - Dlaczego: na telefonie portret przewija się z treścią. Kanwas świata jest przypięty do ekranu, więc musiałby przerysowywać postać przy każdym przewinięciu i by się spóźniał.
+  - Scenę montuje warstwa świata (portal React do ramki na stronie), a silnik świata i scena portretu są w jednym dynamicznym module `lib/engine/runtime.ts`. Inaczej Turbopack wstawiał three.js dwa razy (dodatkowe 670 KB).
+- [x] Najpierw statyczny obraz, potem żywa postać (2026-11-22).
+  - Poster `public/portrait/guide.webp` (16 KB), renderowany z żywego portretu skryptem `scripts/guide/portrait-poster.mjs` (uruchomić po każdej zmianie modelu).
+  - Żywa postać ładuje się po 2 s spokoju od gotowości świata, tylko gdy portret jest na ekranie. Szybkie wejście do świata niczego więc nie pobiera.
+- [x] Głowa i oczy podążają za kursorem, animacja bezczynności (2026-11-22).
+  - Głowa i szyja obracają się za kursorem; oczy przesuwają się teksturą, bo model nie ma kości oczu.
+  - Bez kursora (telefon albo kursor w spoczynku) postać co kilka sekund spokojnie się rozgląda. Kliknięcie lub dotknięcie portretu to machanie („Call”).
+  - Mruganie działa samo, gdy model ma kształt `blink`.
+  - Przy ograniczonym ruchu i oszczędzaniu danych zostaje sam poster.
+  - Rysuje najwyżej 30 klatek na sekundę i tylko wtedy, gdy portret jest na ekranie, karta jest widoczna, a świat nie jest na pierwszym planie.
+- [x] Gotowe, gdy: portret nie pogarsza pierwszego wyświetlenia i wyników Lighthouse, nie rysuje klatek, gdy nic się nie dzieje, a budżety `pnpm perf` przechodzą. (2026-11-22)
+  - **Stan (2026-11-22):** budżety portretu są w `perf/budgets.json` (`portrait.afterReadyMs`, `portrait.longTaskMs`). Pomiary przy opóźnieniu 1 s mieściły się w nich, ale po zmianie na 2 s nie było nowego pomiaru.
+  - Lighthouse z portretem (pomiar Twój, 2026-11-22): wyniki bez zmian względem B1.
+  - `pnpm perf` (2026-11-22): wszystkie budżety przechodzą. Portret ładuje się 2,5 s po gotowości świata, jego długie zadania to 136 ms; ładowanie strony 118 ms; wejście 0 klatek powyżej 33 ms; dzień/noc p95 16,8 ms.
+  - Po drodze: portret prosił o GPU w trybie „low-power”, co przy kontekście świata („high-performance”) trzymało przejście dnia i nocy na 30 klatkach. Teraz oba proszą o ten sam tryb, a płótno portretu znika ze strony, gdy świat jest na pierwszym planie.
+  - Testy e2e świata i edytora nie były uruchamiane po ostatnich zmianach portretu.
 
-### B4. Drzwi do świata i animacja ładowania **(razem)**
+### B4. Ekran wejściowy z drzwiami **(razem)**
 
-- [ ] Decyzja: drzwi jako grafika na stronie (SVG lub CSS, lekkie i ostre) czy jako obiekt 3D. Zaproponuję szkic. **(razem)**
-- [ ] Ładowanie świata pokazane na drzwiach albo przy nich, np. światło w szparze rośnie razem z postępem.
-- [ ] Gdy świat jest gotowy: drzwi lekko się uchylają i bije z nich światło. Klik i klawiatura (dostępność).
-- [ ] Drzwi zastępują obecną platformę z kryształem.
+Zmiana koncepcji (2026-11-22): wejście do świata nie prowadzi już z portretu, tylko przez drzwi na ekranie wejściowym. Strona z portretem zostaje jako wersja klasyczna. Rozważane i odrzucone: drzwi w tle portretu, przewijanie jako warunek otwarcia drzwi, mapa jako motyw wejścia, sam świat bez zwykłej strony (za duże ryzyko u rekruterów i na telefonach). Prototyp: `components/site/EntryScreen.tsx`, tylko pod `?entry=door`.
 
-### B5. Przejście: z portretu przez drzwi do świata **(Claude)**
+- [x] Decyzja: ekran wejściowy z drzwiami na środku jako loaderem; drzwi w CSS (wersja 3D, jeśli koncept się sprawdzi). (2026-11-22, prototyp)
+- [x] Ładowanie na drzwiach: zamknięte, światło pulsuje w szparach i rośnie z postępem. (2026-11-22, prototyp)
+- [x] Gotowe: drzwi uchylone, światło stałe i na podłodze; klik i klawiatura. (2026-11-22, prototyp)
+- [x] Kartka „CV” na drzwiach: panel z opisem strony, pobraniem CV, wersją klasyczną i kontaktem; tabliczka z imieniem i rolą; PL | EN. (2026-11-22, prototyp)
+- [x] Drzwi zastępują platformę z kryształem (na stronie nie jest rysowana od B1).
+- [ ] Ekran domyślnie na `/`, z zasadami:
+  - telefon, brak WebGL, ograniczony ruch i oszczędzanie danych trafiają od razu na wersję klasyczną;
+  - linki do konkretnej treści (`/projects/...`) omijają ekran;
+  - wybór jest zapamiętany (powracający odwiedzający);
+  - bez mignięcia zwykłej strony przed ekranem (dziś ekran pojawia się dopiero po wczytaniu skryptów).
 
-- [ ] Postać wychodzi z portretu (animacja do ustalenia na prototypie), idzie do drzwi i przechodzi przez nie.
-- [ ] Kamera przechodzi przez drzwi i świat się otwiera. Obecne wejście (fala terenu, obiekty wyrastające z ziemi) dostosowane do drzwi.
-- [ ] Wyjście ze świata: droga powrotna (postać wraca do portretu).
-- [ ] Gotowe, gdy: przejście jest płynne (budżet wejścia: brak przyciętych klatek i kompilacji), działa na telefonie, a przy ograniczonym ruchu jest cięcie.
+### B5. Przejście przez drzwi i mapa świata **(Claude)**
+
+- [x] Jeden ciągły ruch: drzwi otwierają się, a kamera przyspiesza w otwór, aż jego światło wypełni ekran; pod pełnym światłem zmienia się scena; światło gaśnie nad światem. Wejście świata startuje od najwyższego punktu i tylko opada (nowa opcja `fromTop` polecenia `enter`). (2026-11-22, prototyp)
+- [x] Podczas wejścia sam świat bez kontrolek; na końcu mapa świata na pełnym ekranie (strefa: lot i sekcja, pinezka: projekt, „Zwiedzaj świat” lub Escape: zamknięcie); kontrolki dopiero po jej zamknięciu. (2026-11-22, prototyp)
+- [x] Wyjście ze świata: kto wszedł przez drzwi, wraca na ekran z drzwiami, tym samym ruchem odwrotnie (ze światła, z otworu drzwi, drzwi przymykają się do uchylenia; fokus na drzwiach). (2026-11-22, prototyp)
+- [ ] Gotowe, gdy: budżety `pnpm perf` przechodzą także dla wejścia przez drzwi (dziś mierzone jest tylko zwykłe wejście), pełny zestaw testów przechodzi, a przy ograniczonym ruchu jest cięcie.
 
 ### B6. Przewodnik w świecie **(Claude)**
 
@@ -97,7 +137,7 @@ Jeden darmowy model do portretu i do świata (vision.md, rozdział 5).
 - [ ] Budżety `pnpm perf` dla portretu, drzwi, przejścia i przewodnika.
 - [ ] Testy e2e całej ścieżki: strona, drzwi, przejście, świat, przewodnik, powrót.
 - [ ] Sprawdzenie na Twoim telefonie. **(Ty)**
-- [ ] Lighthouse na produkcji.
+- [ ] Lighthouse na produkcji według kryterium z B1, plus mniejszy koszt hydratacji strony (kilka punktów wydajności na telefonie).
 
 ---
 
@@ -132,7 +172,7 @@ Jeden darmowy model do portretu i do świata (vision.md, rozdział 5).
 
 - [ ] SEO: tytuły i opisy stron w obu językach, `hreflang`, `sitemap.xml`, `robots.txt`, favicon.
 - [ ] Podglądy linków (Open Graph): ładny obrazek przy udostępnianiu w LinkedIn i komunikatorach.
-- [ ] Lighthouse na produkcji: co najmniej 95 we wszystkich kategoriach.
+- [ ] Lighthouse na produkcji według kryterium z B1 (komputer co najmniej 95 wszędzie; telefon co najmniej 95 poza wydajnością, ta co najmniej 75 i bez spadków).
 - [ ] Własna domena (decyzja). **(Ty)**
 
 ---

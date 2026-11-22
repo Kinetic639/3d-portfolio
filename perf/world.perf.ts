@@ -118,8 +118,14 @@ async function loadAndEnter(page: Page) {
   // check on-demand rendering, so they run with the wind held still (as for reduced motion);
   // measureWind measures the wind on its own.
   await page.evaluate(() => (window.__worldEngine as unknown as Probe).environment.wind.setStilled(true));
-  // Let the landing page come to rest, as a visitor reading it would.
+  // Let the landing page come to rest, as a visitor reading it would, and the living portrait come alive
+  // (it waits for a quiet moment after the world is ready); then the entry is measured on its own.
   await page.waitForTimeout(1500);
+  const portraitLoaded = () => page.evaluate(() => (window as unknown as { __portrait?: { sidebar?: { stats: { loadedAt: number | null } } } }).__portrait?.sidebar?.stats.loadedAt ?? null);
+  await expect.poll(portraitLoaded, { timeout: 10_000 }).not.toBeNull().catch(() => undefined);
+  await page.waitForTimeout(500);
+  const portraitLoadedAt = await portraitLoaded();
+  const portraitTasks = portraitLoadedAt === null ? null : await longTasks(page, ready, portraitLoadedAt);
 
   const programsBefore = await page.evaluate(() => (window.__worldEngine as unknown as Probe).renderer.info.programs.length);
   await startFrames(page);
@@ -132,6 +138,8 @@ async function loadAndEnter(page: Page) {
   const programsAfter = await page.evaluate(() => (window.__worldEngine as unknown as Probe).renderer.info.programs.length);
   return {
     readyMs: ready,
+    portraitAfterReadyMs: portraitLoadedAt === null ? null : portraitLoadedAt - ready,
+    portraitLongTaskMs: portraitTasks?.total ?? null,
     loadLongTaskMs: load.total,
     warmUpOk: report?.ok ? 1 : 0,
     warmUpNewResources: report?.newResourcesDuringTest ?? 99,
@@ -171,6 +179,10 @@ test("the world stays within its performance budgets", async ({ browser }) => {
   record("load.longTaskMs", median(runs.map((run) => run.loadLongTaskMs)));
   record("load.warmUpOk", Math.min(...runs.map((run) => run.warmUpOk)));
   record("load.warmUpNewResources", Math.max(...runs.map((run) => run.warmUpNewResources)));
+  // The living portrait: how long after the world is ready it comes alive (it must not load before), and what that blocks.
+  // A portrait that never came alive counts as 99 999 ms, so its budget fails.
+  record("portrait.afterReadyMs", median(runs.map((run) => run.portraitAfterReadyMs ?? 99_999)));
+  record("portrait.longTaskMs", median(runs.map((run) => run.portraitLongTaskMs ?? 99_999)));
   record("entry.maxFrameMs", median(runs.map((run) => run.entry.maxFrameMs)));
   record("entry.p95FrameMs", median(runs.map((run) => run.entry.p95FrameMs)));
   record("entry.framesOver33Ms", median(runs.map((run) => run.entry.above33_3Ms.count)));
@@ -379,7 +391,7 @@ async function screenPoint(page: Page, which: "anchor" | "focus", id = MINE) {
     const point = (kind === "anchor" ? item.anchor : item.focus).clone();
     if (kind === "focus") point.y = 4;
     const ndc = point.project(probe.rig.camera);
-    const rect = document.querySelector("canvas")!.getBoundingClientRect();
+    const rect = document.querySelector("canvas[data-world]")!.getBoundingClientRect();
     return { x: rect.left + ((ndc.x + 1) / 2) * rect.width, y: rect.top + ((1 - ndc.y) / 2) * rect.height };
   }, [id, which] as const);
 }

@@ -3,11 +3,11 @@
 Krótka lista do odhaczania. Szczegóły każdego punktu (zakres, kryterium „gotowe”, decyzje) są w `docs/roadmap.md` pod tym samym numerem.
 Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 
-**Faza 1:** 6 / 46 (13%) `███░░░░░░░░░░░░░░░░░`
+**Faza 1:** 23 / 48 (48%) `██████████░░░░░░░░░░`
 
 | Część | Zrobione |
 |---|---|
-| Baza produktu (B0-B9) | 6 / 35 |
+| Baza produktu (B0-B9) | 23 / 37 |
 | Gotowe dla rekruterów (J1-J5) | 0 / 11 |
 
 ---
@@ -17,37 +17,39 @@ Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 **B0. Porządki** 1/1
 - [x] Serwer 3301, kopia `orig`, repo na `main`, stare gałęzie (2026-11-22)
 
-**B1. Szkielet strony** 5/7
+**B1. Szkielet strony** 7/7
 - [x] Układ: wariant D, telefon z portretem w treści (2026-11-22)
-- [ ] Dwa języki: PL i EN, przełącznik, adresy, `hreflang`
+- [x] Dwa języki: PL i EN, przełącznik, adresy, `hreflang` (2026-11-22)
 - [x] Sekcje z treścią zastępczą (2026-11-22)
 - [x] Pobieranie CV (zastępczy PDF) (2026-11-22)
 - [x] Miejsce na portret i drzwi (statyczne) (2026-11-22)
 - [x] Responsywność, dzień i noc (2026-11-22)
-- [ ] Lighthouse ≥ 95, działa bez JS i WebGL
+- [x] Lighthouse (komputer ≥ 95, telefon ≥ 95 poza wydajnością ≥ 75), działa bez JS i WebGL (2026-11-22)
 
-**B2. Postać testowa** 0/3
-- [ ] Wymagania modelu spisane
-- [ ] Porównanie kandydatów i wybór
-- [ ] Model w `pnpm assets`
+**B2. Postać testowa** 3/3
+- [x] Wymagania modelu spisane, kandydaci porównani w `docs/characters.md` (2026-11-22)
+- [x] Wybór: Quaternius, strój Peasant z głową Superhero (2026-11-22)
+- [x] Model w `pnpm assets` (`guide`, 882 KB, 18,8 tys. trójkątów, 13 klipów) (2026-11-22)
 
-**B3. Portret** 0/4
-- [ ] Decyzja techniczna (osobna scena czy kanwas świata)
-- [ ] Najpierw statyczny obraz, potem żywa postać
-- [ ] Głowa i oczy za kursorem, bezczynność, telefon
-- [ ] Bez straty na wydajności i Lighthouse
+**B3. Portret** 4/4
+- [x] Decyzja techniczna: osobna scena w ramce (2026-11-22)
+- [x] Najpierw statyczny obraz, potem żywa postać (2026-11-22)
+- [x] Głowa i oczy za kursorem, bezczynność, telefon (2026-11-22)
+- [x] Bez straty na wydajności i Lighthouse (2026-11-22)
 
-**B4. Drzwi i ładowanie** 0/4
-- [ ] Decyzja: grafika czy 3D, szkic
-- [ ] Postęp ładowania na drzwiach
-- [ ] Uchylenie i światło, gdy świat gotowy
-- [ ] Drzwi zamiast platformy z kryształem
+**B4. Ekran wejściowy z drzwiami** 5/6
+- [x] Decyzja: ekran z drzwiami jako loaderem (prototyp `?entry=door`) (2026-11-22)
+- [x] Postęp ładowania na drzwiach (2026-11-22)
+- [x] Uchylenie i światło, gdy świat gotowy (2026-11-22)
+- [x] Kartka „CV” z panelem, tabliczka, PL | EN (2026-11-22)
+- [x] Drzwi zamiast platformy z kryształem
+- [ ] Ekran domyślnie na `/` (telefon i brak WebGL: wersja klasyczna, linki omijają, wybór zapamiętany)
 
-**B5. Przejście** 0/4
-- [ ] Postać wychodzi z portretu i przechodzi przez drzwi
-- [ ] Kamera przez drzwi, wejście do świata
-- [ ] Powrót: postać wraca do portretu
-- [ ] Płynnie, na telefonie, cięcie przy ograniczonym ruchu
+**B5. Przejście i mapa świata** 3/4
+- [x] Kamera w drzwi, światło, świat od najwyższego punktu (2026-11-22)
+- [x] Świat bez kontrolek, potem mapa świata na pełnym ekranie (2026-11-22)
+- [x] Wyjście ze świata: powrót na ekran z drzwiami (2026-11-22)
+- [ ] Budżety perf dla wejścia przez drzwi, pełne testy, cięcie przy ograniczonym ruchu
 
 **B6. Przewodnik w świecie** 0/4
 - [ ] Idzie za kamerą, zostaje w kadrze

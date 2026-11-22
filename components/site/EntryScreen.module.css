@@ -1,0 +1,518 @@
+/*
+ * The entry screen (prototype, ?entry=door). Its own dusk palette in both
+ * themes: the door's light needs the dark around it. Animations are
+ * transform and opacity only.
+ */
+.screen {
+  --wall: #161b25;
+  --ink: #efe6d2;
+  --muted-ink: #b9ae97;
+  --wood: #7a5c40;
+  --wood-dark: #5a422d;
+  --stone: #4a4338;
+  --warm: #ffd67a;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px 16px;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 62%, #2a3242 0%, var(--wall) 68%);
+  color: var(--ink);
+  font: 400 16px/1.5 var(--font-sans);
+  transition: opacity 700ms ease-out;
+}
+
+/* Under the full light the door and the dusk go at once; only the light lifts, off the world. */
+.screen[data-stage="fading"] {
+  background: transparent;
+  pointer-events: none;
+}
+
+.screen[data-stage="fading"] .stage,
+.screen[data-stage="fading"] .status,
+.screen[data-stage="fading"] .classic,
+.screen[data-stage="fading"] .languages {
+  visibility: hidden;
+}
+
+.languages {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: flex;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.languages a {
+  padding: 4px 9px;
+  border: 1px solid rgba(239, 230, 210, 0.3);
+  border-radius: 999px;
+  color: var(--muted-ink);
+  text-decoration: none;
+}
+
+.languages a[aria-current="page"] {
+  background: var(--ink);
+  color: var(--wall);
+}
+
+/* The "camera": the scene moves towards the door. */
+.stage {
+  perspective: 900px;
+}
+
+.scene {
+  --progress: 0;
+  --origin-x: 50%;
+  --origin-y: 58%;
+  --shift-x: 0px;
+  --shift-y: 0px;
+  --zoom: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform-origin: var(--origin-x) var(--origin-y);
+  /* Accelerating into the doorway, like a step through it. */
+  transition: transform 1300ms cubic-bezier(0.5, 0, 0.85, 0.3);
+}
+
+.screen[data-stage="going"] .scene {
+  transform: translate(var(--shift-x), var(--shift-y)) scale(var(--zoom));
+}
+
+.plate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 0 14px;
+  padding: 6px 18px;
+  border: 1px solid rgba(255, 214, 122, 0.35);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  line-height: 1.25;
+  text-align: center;
+}
+
+.plate strong {
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+
+.plate span {
+  color: var(--warm);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* The doorway: a stone frame around light, with the door in it. */
+.doorway {
+  position: relative;
+  width: 190px;
+  height: 300px;
+  border: 14px solid var(--stone);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  background: #0d0f14;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+  perspective: 700px;
+}
+
+.light {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 40% 55%, #fffbe8 0%, #ffe59a 40%, #ffb347 100%);
+  opacity: calc(0.25 + var(--progress) * 0.45);
+}
+
+.scene[data-door="loading"] .light {
+  animation: pulse 1.4s ease-in-out infinite alternate;
+}
+
+.scene[data-door="ready"] .light,
+.scene[data-door="open"] .light {
+  opacity: 1;
+}
+
+@keyframes pulse {
+  from {
+    filter: brightness(0.6);
+  }
+  to {
+    filter: brightness(1.15);
+  }
+}
+
+/* The door leaf, hinged on the left; the gaps around it let the light through. */
+.leaf {
+  position: absolute;
+  inset: 5px 5px 9px 5px;
+  border-radius: 6px 6px 0 0;
+  background: linear-gradient(90deg, var(--wood-dark), var(--wood) 18%, var(--wood) 82%, var(--wood-dark));
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.25);
+  z-index: 3;
+  /* Clicks on the door go through to the doorway (the way in); only the note takes its own. */
+  pointer-events: none;
+  transform-origin: left center;
+  transform: rotateY(0deg);
+  transition: transform 700ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.scene[data-door="ready"] .leaf {
+  transform: rotateY(-24deg);
+}
+
+.scene[data-door="open"] .leaf {
+  transform: rotateY(-102deg);
+  transition-duration: 800ms;
+}
+
+.panelTop,
+.panelBottom {
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  border: 3px solid rgba(0, 0, 0, 0.18);
+  border-radius: 3px;
+}
+
+.panelTop {
+  top: 9%;
+  height: 34%;
+}
+
+.panelBottom {
+  bottom: 9%;
+  height: 34%;
+}
+
+.knob {
+  position: absolute;
+  top: 52%;
+  right: 10%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffe7a3, #b98a2e);
+}
+
+/* The whole doorway is the way in. */
+.enter {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: default;
+}
+
+.scene[data-door="ready"] .enter {
+  cursor: pointer;
+}
+
+.enter:focus-visible {
+  outline: 3px solid var(--warm);
+  outline-offset: 10px;
+}
+
+/* The note pinned to the door. */
+.note {
+  position: absolute;
+  top: 26%;
+  left: 54%;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 66px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: linear-gradient(170deg, #fbf6e9, #eee4cc);
+  box-shadow: 2px 3px 6px rgba(0, 0, 0, 0.45);
+  color: #2b2418;
+  font: 800 19px/1 var(--font-sans);
+  letter-spacing: 0.04em;
+  transform: rotate(-7deg);
+  transform-origin: 50% 8%;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: transform 200ms ease;
+}
+
+.note::before {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ff8a7a, #b3261e);
+  transform: translateX(-50%);
+}
+
+.note:hover {
+  transform: rotate(-3deg) scale(1.06);
+}
+
+.scene[data-door="loading"] .note {
+  animation: flutter 2.6s ease-in-out infinite;
+}
+
+@keyframes flutter {
+  0%, 100% {
+    transform: rotate(-7deg);
+  }
+  50% {
+    transform: rotate(-4deg) skewY(-2deg);
+  }
+}
+
+.note:focus-visible {
+  outline: 3px solid var(--warm);
+  outline-offset: 3px;
+}
+
+/* The door hides when it swings fully open, so the note goes with it. */
+.scene[data-door="open"] .note {
+  opacity: 0;
+  transition: opacity 300ms;
+}
+
+/* Light spilling on the floor in front of the door. */
+.floor {
+  width: 340px;
+  height: 46px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 0%, rgba(255, 214, 122, 0.55), transparent 70%);
+  opacity: calc(0.2 + var(--progress) * 0.4);
+}
+
+.scene[data-door="ready"] .floor,
+.scene[data-door="open"] .floor {
+  opacity: 1;
+}
+
+.status {
+  min-height: 1.5em;
+  margin: 0;
+  color: var(--muted-ink);
+  font-size: 14px;
+}
+
+.classic {
+  padding: 4px 6px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.classic:focus-visible {
+  outline: 2px solid var(--warm);
+  outline-offset: 2px;
+}
+
+.screen[data-stage="going"] .status,
+.screen[data-stage="going"] .classic,
+.screen[data-stage="going"] .languages {
+  opacity: 0;
+  transition: opacity 300ms;
+}
+
+/* The flash: the light fills the screen, and the world begins under it. */
+.flash {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  background: radial-gradient(circle at 50% 55%, #fffdf3 0%, #fff4cf 45%, #ffe1a0 100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The light thickens over the last part of the move, so the doorway's light and the flash are one. */
+.screen[data-stage="going"] .flash {
+  opacity: 1;
+  transition: opacity 500ms ease-in 800ms;
+}
+
+.screen[data-stage="fading"] .flash {
+  opacity: 0;
+  transition: opacity 900ms ease-out;
+}
+
+/* The note's panel. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.panel {
+  position: relative;
+  width: min(440px, 100%);
+  padding: 26px 26px 22px;
+  border-radius: 4px;
+  background: linear-gradient(170deg, #fbf6e9, #efe5cd);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  color: #2b2418;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.panel h2:focus {
+  outline: none;
+}
+
+.panel h3 {
+  margin: 18px 0 6px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.role {
+  margin: 2px 0 12px;
+  color: #8a5a12;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.panelActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0 0;
+}
+
+.primary,
+.secondary {
+  padding: 9px 16px;
+  border: 1px solid #2b2418;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.primary {
+  background: #2b2418;
+  color: #fbf6e9;
+}
+
+.secondary {
+  background: transparent;
+  color: #2b2418;
+}
+
+.contactList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.contactList a {
+  color: #2b2418;
+}
+
+.close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 4px 10px;
+  border: 1px solid rgba(43, 36, 24, 0.35);
+  border-radius: 6px;
+  background: transparent;
+  color: #2b2418;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+@media (max-width: 760px) {
+  .doorway {
+    width: 150px;
+    height: 240px;
+  }
+
+  .floor {
+    width: 260px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene[data-door="loading"] .light,
+  .scene[data-door="loading"] .note {
+    animation: none;
+  }
+
+  .scene,
+  .leaf {
+    transition: none;
+  }
+}
+
+/* Back from the world: the screen starts in the light, at the doorway, then moves out of it. */
+.screen[data-stage="returning"] .scene {
+  transform: translate(var(--shift-x), var(--shift-y)) scale(var(--zoom));
+  transition: none;
+}
+
+.screen[data-stage="returning"] .flash {
+  opacity: 1;
+  transition: none;
+}
+
+.screen[data-stage="returning"] .status,
+.screen[data-stage="returning"] .classic,
+.screen[data-stage="returning"] .languages {
+  opacity: 0;
+}
+
+/* The way out decelerates (the way in accelerated), and the light thins as the doorway shrinks. */
+.screen[data-returned] .scene {
+  transition: transform 1300ms cubic-bezier(0.15, 0.7, 0.3, 1);
+}
+
+.screen[data-returned][data-stage="door"] .flash {
+  opacity: 0;
+  transition: opacity 700ms ease-out;
+}
+
+.screen[data-returned][data-stage="door"] .status,
+.screen[data-returned][data-stage="door"] .classic,
+.screen[data-returned][data-stage="door"] .languages {
+  opacity: 1;
+  transition: opacity 400ms ease 900ms;
+}

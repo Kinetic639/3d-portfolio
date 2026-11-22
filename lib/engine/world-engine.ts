@@ -26,6 +26,7 @@ import { resolveActor, type ActorMovement } from "./actor";
 import type { PlacedActor } from "./entity-meshes";
 import type { ActorHud, ZoneInfo } from "@/lib/bridge/world-bridge";
 import { zoneSection } from "@/lib/content/places";
+import type { ContentSection } from "@/lib/content/content";
 import { FOCUS_DIRECTION_YAW, frameZone, measureZones, planFlight, sampleFlight, type Flight, type ZoneArea } from "./zones";
 import { LABEL_FADE_FAR, LABEL_FADE_NEAR, ZoneLabels } from "./zone-labels";
 import { SkyDiscs } from "./sky-discs";
@@ -75,6 +76,8 @@ export type LoadMapOptions = {
   onProgress?: (fraction: number) => void;
   /** Display title for a content reference, or null if it does not exist. Without it nothing is interactive. */
   describeContent?: (reference: MapContentReference) => string | null;
+  /** A section's name in the visitor's language, for zone names. Without it, the section's own (English) label. */
+  describeSection?: (section: ContentSection) => string;
 };
 
 export type WarmUpReport = {
@@ -387,7 +390,7 @@ export class WorldEngine {
       describeContent: options.describeContent ?? (() => null),
     });
     this.scene.add(terrain.group, this.entities.group, this.interaction.group);
-    this.installPlaces(definition, query);
+    this.installPlaces(definition, query, options.describeSection ?? ((section) => section.label));
     this.terrainSky = -1;
     this.syncTerrainSky();
 
@@ -909,7 +912,7 @@ export class WorldEngine {
     this.active = true;
     this.entering = true;
     this.bridge.set({ phase: "entering" });
-    this.entry = { elapsed: 0, reducedMotion: command.reducedMotion === true, focus: command.focus, inset: command.inset };
+    this.entry = { elapsed: command.fromTop ? FOCUS_SECONDS : 0, reducedMotion: command.reducedMotion === true, focus: command.focus, inset: command.inset };
     this.lastTickAt = 0;
     this.lastFrameAt = 0;
     this.resetFramePacing();
@@ -1237,7 +1240,7 @@ export class WorldEngine {
   }
 
   /** Zones that are places (a section of the site, or a mini-game): their areas, names on the terrain, and the list the UI shows. */
-  private installPlaces(definition: RuntimeMap, query: WorldQuery) {
+  private installPlaces(definition: RuntimeMap, query: WorldQuery, describeSection: (section: ContentSection) => string) {
     const areas = measureZones(query);
     const listed: ZoneInfo[] = [];
     for (const zone of [...definition.zones].sort((a, b) => a.displayOrder - b.displayOrder)) {
@@ -1246,7 +1249,7 @@ export class WorldEngine {
       const section = zoneSection(zone);
       const minigame = zone.kind === "minigame";
       if (!section && !minigame) continue;
-      const info: ZoneInfo = { id: zone.id, label: section?.label ?? zone.label, color: zone.color, kind: section?.kind ?? null, minigame };
+      const info: ZoneInfo = { id: zone.id, label: section ? describeSection(section) : zone.label, color: zone.color, kind: section?.kind ?? null, minigame };
       listed.push(info);
       this.places.set(zone.numericId, { info, area, yaw: zone.focusDirection ? FOCUS_DIRECTION_YAW[zone.focusDirection] ?? null : null });
     }

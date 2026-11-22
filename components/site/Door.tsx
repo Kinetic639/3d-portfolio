@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { enterWorld, loadWorld, WORLD_DOOR_ID } from "@/components/world/entry-control";
 import { useWorldBridge } from "@/lib/bridge/use-world-bridge";
 import { useUiWork } from "@/lib/perf/ui-work";
+import { messages } from "@/lib/i18n/messages";
+import { useLocale } from "./locale-context";
 import styles from "./Door.module.css";
 
 /**
@@ -14,6 +16,7 @@ import styles from "./Door.module.css";
  */
 export default function Door() {
   useUiWork();
+  const text = messages(useLocale()).door;
   const phase = useWorldBridge((state) => state.phase);
   // Whole percents: at most a hundred renders over the entire load.
   const percent = useWorldBridge((state) => Math.round(state.progress * 100));
@@ -30,10 +33,10 @@ export default function Door() {
   const ready = phase === "ready";
   const loading = phase === "loading" || phase === "warming";
   const state = ready ? "ready" : loading ? "loading" : phase === "idle" && heldBack ? "held" : "closed";
-  const label = ready ? "Enter the world" : state === "held" ? "Load the interactive world" : "The 3D world is loading";
+  const label = ready ? text.enter : state === "held" ? text.load : text.loading;
 
   return (
-    <div className={styles.door} data-state={state} style={{ "--progress": percent / 100 } as React.CSSProperties}>
+    <div className={styles.door} data-world-door data-state={state} style={{ "--progress": percent / 100 } as React.CSSProperties}>
       <button
         id={WORLD_DOOR_ID}
         type="button"
@@ -54,9 +57,9 @@ export default function Door() {
         </span>
       </button>
       <p className={styles.caption} aria-hidden="true">
-        {ready ? "Enter the world" : state === "held" ? "Load the world" : loading ? `Loading ${percent}%` : " "}
+        {ready ? text.enter : state === "held" ? text.loadShort : loading ? text.progress(percent) : " "}
       </p>
-      {ready ? <p className={styles.srOnly} role="status">The interactive 3D world is ready.</p> : null}
+      {ready ? <p className={styles.srOnly} role="status">{text.ready}</p> : null}
     </div>
   );
 }

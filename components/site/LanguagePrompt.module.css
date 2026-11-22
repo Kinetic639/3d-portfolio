@@ -1,0 +1,68 @@
+/* Floats under the top bar, over the content column: nothing is laid out again when it appears. */
+.prompt {
+  position: fixed;
+  top: calc(var(--bar, 64px) + 12px);
+  left: 32px;
+  z-index: 7;
+  width: min(360px, calc(100vw - 32px));
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: var(--shadow-md, 0 8px 24px rgb(0 0 0 / 0.12));
+  backdrop-filter: blur(8px);
+  animation: appear 240ms ease-out;
+}
+
+.question {
+  margin: 0;
+  font-weight: 700;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.go,
+.stay {
+  padding: 6px 14px;
+  border: 1px solid var(--foreground);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.go {
+  background: var(--foreground);
+  color: var(--background) !important;
+}
+
+.stay {
+  background: transparent;
+  color: inherit;
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@media (max-width: 760px) {
+  .prompt {
+    left: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prompt {
+    animation: none;
+  }
+}
