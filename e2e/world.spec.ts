@@ -233,7 +233,7 @@ test("clicking terrain inside a content zone opens that zone's content", async (
 
 test("content can be opened from the menu with the keyboard alone", async ({ page }) => {
   await openWorld(page);
-  await page.getByText("Menu", { exact: true }).focus();
+  await page.locator("[data-view]").getByText("Menu", { exact: true }).focus();
   await page.keyboard.press("Enter");
   const link = page.getByRole("navigation", { name: "Portfolio sections" }).getByRole("link", { name: "Contact" });
   await link.focus();
@@ -351,7 +351,7 @@ const zoneArea = (page: import("@playwright/test").Page, label: string) => page.
 test("a section's URL is its zone: the camera flies to frame it and the panel lists the section", async ({ page }) => {
   const errors = trackErrors(page);
   await openWorld(page);
-  await page.getByText("Menu").click();
+  await page.locator("[data-view]").getByText("Menu", { exact: true }).click();
   await page.getByRole("navigation", { name: "Portfolio sections" }).getByRole("link", { name: "Projects", exact: true }).click();
   await expect(page).toHaveURL(/\/projects$/);
   const panel = page.getByRole("dialog");

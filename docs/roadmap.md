@@ -43,7 +43,12 @@ Nowy układ strony, od którego zależy reszta. Na razie bez stylizacji, ale z d
   - **Komputer:** wąski, przypięty sidebar po prawej (ok. 280 px). Na samej górze duży portret, pod nim imię i rola, na dole sidebara małe drzwi do świata. Treść w kolumnie po lewej, nawigacja, język i motyw w górnym pasku nad treścią.
   - **Telefon:** portret na górze treści, nad powitaniem, przewija się razem z treścią (nie jest przypięty). Drzwi w zarezerwowanym, przypiętym pasku na dole ekranu. W górnym pasku imię i menu.
   - Szkice wariantów A-D zostały w historii rozmowy, wybrany jest D z telefonem 2.
-- [ ] Dwa języki: polski i angielski, przełącznik i wybór przy pierwszej wizycie. Struktura adresów (np. `/pl/...`, `/en/...`), treść w dwóch wersjach, `hreflang`. Robimy to na początku, bo zmienia adresy wszystkich stron i stref.
+- [x] Dwa języki: polski i angielski, przełącznik i wybór przy pierwszej wizycie, treść w dwóch wersjach, `hreflang`. (2026-11-22)
+  - **Adresy:** angielski zostaje pod gołymi ścieżkami (`/`, `/projects/...`), polski pod `/pl/...`, z tymi samymi segmentami. Bez przekierowań i bez proxy: każda strona jest statyczna, a `/` nie traci czasu na przekierowanie.
+  - **Przełącznik:** EN | PL w górnym pasku (na telefonie w menu), zwykłe linki do tej samej strony w drugim języku, wybór jest zapamiętany.
+  - **Pierwsza wizyta:** gdy przeglądarka prosi o drugi język, mała notka pyta o niego w tym języku. Strona nigdy sama nie przekierowuje.
+  - **Telefon:** w górnym pasku imię, dzień/noc i Menu (sekcje i język), bo z przełącznikiem języka pasek się nie mieścił.
+  - **Teksty:** interfejs w `lib/i18n/messages.ts`, treść portfolio w `content/` (plik na język, test pilnuje, że mają te same pozycje). Świat 3D też mówi językiem strony: menu, panele, nazwy stref, adresy.
 - [x] Sekcje z treścią zastępczą: o mnie, projekty, doświadczenie, umiejętności, kontakt. (2026-11-22)
 - [x] Pobieranie CV (na razie zastępczy PDF w `public/`). (2026-11-22)
 - [x] Miejsce na portret i drzwi w sekcji powitalnej (na razie statyczne). (2026-11-22)

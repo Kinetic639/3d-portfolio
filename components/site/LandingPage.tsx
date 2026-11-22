@@ -7,6 +7,7 @@ import Door from "./Door";
 import Portrait from "./Portrait";
 import LanguageSwitch from "./LanguageSwitch";
 import LanguagePrompt from "./LanguagePrompt";
+import PhoneMenu from "./PhoneMenu";
 import type { MinimapData } from "@/lib/minimap/minimap";
 import { readMinimapData } from "@/lib/minimap/minimap-store";
 import { readMapIndex } from "@/lib/maps/map-store";
@@ -46,6 +47,7 @@ export default function LandingPage({ locale, featured, featuredSection, minimap
   // The default map's, unless a page names another (a map preview). Read at build time.
   const map = minimap === undefined ? readMinimapData(readMapIndex().defaultMapId) : minimap;
   const inner = featured !== undefined || featuredSection !== undefined;
+  const sectionLinks = CONTENT_SECTIONS.map((section) => ({ href: `${inner ? home : ""}#${section.segment}`, text: text.sections[section.kind] }));
 
   return (
     <div id="landing" className={styles.page}>
@@ -56,13 +58,12 @@ export default function LandingPage({ locale, featured, featuredSection, minimap
           <p className={styles.brand}><Link href={home}>{owner.name}</Link></p>
           <nav aria-label={text.page.sectionsNav} className={styles.navWrap}>
             <ul className={styles.nav}>
-              {CONTENT_SECTIONS.map((section) => (
-                <li key={section.kind}><a href={`${inner ? home : ""}#${section.segment}`}>{text.sections[section.kind]}</a></li>
-              ))}
+              {sectionLinks.map((link) => <li key={link.href}><a href={link.href}>{link.text}</a></li>)}
             </ul>
           </nav>
-          <LanguageSwitch />
+          <span className={styles.wideOnly}><LanguageSwitch /></span>
           <ThemeToggle />
+          <PhoneMenu label={text.page.menu} navLabel={text.page.sectionsNav} links={sectionLinks} />
         </header>
 
       <main id="content" className={styles.main}>

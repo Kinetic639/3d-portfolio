@@ -38,6 +38,23 @@ test("the switch opens the same page in the other language and remembers the cho
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
 });
 
+test("phones fold the sections and the language into the bar's menu, which folds away after a choice", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/pl");
+  await hideDevIndicator(page);
+  const sections = page.locator("#landing").getByRole("navigation", { name: "Sekcje", exact: true });
+  await expect(sections).toBeHidden();
+  await page.locator("#landing").getByText("Menu", { exact: true }).click();
+  await expect(sections).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Język" }).getByRole("link", { name: "English" })).toBeVisible();
+  // The bar fits: nothing in it spills past the screen's edge.
+  const bar = await page.locator("#landing header").evaluate((el) => el.scrollWidth <= el.clientWidth);
+  expect(bar).toBe(true);
+  await sections.getByRole("link", { name: "Projekty" }).click();
+  await expect(page).toHaveURL(/\/pl#projects$/);
+  await expect(sections).toBeHidden();
+});
+
 test("the world speaks Polish on a Polish page, and its addresses keep the prefix", async ({ page }) => {
   await openLanding(page, "/pl/projects");
   await page.getByRole("button", { name: "Wejdź do świata" }).click();

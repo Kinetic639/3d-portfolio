@@ -21,6 +21,7 @@ const en = {
   page: {
     skip: "Skip to content",
     sectionsNav: "Sections",
+    menu: "Menu",
     introduction: "Introduction",
     downloadCv: "Download CV",
     contact: "Contact",
@@ -98,6 +99,7 @@ const pl: Messages = {
   page: {
     skip: "Przejdź do treści",
     sectionsNav: "Sekcje",
+    menu: "Menu",
     introduction: "Powitanie",
     downloadCv: "Pobierz CV",
     contact: "Kontakt",
