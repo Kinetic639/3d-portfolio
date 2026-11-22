@@ -215,6 +215,9 @@ export class GuideDriver {
 
   /** Where to stand for a view: in front of what the camera looks at, on a column it can stand in. */
   private spotFor(target: Point, camera: Point): Point {
+    // Looking at the central platform (the arrival): its place is the middle of it.
+    const home = this.home.position;
+    if (Math.hypot(target.x - home.x, target.z - home.z) < GUIDE.slack) return { x: home.x, z: home.z };
     const spot = guideSpot(target, camera);
     return (this.nav && nearestStandable(this.nav, spot, 4)) ?? spot;
   }

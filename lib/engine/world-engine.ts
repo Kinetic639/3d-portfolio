@@ -24,7 +24,7 @@ import { ModelWindRegistry } from "./model-wind";
 import { ModelStyleRegistry } from "./model-style";
 import { resolveActor, type ActorMovement } from "./actor";
 import type { PlacedActor } from "./entity-meshes";
-import { GUIDE, guideSpot, yawTowards } from "./guide";
+import { GUIDE, yawTowards } from "./guide";
 import { GuideDriver } from "./guide-driver";
 import { buildNavGrid, type Footprint, type NavGrid } from "@/lib/navigation/nav-grid";
 import type { PlacedMapEntity } from "@/lib/maps/map-entities";
@@ -362,19 +362,18 @@ export class WorldEngine {
   }
 
   /**
-   * The guide, as an entity of this world: at the arrival, where the camera rests after the entry,
-   * standing in front and a little aside, facing the camera. Not part of the map file (nor its bake).
+   * The guide, as an entity of this world: in the middle of the central platform (the loader
+   * platform's four columns, where the world grows from), facing the camera's arrival.
+   * Not part of the map file (nor its bake).
    */
   private guideEntity(definition: RuntimeMap, query: WorldQuery): PlacedMapEntity {
-    const spawn = definition.spawnPoints.find((candidate) => candidate.id === definition.defaultSpawnId) ?? definition.spawnPoints[0];
-    const min = query.cellToWorld(definition.playableBounds.minX, 0, definition.playableBounds.minZ);
-    const max = query.cellToWorld(definition.playableBounds.maxX, 0, definition.playableBounds.maxZ);
-    const focus = spawn
-      ? query.cellToWorld(spawn.cameraTarget?.x ?? spawn.position.x, 0, spawn.cameraTarget?.z ?? spawn.position.z)
-      : { x: (min.x + max.x) / 2, z: (min.z + max.z) / 2 };
+    const { width, depth } = definition.dimensions;
+    // The platform is the four columns around the map's centre (width / 2 - 1 and width / 2): its middle is between them.
+    const first = query.cellToWorld(width / 2 - 1, 0, depth / 2 - 1);
+    const second = query.cellToWorld(width / 2, 0, depth / 2);
+    const spot = { x: (first.x + second.x) / 2, z: (first.z + second.z) / 2 };
     const yaw = THREE.MathUtils.degToRad(VISITOR_CAMERA.yawDegrees);
-    const camera = { x: focus.x + Math.sin(yaw) * 20, z: focus.z + Math.cos(yaw) * 20 };
-    const spot = guideSpot({ x: focus.x, z: focus.z }, camera);
+    const camera = { x: spot.x + Math.sin(yaw) * 20, z: spot.z + Math.cos(yaw) * 20 };
     return {
       id: GUIDE.entityId,
       name: "Guide",
