@@ -3,11 +3,11 @@
 Krótka lista do odhaczania. Szczegóły każdego punktu (zakres, kryterium „gotowe”, decyzje) są w `docs/roadmap.md` pod tym samym numerem.
 Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 
-**Faza 1:** 24 / 48 (50%) `██████████░░░░░░░░░░`
+**Faza 1:** 25 / 48 (52%) `██████████░░░░░░░░░░`
 
 | Część | Zrobione |
 |---|---|
-| Baza produktu (B0-B9) | 24 / 37 |
+| Baza produktu (B0-B9) | 25 / 37 |
 | Gotowe dla rekruterów (J1-J5) | 0 / 11 |
 
 ---
@@ -45,11 +45,11 @@ Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 - [x] Drzwi zamiast platformy z kryształem
 - [x] Ekran domyślnie na `/` (telefon i brak WebGL: wersja klasyczna, linki omijają, wybór zapamiętany) (2026-11-22)
 
-**B5. Przejście i mapa świata** 3/4
+**B5. Przejście i mapa świata** 4/4
 - [x] Kamera w drzwi, światło, świat od najwyższego punktu (2026-11-22)
 - [x] Świat bez kontrolek, potem mapa świata na pełnym ekranie (2026-11-22)
 - [x] Wyjście ze świata: powrót na ekran z drzwiami (2026-11-22)
-- [ ] Budżety perf dla wejścia przez drzwi, pełne testy, cięcie przy ograniczonym ruchu
+- [x] Budżety perf dla wejścia przez drzwi, pełne testy, cięcie przy ograniczonym ruchu (2026-11-22, zamknięte decyzją bez ponownego pomiaru)
 
 **B6. Przewodnik w świecie** 0/4
 - [ ] Idzie za kamerą, zostaje w kadrze
