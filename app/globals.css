@@ -115,16 +115,6 @@ html[data-world="world"] {
   overflow: hidden;
 }
 
-/* The loader sits over the bottom of the viewport: leave room under the page's last line.
-   The room stays while the world is in front, so entering does not lay the page out again. */
-html[data-world="warming"] #landing,
-html[data-world="ready"] #landing,
-html[data-world="entering"] #landing,
-html[data-world="world"] #landing,
-html[data-world="leaving"] #landing {
-  padding-bottom: 200px;
-}
-
 /* While the loader waits, the page already has the layer its fade will need, so
    clicking it does not make the browser rasterize the whole page in that frame. */
 html[data-world="ready"] #landing,

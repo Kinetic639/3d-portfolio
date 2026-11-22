@@ -40,8 +40,17 @@ export function trackErrors(page: Page) {
  */
 export async function openLanding(page: Page, path = "/") {
   await page.goto(path);
+  await hideDevIndicator(page);
   await waitForPhase(page, "ready");
   await page.evaluate(() => (window.__worldEngine as unknown as { environment: { wind: { setStilled: (stilled: boolean) => void } } }).environment.wind.setStilled(true));
+}
+
+/**
+ * The development server's Next.js indicator sits in a corner of the page, over whatever is
+ * there (on phones, the door). It does not exist in production; tests take it out of the way.
+ */
+export async function hideDevIndicator(page: Page) {
+  await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
 }
 
 export const enterButton = (page: Page) => page.getByRole("button", { name: /enter the world/i });

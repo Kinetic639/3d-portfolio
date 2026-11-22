@@ -44,10 +44,10 @@ Nowy układ strony, od którego zależy reszta. Na razie bez stylizacji, ale z d
   - **Telefon:** portret na górze treści, nad powitaniem, przewija się razem z treścią (nie jest przypięty). Drzwi w zarezerwowanym, przypiętym pasku na dole ekranu. W górnym pasku imię i menu.
   - Szkice wariantów A-D zostały w historii rozmowy, wybrany jest D z telefonem 2.
 - [ ] Dwa języki: polski i angielski, przełącznik i wybór przy pierwszej wizycie. Struktura adresów (np. `/pl/...`, `/en/...`), treść w dwóch wersjach, `hreflang`. Robimy to na początku, bo zmienia adresy wszystkich stron i stref.
-- [ ] Sekcje z treścią zastępczą: o mnie, projekty, doświadczenie, umiejętności, kontakt.
-- [ ] Pobieranie CV (na razie zastępczy PDF w `public/`).
-- [ ] Miejsce na portret i drzwi w sekcji powitalnej (na razie statyczne).
-- [ ] Responsywność od telefonu po szeroki ekran, motyw dzień i noc.
+- [x] Sekcje z treścią zastępczą: o mnie, projekty, doświadczenie, umiejętności, kontakt. (2026-11-22)
+- [x] Pobieranie CV (na razie zastępczy PDF w `public/`). (2026-11-22)
+- [x] Miejsce na portret i drzwi w sekcji powitalnej (na razie statyczne). (2026-11-22)
+- [x] Responsywność od telefonu po szeroki ekran, motyw dzień i noc. (2026-11-22)
 - [ ] Gotowe, gdy: Lighthouse co najmniej 95 we wszystkich kategoriach na produkcji, a strona działa bez JavaScriptu i bez WebGL.
 
 ### B2. Postać testowa **(razem)**

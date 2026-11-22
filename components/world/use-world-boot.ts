@@ -108,7 +108,8 @@ export function useWorldBoot(mapId: string, canvasRef: RefObject<HTMLCanvasEleme
       ]);
       if (signal.aborted) return;
 
-      const instance = new WorldEngine(canvas, worldBridge, context);
+      // The door in the page is the way in; the original loader at the bottom of the page is not drawn.
+      const instance = new WorldEngine(canvas, worldBridge, context, { landingLoader: false });
       engine = instance;
       // Tests read the engine. Development always exposes it; a production build only when
       // built with NEXT_PUBLIC_WORLD_PROBE=1 (the perf regression test). Inlined at build

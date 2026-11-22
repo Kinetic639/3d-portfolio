@@ -1,0 +1,35 @@
+.portrait {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  /* The frame. */
+  background: linear-gradient(145deg, #a2876a, #6d5a45);
+  box-shadow: var(--shadow-sm);
+}
+
+.canvas {
+  display: block;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  border-radius: 2px;
+  background: radial-gradient(ellipse at 50% 35%, var(--surface), var(--accent-soft));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+.figure {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: var(--muted);
+  opacity: 0.35;
+}
+
+.portrait[data-placement="sidebar"] {
+  width: 100%;
+}
+
+.portrait[data-placement="inline"] {
+  width: min(180px, 48vw);
+  margin: 0 auto 20px;
+}

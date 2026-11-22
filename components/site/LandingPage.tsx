@@ -3,6 +3,8 @@ import ContentArticle from "@/components/content/ContentArticle";
 import SectionArticle from "@/components/content/SectionArticle";
 import PortfolioMap from "@/components/content/PortfolioMap";
 import ThemeToggle from "./ThemeToggle";
+import Door from "./Door";
+import Portrait from "./Portrait";
 import type { MinimapData } from "@/lib/minimap/minimap";
 import { readMinimapData } from "@/lib/minimap/minimap-store";
 import { readMapIndex } from "@/lib/maps/map-store";
@@ -11,10 +13,19 @@ import { CONTENT_SECTIONS, getContentPath, listContentByKind, type ContentItem, 
 import { getSectionPath } from "@/lib/content/places";
 import styles from "./LandingPage.module.css";
 
+/** The placeholder CV until J2 brings the real one. */
+export const CV_PATH = "/cv/michal-stepien-cv.pdf";
+
 /**
  * The complete portfolio as ordinary, server-rendered HTML. It is useful on
  * its own: no JavaScript, WebGL or waiting is needed to read it. The 3D world
- * loads behind it and is offered once it is ready.
+ * loads behind it and is offered once it is ready, through the door.
+ *
+ * Layout (docs/roadmap.md, B1, variant D): content in a column with the
+ * navigation in a bar above it, and a narrow pinned sidebar on the right with
+ * the portrait at the top and the door at the bottom. On phones the portrait
+ * sits at the top of the content and scrolls with it; the door is pinned in a
+ * bar at the bottom, with room kept for it so it covers nothing.
  *
  * On an item's or a section's own URL that item or section is shown first,
  * as the page's main heading, followed by the rest of the portfolio.
@@ -29,25 +40,31 @@ export default function LandingPage({ featured, featuredSection, minimap }: { fe
     <div id="landing" className={styles.page}>
       <a className={styles.skip} href="#content">Skip to content</a>
 
-      <header className={styles.header}>
-        <ThemeToggle className={styles.theme} />
-        {inner ? (
+      <div className={styles.column}>
+        <header className={styles.bar}>
           <p className={styles.brand}><Link href="/">{owner.name}</Link></p>
-        ) : (
-          <h1 className={styles.name}>{owner.name}</h1>
-        )}
-        <p className={styles.role}>{owner.role}</p>
-        {inner ? null : <p className={styles.tagline}>{owner.tagline}</p>}
-        <nav aria-label="Sections">
-          <ul className={styles.nav}>
-            {CONTENT_SECTIONS.map((section) => (
-              <li key={section.kind}><a href={`${inner ? "/" : ""}#${section.segment}`}>{section.label}</a></li>
-            ))}
-          </ul>
-        </nav>
-      </header>
+          <nav aria-label="Sections" className={styles.navWrap}>
+            <ul className={styles.nav}>
+              {CONTENT_SECTIONS.map((section) => (
+                <li key={section.kind}><a href={`${inner ? "/" : ""}#${section.segment}`}>{section.label}</a></li>
+              ))}
+            </ul>
+          </nav>
+          <ThemeToggle />
+        </header>
 
       <main id="content" className={styles.main}>
+        <Portrait placement="inline" />
+        <section className={styles.hero} aria-label="Introduction">
+          {inner ? <p className={styles.heroName}>{owner.name}</p> : <h1 className={styles.heroName}>{owner.name}</h1>}
+          <p className={styles.role}>{owner.role}</p>
+          {inner ? null : <p className={styles.tagline}>{owner.tagline}</p>}
+          <p className={styles.actions}>
+            <a className={styles.primary} href={CV_PATH} download>Download CV</a>
+            <a className={styles.secondary} href={`${inner ? "/" : ""}#contact`}>Contact</a>
+          </p>
+        </section>
+
         {featured ? (
           <section className={styles.featured} aria-label={featured.title}>
             <ContentArticle item={featured} headingLevel={1} />
@@ -100,6 +117,16 @@ export default function LandingPage({ featured, featuredSection, minimap }: { fe
       <footer className={styles.footer}>
         <p>{owner.name}</p>
       </footer>
+      </div>
+
+      <aside className={styles.sidebar} aria-label="Portrait and the way into the 3D world">
+        <div className={styles.sidebarTop}>
+          <Portrait placement="sidebar" />
+          <p className={styles.sidebarName}>{owner.name}</p>
+          <p className={styles.sidebarRole}>{owner.role}</p>
+        </div>
+        <Door />
+      </aside>
     </div>
   );
 }

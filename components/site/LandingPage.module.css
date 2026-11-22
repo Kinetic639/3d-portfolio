@@ -1,9 +1,121 @@
+/*
+ * Variant D (docs/roadmap.md, B1): a content column with its bar, and a
+ * narrow pinned sidebar on the right (portrait at the top, door at the
+ * bottom). Phones: one column, the portrait in the content, the door in a
+ * pinned bottom bar with room kept for it.
+ */
 .page {
+  --sidebar: 280px;
+  --bar: 64px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--sidebar);
   min-height: 100vh;
-  padding: 0 24px 140px;
   background: var(--background);
   color: var(--foreground);
   font: 400 17px/1.6 var(--font-sans);
+}
+
+.column {
+  min-width: 0;
+  padding: 0 32px 64px;
+}
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: var(--bar);
+  margin: 0 -32px;
+  padding: 0 32px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+}
+
+.navWrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  height: 100vh;
+  padding: 24px 22px;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.sidebarTop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.sidebarName {
+  margin: 14px 0 0;
+  font-weight: 700;
+  text-align: center;
+}
+
+.sidebarRole {
+  margin: 0;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* The sidebar's portrait on wide screens, the content's on phones. */
+.main > figure[data-placement="inline"] {
+  display: none;
+}
+
+.hero {
+  padding: 56px 0 32px;
+}
+
+.heroName {
+  margin: 0;
+  font-size: clamp(36px, 6vw, 60px);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 24px 0 0;
+}
+
+.primary,
+.secondary {
+  padding: 10px 18px;
+  border: 1px solid var(--foreground);
+  border-radius: var(--radius-md);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.primary {
+  background: var(--foreground);
+  color: var(--background) !important;
+}
+
+.secondary {
+  color: inherit;
 }
 
 .skip {
@@ -20,28 +132,17 @@
   top: 16px;
 }
 
-.header,
 .main,
 .footer {
-  max-width: 920px;
+  max-width: 820px;
   margin: 0 auto;
-}
-
-.header {
-  padding: 72px 0 32px;
-}
-
-.name {
-  margin: 0;
-  font-size: clamp(36px, 7vw, 64px);
-  line-height: 1.05;
-  letter-spacing: -0.02em;
 }
 
 .brand {
   margin: 0;
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .brand a {
@@ -66,11 +167,17 @@
 
 .nav {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px 20px;
-  margin: 28px 0 0;
+  justify-content: center;
+  gap: 4px 20px;
+  margin: 0;
   padding: 0;
+  overflow-x: auto;
   list-style: none;
+  scrollbar-width: none;
+}
+
+.nav li {
+  white-space: nowrap;
 }
 
 .nav a {
@@ -91,7 +198,8 @@
 .section {
   padding: 28px 0;
   border-top: 1px solid var(--border);
-  scroll-margin-top: 16px;
+  /* Below the sticky bar when a link jumps here. */
+  scroll-margin-top: calc(var(--bar) + 12px);
 }
 
 .sectionTitle {
@@ -192,13 +300,63 @@
   color: var(--muted);
 }
 
-.header {
-  position: relative;
-}
+/* Phones: one column. The portrait leads the content; the door has a pinned bar
+   at the bottom, and the page keeps room for it at its end. */
+@media (max-width: 760px) {
+  .page {
+    --bar: 56px;
+    display: block;
+    padding-bottom: 120px;
+  }
 
-/* Day and night, top right of the header. */
-.theme {
-  position: absolute;
-  top: 24px;
-  right: 0;
+  .column {
+    padding: 0 16px 24px;
+  }
+
+  .bar {
+    gap: 12px;
+    margin: 0 -16px;
+    padding: 0 16px;
+  }
+
+  .nav {
+    justify-content: flex-start;
+  }
+
+  .main > figure[data-placement="inline"] {
+    display: block;
+    margin-top: 24px;
+  }
+
+  .hero {
+    padding-top: 8px;
+    text-align: center;
+  }
+
+  .actions {
+    justify-content: center;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 6;
+    flex-direction: row;
+    height: auto;
+    padding: 8px 16px;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+    background: var(--panel);
+    backdrop-filter: blur(8px);
+  }
+
+  .sidebarTop {
+    display: none;
+  }
+
+  .sidebar > :last-child {
+    flex-direction: row-reverse;
+    gap: 12px;
+    margin-left: auto;
+  }
 }

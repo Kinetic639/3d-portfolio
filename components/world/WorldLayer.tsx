@@ -23,6 +23,7 @@ import { useWorldBoot } from "./use-world-boot";
 import PerfHud from "./PerfHud";
 import WorldMinimap from "./WorldMinimap";
 import SkySwitch from "./SkySwitch";
+import { registerWorldEntry, WORLD_DOOR_ID } from "./entry-control";
 import type { MinimapData } from "@/lib/minimap/minimap";
 import { useUiWork } from "@/lib/perf/ui-work";
 import styles from "./WorldLayer.module.css";
@@ -72,7 +73,6 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
   const worldPath = mapId === defaultMapId ? "/" : `/map/${mapId}`;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const enterButtonRef = useRef<HTMLButtonElement>(null);
   const startLoading = useWorldBoot(mapId, canvasRef, bakes[mapId], serveBakes);
   const phase = useWorldBridge((state) => state.phase);
   const shown = phase === "entering" || phase === "world" || phase === "leaving";
@@ -106,6 +106,9 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
     window.history.pushState(null, "", window.location.pathname);
     worldBridge.commands.emit({ type: "exit", reducedMotion: prefersReducedMotion() });
   }, []);
+
+  // The door on the page is the way in (components/site/Door.tsx).
+  useEffect(() => registerWorldEntry({ enter, load: startLoading }), [enter, startLoading]);
 
   // Back and Forward move between landing entries and world entries.
   useEffect(() => {
@@ -145,7 +148,7 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
       canvasRef.current?.focus({ preventScroll: true });
     }
     if (phase === "ready" && previousPhase.current === "leaving") {
-      enterButtonRef.current?.focus({ preventScroll: true });
+      document.getElementById(WORLD_DOOR_ID)?.focus({ preventScroll: true });
     }
     previousPhase.current = phase;
   }, [phase, panelOpen]);
@@ -318,7 +321,6 @@ export default function WorldLayer({ defaultMapId, bakes, serveBakes, minimaps }
         ) : null}
       </div>
 
-      <EnterPrompt buttonRef={enterButtonRef} onEnter={enter} onLoad={startLoading} />
     </>
   );
 }
@@ -446,62 +448,3 @@ function MinigameHud() {
   );
 }
 
-/**
- * The way in, at the bottom of the landing page. The world layer draws the
- * loader there live (the platform at the centre of the world, with its
- * crystal); this is the button over it, which exists only once the world is
- * warmed up. Before that there is a thin progress line.
- */
-function EnterPrompt({ buttonRef, onEnter, onLoad }: {
-  buttonRef: React.RefObject<HTMLButtonElement | null>;
-  onEnter: () => void;
-  onLoad: () => void;
-}) {
-  useUiWork();
-  const phase = useWorldBridge((state) => state.phase);
-  // Whole percents: at most a hundred renders over the entire load.
-  const percent = useWorldBridge((state) => Math.round(state.progress * 100));
-  const [heldBack, setHeldBack] = useState(false);
-
-  useEffect(() => {
-    // Read after mount: the preference is not known during server rendering.
-    const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
-    const timer = window.setTimeout(() => setHeldBack(connection?.saveData === true), 0);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  if (phase === "loading" || phase === "warming") {
-    return (
-      <div className={styles.progress} aria-hidden="true">
-        <div className={styles.progressBar} style={{ transform: `scaleX(${percent / 100})` }} />
-      </div>
-    );
-  }
-
-  if (phase === "idle" && heldBack) {
-    return (
-      <div className={styles.prompt}>
-        <button type="button" className={styles.enter} onClick={onLoad}>
-          Load the interactive world
-          <span>Data saver is on, so it was not loaded automatically</span>
-        </button>
-      </div>
-    );
-  }
-
-  if (phase !== "ready") return null;
-
-  return (
-    <>
-      <p className={styles.srOnly} role="status">The interactive 3D world is ready.</p>
-      <button
-        ref={buttonRef}
-        type="button"
-        className={styles.loaderButton}
-        onClick={onEnter}
-      >
-        <span className={styles.loaderHint}>Enter the world</span>
-      </button>
-    </>
-  );
-}
