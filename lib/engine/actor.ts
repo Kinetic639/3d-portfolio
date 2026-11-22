@@ -38,6 +38,16 @@ type Resolved = { clip: THREE.AnimationClip; reversed: boolean };
 
 const normalise = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
 const LOOPING = /(idle|fly|walk|run|loop|lobby)/;
+/** How long appearing takes (a pop: grows from nothing, overshoots a little, settles). */
+export const APPEAR_SECONDS = 0.45;
+
+/** Size while appearing, 0..1 of the way: from nothing, a little over, then exactly 1. */
+export function appearSize(progress: number) {
+  const t = THREE.MathUtils.clamp(progress, 0, 1);
+  const eased = 1 - Math.pow(1 - t, 3);
+  return 0.001 + 0.999 * eased + Math.sin(Math.PI * t) * (1 - t) * 0.35;
+}
+
 /** How fast a walking creature's height follows the ground, per second: about 0.1 s to settle on a step. */
 const STEP_RATE = 30;
 
@@ -80,6 +90,8 @@ export class Actor {
   readonly position: THREE.Vector3;
   /** Heading in radians, as the model's rotation about Y. */
   yaw: number;
+  /** Size, as a factor of its own (1 at rest; less while appearing). */
+  size = 1;
   readonly clips: readonly THREE.AnimationClip[];
   private config: ActorConfig;
   private state: ActorState = "idle";
@@ -87,6 +99,10 @@ export class Actor {
   private facing: number | null = null;
   /** The rest of a path being walked (after the current target). */
   private waypoints: THREE.Vector3[] = [];
+  /** A clip to rest in instead of the idle one (arms folded); null for the idle clip. */
+  private idleOverride: Resolved | null = null;
+  /** Seconds into appearing, or null when it is not appearing. */
+  private appearing: number | null = null;
   private readonly mixer: THREE.AnimationMixer;
   private readonly actions = new Map<string, THREE.AnimationAction>();
   private readonly roles: ReturnType<typeof resolveActorClips>;
@@ -126,7 +142,7 @@ export class Actor {
 
   /** True while it travels, turns in place or plays a one-off clip (take-off, landing, preview). */
   get busy() {
-    return this.state !== "idle" || this.facing !== null;
+    return this.state !== "idle" || this.facing !== null || this.appearing !== null;
   }
 
   /** Turns in place to a heading (radians), once it is not travelling. */
@@ -139,6 +155,20 @@ export class Actor {
     this.position.copy(position).add(new THREE.Vector3(0, this.config.groundOffset, 0));
     this.facing = null;
     this.rest();
+  }
+
+  /** Puts it at a point, popping up there from nothing. */
+  appear(position: THREE.Vector3) {
+    this.placeAt(position);
+    this.appearing = 0;
+    this.size = appearSize(0);
+  }
+
+  /** Rests in another looping clip (by name) instead of the idle one, or in the idle one again (null). */
+  setIdle(name: string | null) {
+    const clip = name ? this.clips.find((candidate) => candidate.name === name) : null;
+    this.idleOverride = clip ? { clip, reversed: false } : null;
+    if (this.state === "idle") this.play(this.idleOverride ?? this.roles.idle, true);
   }
 
   setConfig(config: ActorConfig) {
@@ -188,12 +218,18 @@ export class Actor {
     this.curve = null;
     this.sequence = null;
     this.state = "idle";
-    this.play(this.roles.idle, true);
+    this.play(this.idleOverride ?? this.roles.idle, true);
   }
 
   /** Moves and animates. `animate` false skips the skeleton (out of view); movement still advances. */
   update(delta: number, groundAt: (x: number, z: number) => number, animate = true) {
     if (animate) this.mixer.update(delta);
+    if (this.appearing !== null) {
+      this.appearing += delta;
+      const progress = this.appearing / APPEAR_SECONDS;
+      this.size = progress >= 1 ? 1 : appearSize(progress);
+      if (progress >= 1) this.appearing = null;
+    }
     if (!this.target) {
       // Turning in place also while a clip plays where it stands (a gesture towards something).
       if (this.facing !== null && (this.state === "idle" || this.state === "preview")) {
