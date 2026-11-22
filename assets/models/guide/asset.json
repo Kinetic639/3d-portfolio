@@ -1,0 +1,27 @@
+{
+  "name": "Guide (test)",
+  "category": "creatures",
+  "description": "Test guide for the portrait and the world until the final character (docs/characters.md). Quaternius, CC0: the Peasant outfit with the head of the Universal Base Characters' Superhero, clips from the Universal Animation Library. Built by scripts/guide/compose.mjs. No facial rig: the head and neck turn, the eyes look around by moving their texture.",
+  "scale": 1,
+  "rotationY": 0,
+  "collision": "none",
+  "animation": "Idle",
+  "animations": ["Idle", "Walk", "Run", "Talk", "Interact", "PickUp", "SitDown", "Sitting", "StandUp", "Yes", "No", "Call", "ArmsFolded"],
+  "maxTextureSize": 1024,
+  "tags": ["character", "guide", "test", "animated"],
+  "style": {
+    "shading": "toon",
+    "outline": true,
+    "outlineScale": 0.25,
+    "contactShadow": false,
+    "castShadow": true
+  },
+  "actor": {
+    "walkSpeed": 1.3,
+    "runSpeed": 3,
+    "turnSpeed": 8,
+    "crossfade": 0.25,
+    "groundOffset": 0,
+    "forwardYaw": 0
+  }
+}

@@ -413,7 +413,7 @@ test("models from the asset pipeline appear in the object palette with a picture
   const crate = leftDock(page).getByRole("option", { name: /Crate \(sample\)/ });
   // The picture is rendered in the browser from the model itself.
   await expect(crate.locator("img")).toHaveAttribute("src", /^data:image\/png/, { timeout: 20_000 });
-  await expect(leftDock(page).getByRole("option", { name: /Soldier/ })).toBeVisible();
+  await expect(leftDock(page).getByRole("option", { name: /Guide \(test\)/ })).toBeVisible();
 
   await crate.click();
   const first = await columnTop(page, 20, 20);
