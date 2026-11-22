@@ -68,7 +68,8 @@ Nowy układ strony, od którego zależy reszta. Na razie bez stylizacji, ale z d
 
 Jeden darmowy model do portretu i do świata (vision.md, rozdział 5).
 
-- [ ] Wymagania: zrigowany humanoid, kość głowy (i najlepiej oczu), animacje bezczynności, chodu, biegu i machania, do około 20 tys. trójkątów, licencja pozwalająca na publiczne użycie (najlepiej CC0).
+- [x] Wymagania i porównanie kandydatów: `docs/characters.md` (2026-11-22). Rekomendacja: Quaternius Universal Base Characters z Universal Animation Library (CC0), rezerwa: KayKit.
+  - Pierwotne wymagania: zrigowany humanoid, kość głowy (i najlepiej oczu), animacje bezczynności, chodu, biegu i machania, do około 20 tys. trójkątów, licencja pozwalająca na publiczne użycie (najlepiej CC0).
 - [ ] Wybór modelu spośród kandydatów. Przygotuję porównanie: źródło, licencja, wygląd, rozmiar, animacje. Kandydaci do sprawdzenia: paczki CC0 Quaternius i Kenney, postacie i animacje z Mixamo. **(razem)**
 - [ ] Model w pipeline'ie `pnpm assets` (optymalizacja, klipy animacji, ustawienia aktora).
 
