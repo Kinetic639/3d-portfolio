@@ -132,7 +132,7 @@ export default function LandingPage({ locale, featured, featuredSection, minimap
       </footer>
       </div>
 
-      <aside className={styles.sidebar} aria-label={text.page.sidebar}>
+      <aside className={styles.sidebar} data-door-bar aria-label={text.page.sidebar}>
         <div className={styles.sidebarTop}>
           <Portrait placement="sidebar" />
           <p className={styles.sidebarName}>{owner.name}</p>

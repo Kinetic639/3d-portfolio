@@ -181,6 +181,10 @@ test("without WebGL the landing page works and no entry element appears", async 
   await expect(enterButton(page)).toHaveCount(0);
   // Missing WebGL is not the visitor's problem: no warning, no broken control.
   await expect(page.getByText(/unavailable|failed|not supported/i)).toHaveCount(0);
+  // On phones no empty door bar stays pinned at the bottom, and the page keeps no room for it.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator("[data-door-bar]")).toBeHidden();
+  expect(await page.locator("#landing").evaluate((el) => getComputedStyle(el).paddingBottom)).toBe("0px");
   expect(errors).toEqual([]);
 });
 

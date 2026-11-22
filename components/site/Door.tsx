@@ -36,7 +36,7 @@ export default function Door() {
   const label = ready ? text.enter : state === "held" ? text.load : text.loading;
 
   return (
-    <div className={styles.door} data-state={state} style={{ "--progress": percent / 100 } as React.CSSProperties}>
+    <div className={styles.door} data-world-door data-state={state} style={{ "--progress": percent / 100 } as React.CSSProperties}>
       <button
         id={WORLD_DOOR_ID}
         type="button"

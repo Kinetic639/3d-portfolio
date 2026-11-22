@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import SiteShell from "@/components/site/SiteShell";
 import { messages } from "@/lib/i18n/messages";
+import { siteUrl } from "@/lib/site-url";
 
 export const metadata: Metadata = {
+  // Canonical and hreflang URLs are absolute against this.
+  metadataBase: siteUrl(),
   title: messages("pl").meta.title,
   description: messages("pl").meta.description,
 };

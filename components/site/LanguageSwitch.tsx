@@ -24,11 +24,11 @@ export default function LanguageSwitch() {
           href={pathInLocale(pathname, candidate)}
           hrefLang={candidate}
           lang={candidate}
-          aria-label={LOCALE_NAMES[candidate]}
           aria-current={candidate === locale ? "page" : undefined}
           onClick={() => rememberLocaleChoice(candidate)}
         >
-          {candidate.toUpperCase()}
+          {/* The name starts with what is on screen (EN), so voice control finds it; the language's full name follows for screen readers. */}
+          {candidate.toUpperCase()}<span className={styles.srOnly}> {LOCALE_NAMES[candidate]}</span>
         </a>
       ))}
     </nav>

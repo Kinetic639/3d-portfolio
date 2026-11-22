@@ -55,6 +55,26 @@ test("phones fold the sections and the language into the bar's menu, which folds
   await expect(sections).toBeHidden();
 });
 
+test.describe("without JavaScript", () => {
+  test.use({ javaScriptEnabled: false });
+
+  test("the site works: no door to a world that cannot load, the switch and the phone menu are plain links", async ({ page }) => {
+    await page.goto("/pl");
+    await expect(page.locator("html")).toHaveAttribute("lang", "pl");
+    await expect(page.locator("[data-world-door]")).toBeHidden();
+    await page.getByRole("navigation", { name: "Język" }).getByRole("link", { name: /EN/ }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator("h1")).toHaveText("Michał Stępień");
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    // No empty door bar is pinned at the bottom.
+    await expect(page.locator("[data-door-bar]")).toBeHidden();
+    await page.locator("#landing summary").click();
+    await page.locator("#landing details").getByRole("navigation", { name: "Sections" }).getByRole("link", { name: "Projects" }).click();
+    await expect(page).toHaveURL(/#projects$/);
+  });
+});
+
 test("the world speaks Polish on a Polish page, and its addresses keep the prefix", async ({ page }) => {
   await openLanding(page, "/pl/projects");
   await page.getByRole("button", { name: "Wejdź do świata" }).click();

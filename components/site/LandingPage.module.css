@@ -417,6 +417,15 @@
     justify-content: center;
   }
 
+  /* No door (no WebGL, or no JavaScript): no bar either, and no room kept for it. */
+  .page:not(:has([data-world-door])) {
+    padding-bottom: 0;
+  }
+
+  .sidebar:not(:has([data-world-door])) {
+    display: none;
+  }
+
   .sidebar {
     position: fixed;
     inset: auto 0 0 0;

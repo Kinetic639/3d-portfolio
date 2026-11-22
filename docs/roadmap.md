@@ -54,6 +54,9 @@ Nowy układ strony, od którego zależy reszta. Na razie bez stylizacji, ale z d
 - [x] Miejsce na portret i drzwi w sekcji powitalnej (na razie statyczne). (2026-11-22)
 - [x] Responsywność od telefonu po szeroki ekran, motyw dzień i noc. (2026-11-22)
 - [ ] Gotowe, gdy: Lighthouse co najmniej 95 we wszystkich kategoriach na produkcji, a strona działa bez JavaScriptu i bez WebGL.
+  - **Stan (2026-11-22, lokalny serwer produkcyjny, EN i PL, komputer i telefon):** dostępność, dobre praktyki i SEO po 100. Bez JavaScriptu i bez WebGL strona działa (testy e2e to pilnują).
+  - **Wydajność:** nie zmierzona samym Lighthouse, tylko szacunek ze śladów Chrome. Komputer: LCP 0,2 s, CLS 0, TBT do 109 ms, czyli około 98. Telefon (wolne 4G, procesor 4×): LCP 1,8 s, CLS 0, TBT do 339 ms, czyli około 90.
+  - **Co zabiera punkty na telefonie:** hydratacja strony (jedno zadanie ok. 250 ms) i ładowanie świata w tle (zadania 60-115 ms). Do decyzji, potem pomiar na produkcji.
 
 ### B2. Postać testowa **(razem)**
 
