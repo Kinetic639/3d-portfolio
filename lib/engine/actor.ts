@@ -38,6 +38,8 @@ type Resolved = { clip: THREE.AnimationClip; reversed: boolean };
 
 const normalise = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
 const LOOPING = /(idle|fly|walk|run|loop|lobby)/;
+/** How fast a walking creature's height follows the ground, per second: about 0.1 s to settle on a step. */
+const STEP_RATE = 30;
 
 /** The best clip for a role: name contains the role; long ambient loops ("village", "lobby") last. */
 export function resolveActorClips(clips: readonly THREE.AnimationClip[]) {
@@ -81,6 +83,8 @@ export class Actor {
   readonly clips: readonly THREE.AnimationClip[];
   private config: ActorConfig;
   private state: ActorState = "idle";
+  /** A heading to turn to in place, while idle (the guide facing the visitor); null when there is none. */
+  private facing: number | null = null;
   private readonly mixer: THREE.AnimationMixer;
   private readonly actions = new Map<string, THREE.AnimationAction>();
   private readonly roles: ReturnType<typeof resolveActorClips>;
@@ -118,9 +122,21 @@ export class Actor {
     return { state: this.state, animation: this.currentName, target: this.target ? this.target.clone() : null };
   }
 
-  /** True while it travels or plays a one-off clip (take-off, landing, preview). */
+  /** True while it travels, turns in place or plays a one-off clip (take-off, landing, preview). */
   get busy() {
-    return this.state !== "idle";
+    return this.state !== "idle" || this.facing !== null;
+  }
+
+  /** Turns in place to a heading (radians), once it is not travelling. */
+  turnTo(yaw: number) {
+    this.facing = yaw;
+  }
+
+  /** Puts it at a point at once (no travel), resting. */
+  placeAt(position: THREE.Vector3) {
+    this.position.copy(position).add(new THREE.Vector3(0, this.config.groundOffset, 0));
+    this.facing = null;
+    this.rest();
   }
 
   setConfig(config: ActorConfig) {
@@ -129,6 +145,7 @@ export class Actor {
 
   /** Sends it to a point on the ground. */
   goTo(destination: THREE.Vector3, movement: ActorMovement) {
+    this.facing = null;
     this.target = destination.clone().add(new THREE.Vector3(0, this.config.groundOffset, 0));
     this.sequence = null;
     if (movement === "flight") {
@@ -167,7 +184,18 @@ export class Actor {
   /** Moves and animates. `animate` false skips the skeleton (out of view); movement still advances. */
   update(delta: number, groundAt: (x: number, z: number) => number, animate = true) {
     if (animate) this.mixer.update(delta);
-    if (!this.target) return;
+    if (!this.target) {
+      // Turning in place also while a clip plays where it stands (a gesture towards something).
+      if (this.facing !== null && (this.state === "idle" || this.state === "preview")) {
+        this.yaw = dampAngle(this.yaw, this.facing, this.config.turnSpeed, delta);
+        const left = THREE.MathUtils.euclideanModulo(this.facing - this.yaw + Math.PI, Math.PI * 2) - Math.PI;
+        if (Math.abs(left) < 0.01) {
+          this.yaw = this.facing;
+          this.facing = null;
+        }
+      }
+      return;
+    }
     if (this.state === "walking" || this.state === "running") this.walk(delta, groundAt);
     else if (this.state === "flying") this.fly(delta);
   }
@@ -195,7 +223,9 @@ export class Actor {
     }
     this.step.multiplyScalar(1 / remaining);
     this.next.copy(this.position).addScaledVector(this.step, distance);
-    this.next.y = groundAt(this.next.x, this.next.z) + this.config.groundOffset;
+    // Up and down steps over about a tenth of a second instead of in one frame.
+    const ground = groundAt(this.next.x, this.next.z) + this.config.groundOffset;
+    this.next.y = this.position.y + (ground - this.position.y) * (1 - Math.exp(-STEP_RATE * delta));
     this.position.copy(this.next);
     this.face(this.step, delta);
   }

@@ -24,6 +24,9 @@ import { ModelWindRegistry } from "./model-wind";
 import { ModelStyleRegistry } from "./model-style";
 import { resolveActor, type ActorMovement } from "./actor";
 import type { PlacedActor } from "./entity-meshes";
+import { GUIDE, guideSpot, yawTowards } from "./guide";
+import { GuideDriver } from "./guide-driver";
+import type { PlacedMapEntity } from "@/lib/maps/map-entities";
 import type { ActorHud, ZoneInfo } from "@/lib/bridge/world-bridge";
 import { zoneSection } from "@/lib/content/places";
 import type { ContentSection } from "@/lib/content/content";
@@ -134,6 +137,9 @@ export class WorldEngine {
   private modelStyles: ModelStyleRegistry | null = null;
   /** The creature the visitor chose: clicks on the ground send it there. */
   private chosenActor: PlacedActor | null = null;
+  /** The guide (B6): added to every world whose models include it; it follows the camera. */
+  private guide: GuideDriver | null = null;
+  private cameraWasMoving = false;
   /** Ground of the loaded map, for sending creatures. */
   private query: WorldQuery | null = null;
   private actorMovement: ActorHud["movement"] = "auto";
@@ -348,10 +354,45 @@ export class WorldEngine {
     options.onProgress?.(1);
   }
 
+  /**
+   * The guide, as an entity of this world: at the arrival, where the camera rests after the entry,
+   * standing in front and a little aside, facing the camera. Not part of the map file (nor its bake).
+   */
+  private guideEntity(definition: RuntimeMap, query: WorldQuery): PlacedMapEntity {
+    const spawn = definition.spawnPoints.find((candidate) => candidate.id === definition.defaultSpawnId) ?? definition.spawnPoints[0];
+    const min = query.cellToWorld(definition.playableBounds.minX, 0, definition.playableBounds.minZ);
+    const max = query.cellToWorld(definition.playableBounds.maxX, 0, definition.playableBounds.maxZ);
+    const focus = spawn
+      ? query.cellToWorld(spawn.cameraTarget?.x ?? spawn.position.x, 0, spawn.cameraTarget?.z ?? spawn.position.z)
+      : { x: (min.x + max.x) / 2, z: (min.z + max.z) / 2 };
+    const yaw = THREE.MathUtils.degToRad(VISITOR_CAMERA.yawDegrees);
+    const camera = { x: focus.x + Math.sin(yaw) * 20, z: focus.z + Math.cos(yaw) * 20 };
+    const spot = guideSpot({ x: focus.x, z: focus.z }, camera);
+    return {
+      id: GUIDE.entityId,
+      name: "Guide",
+      entityType: "model",
+      primitiveType: "box",
+      transform: {
+        position: { x: spot.x, y: groundHeight(query, spot.x, spot.z), z: spot.z },
+        rotation: { x: 0, y: yawTowards(spot, camera), z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      },
+      placement: { anchor: "bottom", snapToGrid: false, surfaceAttached: true, surfaceOffset: 0 },
+      appearance: { color: "#9ca3af", visibleAtRuntime: true, visibleInEditor: true },
+      collisionMode: "none",
+      assetReference: GUIDE.modelId,
+      tags: ["model", "guide"],
+      locked: true,
+    } as PlacedMapEntity;
+  }
+
   /** The models the map's objects use, loaded before the map is shown so warm-up covers them. */
   private async loadModels(definition: RuntimeMap) {
     const models = await getModelLibrary();
-    await models.ensureLoaded(models.idsFor(definition.entities));
+    // The guide is not on the map: the engine adds it (installGuide), so its model is loaded here too.
+    const guide = models.entry(GUIDE.modelId) ? [GUIDE.modelId] : [];
+    await models.ensureLoaded([...models.idsFor(definition.entities), ...guide]);
     return models;
   }
 
@@ -382,7 +423,16 @@ export class WorldEngine {
       },
       groundAt: (x: number, z: number) => groundHeight(query, x, z),
     };
-    this.entities = buildEntityLayer(definition.entities, models, { wind: wind.options(), style: this.modelStyles.options(), actors });
+    const guideEntity = models.entry(GUIDE.modelId) ? this.guideEntity(definition, query) : null;
+    const entities = guideEntity ? [...definition.entities, guideEntity] : definition.entities;
+    this.entities = buildEntityLayer(entities, models, { wind: wind.options(), style: this.modelStyles.options(), actors });
+    const guidePlaced = this.entities.actors.find((placed) => placed.entityId === GUIDE.entityId) ?? null;
+    this.guide = guidePlaced && guideEntity
+      ? new GuideDriver(guidePlaced, (x, z) => groundHeight(query, x, z), {
+        position: new THREE.Vector3(guideEntity.transform.position.x, guideEntity.transform.position.y, guideEntity.transform.position.z),
+        yaw: guideEntity.transform.rotation.y,
+      })
+      : null;
     this.interaction = new InteractionLayer({
       map: definition,
       query,
@@ -469,6 +519,7 @@ export class WorldEngine {
       uniforms.uLoaderMotion.value = this.bridge.store.getState().phase === "ready" ? 0 : 1;
     }
     this.entities?.setPopTime(-1);
+    this.guide?.reset();
     if (this.interaction) this.interaction.group.visible = false;
     this.rig.setOrientation(VISITOR_CAMERA.yawDegrees, VISITOR_CAMERA.pitchDegrees, true);
     this.rig.lookAt(this.spawn.x, this.spawn.z, this.rig.curveDistance(VISITOR_CAMERA.initialDistance), true);
@@ -877,6 +928,7 @@ export class WorldEngine {
         break;
       case "clear-focus":
         this.interaction?.setFocused(null);
+        this.guide?.attend(null);
         if (this.viewBeforeFocus) {
           this.rig.lookAt(this.viewBeforeFocus.x, this.viewBeforeFocus.z, this.viewBeforeFocus.distance);
           this.viewBeforeFocus = null;
@@ -899,6 +951,7 @@ export class WorldEngine {
     // Remember where the visitor was only for the first focus in a row.
     this.viewBeforeFocus ??= this.rig.getGoal();
     this.interaction?.setFocused(item.id);
+    this.guide?.attend({ x: item.focus.x, z: item.focus.z });
     this.rig.focusOn(item.focus.x, item.focus.z, Math.min(this.rig.getGoal().distance, this.rig.curveDistance(FOCUS_DISTANCE)), inset);
   }
 
@@ -1100,9 +1153,22 @@ export class WorldEngine {
     this.updateFrustum();
     const windy = this.environment.wind.active && (this.entities?.windInView(this.frustum) ?? false);
     const skyChanging = this.environment.changingSky;
-    const othersAnimating = (this.entities?.update(delta, this.frustum) ?? false) || waving || bursting || skyChanging;
-    const animating = othersAnimating || windy;
-    this.windOnly = windy && !othersAnimating && !cameraMoving && this.entry === null;
+    // The guide decides where to go once the camera has been still for a moment (it follows where the visitor stops).
+    if (this.guide && this.bridge.store.getState().phase === "world" && !this.entry) {
+      const goal = this.rig.getGoal();
+      const camera = this.rig.camera.position;
+      const paused = this.chosenActor === this.guide.placed || (this.minigames?.playing ?? false);
+      this.guide.update(now, cameraMoving, { x: goal.x, z: goal.z }, { x: camera.x, z: camera.z }, paused);
+      // The camera just stopped: one frame after the guide's wait, so it can set off even if nothing else draws.
+      if (this.cameraWasMoving && !cameraMoving) window.setTimeout(() => this.invalidate(), GUIDE.restMs + 30);
+    }
+    this.cameraWasMoving = cameraMoving;
+    // Creatures idling in view are like the wind: half rate, and still when motion is held (reduced motion, still tests).
+    const entityFrames = this.entities?.update(delta, this.frustum, !this.environment.wind.isStilled) ?? "none";
+    const othersAnimating = entityFrames === "full" || waving || bursting || skyChanging;
+    const ambient = windy || entityFrames === "ambient";
+    const animating = othersAnimating || ambient;
+    this.windOnly = ambient && !othersAnimating && !cameraMoving && this.entry === null;
     if (this.chosenActor) {
       const status = this.chosenActor.actor.status;
       if (this.followingActor) {
@@ -1179,6 +1245,8 @@ export class WorldEngine {
     if (!sample.done) return true;
 
     this.entry = null;
+    // The guide turns to the visitor and waves.
+    this.guide?.greet({ x: this.rig.camera.position.x, z: this.rig.camera.position.z });
     // The camera is exactly where the rig rests; hand it back.
     const goal = this.rig.getGoal();
     this.startView = { ...goal };
@@ -1505,8 +1573,7 @@ function firstColumn(world: VoxelWorld, zoneId: number) {
 }
 
 /** Ground height at a world position (the query works in grid columns). */
+/** Where a creature stands (the exact surface: slabs, stairs, slopes; a curb's lip is stepped over). */
 function groundHeight(query: WorldQuery, x: number, z: number) {
-  const column = Math.min(query.width - 1, Math.max(0, Math.floor(x + query.width / 2)));
-  const row = Math.min(query.depth - 1, Math.max(0, Math.floor(z + query.depth / 2)));
-  return query.surfaceHeight(column, row);
+  return query.groundAt(x, z);
 }

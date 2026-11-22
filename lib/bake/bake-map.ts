@@ -1,3 +1,5 @@
+import { getTerrainSurfaceAt } from "@/lib/world/surface-query";
+import { GROUND_UNITS, NO_GROUND } from "@/lib/engine/world-query";
 import { createLoadedMapState, type MapDefinition } from "@/lib/maps/map-definition";
 import { buildSurfaceChunkMesh, collectSurfaceCells } from "@/lib/terrain/surface-mesher";
 import type { SurfaceCell } from "@/lib/terrain/surface-faces";
@@ -81,6 +83,13 @@ export async function bakeMap(definition: MapDefinition): Promise<BakeResult> {
       heights[x + width * z] = top === null ? -128 : top + 1;
     }
   }
+  const grounds = new Int16Array(width * depth);
+  for (let z = 0; z < depth; z += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const surface = getTerrainSurfaceAt(world, x, z);
+      grounds[x + width * z] = surface.valid ? Math.round(surface.surfaceY * GROUND_UNITS) : NO_GROUND;
+    }
+  }
 
   const stats: BakeStats = { sourceFaces, faces: faceCount, cells: cells.length, tiles: tiles.length, bytes: 0, bakeMs: 0 };
   const header: BakedHeader = {
@@ -102,6 +111,7 @@ export async function bakeMap(definition: MapDefinition): Promise<BakeResult> {
     },
     tiles,
     heights: writer.add(heights),
+    grounds: writer.add(grounds),
     zones: writer.add(world.zones),
     voxelZones: voxelZones.map((zone) => writeVoxelZone(writer, world, zone)),
     stats,

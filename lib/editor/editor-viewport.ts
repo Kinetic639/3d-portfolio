@@ -618,7 +618,8 @@ export class EditorViewport {
     this.viewProjection.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.viewProjection);
     // Animated models out of view are not animated and do not ask for frames.
-    let animating = this.entities.update(delta, this.frustum);
+    // The editor animates idling creatures at full rate (the wind is its half-rate case).
+    let animating = this.entities.update(delta, this.frustum, !this.environment.wind.isStilled) !== "none";
     if (this.environment.wind.active && this.entities.group.visible && this.entities.windInView(this.frustum)) animating = true;
     this.environment.update(this.lastTickAt / 1000, delta);
     if (this.renderer.shadowMap.enabled) {

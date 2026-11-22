@@ -39,7 +39,13 @@ export type EntityLayer = {
    * are not animated and do not ask for frames. Returns true when frames
    * must keep coming (something animates in view, or a creature travels).
    */
-  update: (deltaSeconds: number, frustum?: THREE.Frustum) => boolean;
+  /**
+   * Advances animated models and creatures. Returns what that needs: "full" frames (something travels,
+   * turns or plays a clip, or an animated model is in view), "ambient" ones (only creatures idling in view,
+   * which may be drawn at half rate like the wind), or "none". With `ambient` false (reduced motion,
+   * still scenes in tests) idling creatures hold still.
+   */
+  update: (deltaSeconds: number, frustum?: THREE.Frustum, ambient?: boolean) => "none" | "ambient" | "full";
   /** Creatures that can be sent places, one per placed instance of a model with `actor` settings. */
   actors: ReadonlyArray<PlacedActor>;
   /** Seconds since objects started popping up: negative hides them all, POP_COMPLETE shows them at rest. */
@@ -574,27 +580,30 @@ export function buildEntityLayer(entities: PlacedMapEntity[], models?: ModelLibr
       faded = new Set(next);
       return changed;
     },
-    update(deltaSeconds, frustum) {
-      let frames = false;
+    update(deltaSeconds, frustum, ambient = true) {
+      let full = false;
+      let idling = false;
       const settled = popTime.value >= POP_COMPLETE;
       for (const item of animated) {
         if (item.actor) {
           const placed = actors.find((candidate) => candidate.actor === item.actor)!;
           const inView = !frustum || frustum.intersectsSphere(placed.bounds());
-          item.actor.update(deltaSeconds, options.actors!.groundAt, inView);
+          const busy = item.actor.busy;
+          item.actor.update(deltaSeconds, options.actors!.groundAt, inView && (busy || ambient));
           // Once everything has popped up, the creature's own position and heading place it.
           if (settled && item.pose) {
             item.holder.matrix.copy(item.pose());
             item.holder.matrixWorldNeedsUpdate = true;
           }
-          if (inView || item.actor.busy) frames = true;
+          if (busy || item.actor.busy) full = true;
+          else if (inView && ambient) idling = true;
         } else if (item.mixer) {
           if (frustum && !frustum.intersectsSphere(item.sphere)) continue;
           item.mixer.update(deltaSeconds);
-          frames = true;
+          full = true;
         }
       }
-      return frames;
+      return full ? "full" : idling ? "ambient" : "none";
     },
     actors,
     popDuration,

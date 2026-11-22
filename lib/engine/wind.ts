@@ -100,6 +100,11 @@ export class Wind {
     this.sync();
   }
 
+  /** Whether everything is held still (reduced motion, or a test that needs a still scene). */
+  get isStilled() {
+    return this.stilled;
+  }
+
   /** Holds everything still, e.g. for visitors who prefer reduced motion. */
   setStilled(stilled: boolean) {
     this.stilled = stilled;
