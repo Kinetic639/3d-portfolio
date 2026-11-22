@@ -4,6 +4,31 @@ import { findPath, nearestStandable, pathLength } from "@/lib/navigation/path";
 import type { PlacedActor } from "./entity-meshes";
 import { GUIDE, guideSpot, yawTowards, type Point } from "./guide";
 
+/**
+ * A soft dark patch under the guide's feet, which goes where it goes: it stands in for a cast shadow.
+ * Casting into the shadow map, the skinned guide held the day/night switch to 30 fps (traced).
+ */
+function makeFootShadow() {
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d")!;
+  const gradient = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0, "rgba(0,0,0,0.55)");
+  gradient.addColorStop(0.55, "rgba(0,0,0,0.3)");
+  gradient.addColorStop(1, "rgba(0,0,0,0)");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.8), material);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.name = "guide-foot-shadow";
+  mesh.renderOrder = 1;
+  return mesh;
+}
+
 const angleBetween = (a: number, b: number) => Math.abs(THREE.MathUtils.euclideanModulo(b - a + Math.PI, Math.PI * 2) - Math.PI);
 
 /**
@@ -22,6 +47,8 @@ export class GuideDriver {
   private restingSince = 0;
   private attention: Point | null = null;
   private reacted = false;
+  /** The patch under its feet; the engine adds it to the scene. */
+  readonly footShadow = makeFootShadow();
 
   constructor(
     readonly placed: PlacedActor,
@@ -29,6 +56,19 @@ export class GuideDriver {
     private readonly nav: NavGrid | null,
     private readonly home: { position: THREE.Vector3; yaw: number },
   ) {}
+
+  /** Keeps the patch under the feet (each frame the engine draws). */
+  syncFootShadow() {
+    const actor = this.placed.actor;
+    this.footShadow.position.set(actor.position.x, this.groundAt(actor.position.x, actor.position.z) + 0.02, actor.position.z);
+    this.footShadow.rotation.z = -actor.yaw;
+  }
+
+  dispose() {
+    this.footShadow.geometry.dispose();
+    (this.footShadow.material as THREE.MeshBasicMaterial).map?.dispose();
+    (this.footShadow.material as THREE.MeshBasicMaterial).dispose();
+  }
 
   /** Back where it starts (the world was left; the next entry finds it at the arrival). */
   reset() {

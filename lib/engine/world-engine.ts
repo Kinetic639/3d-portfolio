@@ -452,6 +452,10 @@ export class WorldEngine {
         yaw: guideEntity.transform.rotation.y,
       })
       : null;
+    if (this.guide) {
+      this.guide.syncFootShadow();
+      this.scene.add(this.guide.footShadow);
+    }
     this.interaction = new InteractionLayer({
       map: definition,
       query,
@@ -883,6 +887,12 @@ export class WorldEngine {
       this.entities.dispose();
       this.entities = null;
     }
+    if (this.guide) {
+      this.scene.remove(this.guide.footShadow);
+      this.guide.dispose();
+      this.guide = null;
+    }
+    this.nav = null;
     this.modelStyles?.dispose();
     this.modelStyles = null;
     this.chosenActor = null;
@@ -1192,6 +1202,11 @@ export class WorldEngine {
     this.cameraWasMoving = cameraMoving;
     // Creatures idling in view are like the wind: half rate, and still when motion is held (reduced motion, still tests).
     const entityFrames = this.entities?.update(delta, this.frustum, !this.environment.wind.isStilled) ?? "none";
+    if (this.guide) {
+      this.guide.syncFootShadow();
+      // Not while the world grows during the entry: the guide pops up with the other objects, then its patch shows.
+      this.guide.footShadow.visible = this.entry === null;
+    }
     const othersAnimating = entityFrames === "full" || waving || bursting || skyChanging;
     const ambient = windy || entityFrames === "ambient";
     const animating = othersAnimating || ambient;
