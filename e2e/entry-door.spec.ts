@@ -4,6 +4,8 @@ import { hideDevIndicator, waitForPhase } from "./helpers";
 // Prototype (docs/roadmap.md, B4): the entry screen with the door, only with ?entry=door.
 
 test("the door is the world's loader; its note offers the CV and the classic page; through it is the world", async ({ page }) => {
+  // Three page loads and the whole entry: longer than the default.
+  test.setTimeout(90_000);
   await page.goto("/");
   await hideDevIndicator(page);
   await waitForPhase(page, "ready");

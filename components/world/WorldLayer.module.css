@@ -506,6 +506,7 @@
   gap: 10px;
   width: min(860px, 100%);
   max-height: 100%;
+  overflow: hidden;
   padding: 22px 22px 18px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -525,8 +526,9 @@
   color: var(--muted);
 }
 
+/* The map is about square: sized by the height left under the title and above the button, so the card never overflows (and no scrollbar comes and goes). */
 .worldMapCard figure {
-  width: min(100%, calc((100vh - 230px) * 1.25));
+  width: min(100%, calc(100vh - 250px));
   margin: 0;
 }
 
