@@ -3,11 +3,11 @@
 Krótka lista do odhaczania. Szczegóły każdego punktu (zakres, kryterium „gotowe”, decyzje) są w `docs/roadmap.md` pod tym samym numerem.
 Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 
-**Faza 1:** 1 / 46 (2%) `░░░░░░░░░░░░░░░░░░░░`
+**Faza 1:** 2 / 46 (4%) `░░░░░░░░░░░░░░░░░░░░`
 
 | Część | Zrobione |
 |---|---|
-| Baza produktu (B0-B9) | 1 / 35 |
+| Baza produktu (B0-B9) | 2 / 35 |
 | Gotowe dla rekruterów (J1-J5) | 0 / 11 |
 
 ---
@@ -17,8 +17,8 @@ Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 **B0. Porządki** 1/1
 - [x] Serwer 3301, kopia `orig`, repo na `main`, stare gałęzie (2026-11-22)
 
-**B1. Szkielet strony** 0/7
-- [ ] Układ: warianty szkicu, wybór (portret i drzwi przypięte)
+**B1. Szkielet strony** 1/7
+- [x] Układ: wariant D, telefon z portretem w treści (2026-11-22)
 - [ ] Dwa języki: PL i EN, przełącznik, adresy, `hreflang`
 - [ ] Sekcje z treścią zastępczą
 - [ ] Pobieranie CV (zastępczy PDF)

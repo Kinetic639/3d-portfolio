@@ -39,7 +39,10 @@ Cel: wersja gotowa do pokazania rekruterom, z treścią zastępczą, na wysokim 
 
 Nowy układ strony, od którego zależy reszta. Na razie bez stylizacji, ale z docelową strukturą.
 
-- [ ] Decyzja o układzie: portret i drzwi mają stałe, przypięte miejsce w układzie (zawsze widoczne, niczego nie przykrywają). Do tego przywitanie, kolejność sekcji, nawigacja i stopka. Przygotuję 2-3 warianty szkicu do wyboru, także dla telefonu. **(razem)**
+- [x] Decyzja o układzie (2026-11-22): wariant D.
+  - **Komputer:** wąski, przypięty sidebar po prawej (ok. 280 px). Na samej górze duży portret, pod nim imię i rola, na dole sidebara małe drzwi do świata. Treść w kolumnie po lewej, nawigacja, język i motyw w górnym pasku nad treścią.
+  - **Telefon:** portret na górze treści, nad powitaniem, przewija się razem z treścią (nie jest przypięty). Drzwi w zarezerwowanym, przypiętym pasku na dole ekranu. W górnym pasku imię i menu.
+  - Szkice wariantów A-D zostały w historii rozmowy, wybrany jest D z telefonem 2.
 - [ ] Dwa języki: polski i angielski, przełącznik i wybór przy pierwszej wizycie. Struktura adresów (np. `/pl/...`, `/en/...`), treść w dwóch wersjach, `hreflang`. Robimy to na początku, bo zmienia adresy wszystkich stron i stref.
 - [ ] Sekcje z treścią zastępczą: o mnie, projekty, doświadczenie, umiejętności, kontakt.
 - [ ] Pobieranie CV (na razie zastępczy PDF w `public/`).

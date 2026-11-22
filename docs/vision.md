@@ -113,7 +113,9 @@ HUD, panele treści, menu, minimapa, przełącznik dnia i nocy, ewentualny dzien
 - **W pełni responsywna, z wysokimi wynikami testów** (Lighthouse: wydajność, dostępność, SEO, dobre praktyki).
 - **Szybki przegląd:** wszystkie sekcje portfolio bez wchodzenia do świata, pobranie CV, kontakt.
 - **Portret:** animowana postać przewodnika (rozdział 5).
-- **Stałe miejsce w układzie:** portret i drzwi mają zarezerwowane miejsce i są przypięte (zawsze widoczne), także przy przewijaniu całej strony i na podstronach. Nie mogą niczego przykrywać, tak jak dziś przykrywa treść platforma z kryształem na dole ekranu.
+- **Stałe miejsce w układzie:** portret i drzwi mają zarezerwowane miejsce i niczego nie przykrywają, tak jak dziś przykrywa treść platforma z kryształem na dole ekranu.
+  - **Komputer:** przypięty sidebar po prawej, duży portret na górze, małe drzwi na dole. Oba zawsze widoczne, także na podstronach.
+  - **Telefon:** portret na górze treści (przewija się z nią), drzwi przypięte w dolnym pasku.
 - **Język:** polski i angielski z przełącznikiem. Przy pierwszej wizycie strona może zapytać o język.
 - **Kontakt:** formularz kontaktowy, a do tego e-mail i linki.
 - **Ślad odwiedzających:** odwiedzający mogą zostawić trwały ślad, np. wpis w księdze gości.
