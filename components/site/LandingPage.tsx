@@ -18,8 +18,9 @@ import { CONTENT_SECTIONS, getContentPath, listContentByKind, type ContentItem, 
 import { getSectionPath } from "@/lib/content/places";
 import styles from "./LandingPage.module.css";
 
-/** The placeholder CV until J2 brings the real one. */
-export const CV_PATH = "/cv/michal-stepien-cv.pdf";
+import { CV_PATH } from "./cv";
+
+export { CV_PATH };
 
 /**
  * The complete portfolio as ordinary, server-rendered HTML. It is useful on

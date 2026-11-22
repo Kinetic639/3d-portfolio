@@ -102,6 +102,11 @@ html {
   transition: opacity 0.5s ease, transform 0.9s ease, visibility 0s;
 }
 
+/* The entry screen's door (prototype): the page goes under the full light, before the world's own entry fades it. */
+html[data-entry="door"] #landing {
+  visibility: hidden;
+}
+
 html[data-world="entering"] #landing,
 html[data-world="world"] #landing {
   opacity: 0;

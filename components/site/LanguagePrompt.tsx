@@ -23,6 +23,8 @@ export default function LanguagePrompt() {
     // Read after mount: the browser's languages and the stored choice are not known while rendering on the server.
     const timer = window.setTimeout(() => {
       if (readLocaleChoice()) return;
+      // The entry screen (prototype) asks for the language itself.
+      if (new URLSearchParams(window.location.search).get("entry") === "door") return;
       const wanted = preferredLocale(navigator.languages ?? [navigator.language]);
       if (wanted && wanted !== locale) setOffer(wanted);
     }, 0);
