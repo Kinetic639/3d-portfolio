@@ -106,18 +106,20 @@ Zmiana koncepcji (2026-11-22): wejście do świata nie prowadzi już z portretu,
 - [x] Gotowe: drzwi uchylone, światło stałe i na podłodze; klik i klawiatura. (2026-11-22, prototyp)
 - [x] Kartka „CV” na drzwiach: panel z opisem strony, pobraniem CV, wersją klasyczną i kontaktem; tabliczka z imieniem i rolą; PL | EN. (2026-11-22, prototyp)
 - [x] Drzwi zastępują platformę z kryształem (na stronie nie jest rysowana od B1).
-- [ ] Ekran domyślnie na `/`, z zasadami:
+- [x] Ekran domyślnie na `/` (2026-11-22; decyzja w `<head>`, `components/site/entry-boot.ts`), z zasadami:
   - telefon, brak WebGL, ograniczony ruch i oszczędzanie danych trafiają od razu na wersję klasyczną;
   - linki do konkretnej treści (`/projects/...`) omijają ekran;
   - wybór jest zapamiętany (powracający odwiedzający);
-  - bez mignięcia zwykłej strony przed ekranem (dziś ekran pojawia się dopiero po wczytaniu skryptów).
+  - bez mignięcia zwykłej strony przed ekranem (strona jest ukryta, zanim się namaluje; treść zostaje w HTML);
+  - `?entry=door` pokazuje ekran zawsze, `?entry=classic` nigdy; bez WebGL ekran sam się zamyka.
 
 ### B5. Przejście przez drzwi i mapa świata **(Claude)**
 
 - [x] Jeden ciągły ruch: drzwi otwierają się, a kamera przyspiesza w otwór, aż jego światło wypełni ekran; pod pełnym światłem zmienia się scena; światło gaśnie nad światem. Wejście świata startuje od najwyższego punktu i tylko opada (nowa opcja `fromTop` polecenia `enter`). (2026-11-22, prototyp)
 - [x] Podczas wejścia sam świat bez kontrolek; na końcu mapa świata na pełnym ekranie (strefa: lot i sekcja, pinezka: projekt, „Zwiedzaj świat” lub Escape: zamknięcie); kontrolki dopiero po jej zamknięciu. (2026-11-22, prototyp)
 - [x] Wyjście ze świata: kto wszedł przez drzwi, wraca na ekran z drzwiami, tym samym ruchem odwrotnie (ze światła, z otworu drzwi, drzwi przymykają się do uchylenia; fokus na drzwiach). (2026-11-22, prototyp)
-- [ ] Gotowe, gdy: budżety `pnpm perf` przechodzą także dla wejścia przez drzwi (dziś mierzone jest tylko zwykłe wejście), pełny zestaw testów przechodzi, a przy ograniczonym ruchu jest cięcie.
+- [ ] Gotowe, gdy: budżety `pnpm perf` przechodzą także dla wejścia przez drzwi, pełny zestaw testów przechodzi, a przy ograniczonym ruchu jest cięcie.
+  - Stan (2026-11-22): pełne testy przechodzą (66 e2e, 226 jednostkowych); cięcie przy ograniczonym ruchu jest. Wejście przez drzwi jest mierzone w `pnpm perf` (`doorEntry.*`): p95 16,75 ms, 0 długich zadań, 0 kompilacji, ale 2 klatki powyżej 33 ms przy budżecie 1. W tym samym przebiegu zwykłe wejście miało tyle samo (i najdłuższą klatkę 50 ms), więc to wygląda na szum tej maszyny. Do potwierdzenia jednym pomiarem.
 
 ### B6. Przewodnik w świecie **(Claude)**
 

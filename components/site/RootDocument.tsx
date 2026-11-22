@@ -1,4 +1,5 @@
 import "@/app/globals.css";
+import { ENTRY_BOOT_SCRIPT } from "./entry-boot";
 import { THEME_BOOT_SCRIPT } from "./theme-boot";
 
 /**
@@ -8,7 +9,7 @@ import { THEME_BOOT_SCRIPT } from "./theme-boot";
  * server sends. Moving between them is a full page load, which only a
  * language switch does.
  */
-export default function RootDocument({ lang, children }: { lang: string; children: React.ReactNode }) {
+export default function RootDocument({ lang, entryScreen = false, children }: { lang: string; /** The portfolio's pages may open on the entry screen with the door; the tools never do. */ entryScreen?: boolean; children: React.ReactNode }) {
   return (
     // The theme attribute is set by the boot script before React hydrates.
     <html lang={lang} className="h-full antialiased" data-scroll-behavior="smooth" suppressHydrationWarning>
@@ -16,6 +17,7 @@ export default function RootDocument({ lang, children }: { lang: string; childre
       {/* eslint-disable-next-line @next/next/no-head-element */}
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+        {entryScreen ? <script dangerouslySetInnerHTML={{ __html: ENTRY_BOOT_SCRIPT }} /> : null}
         {/* Without JavaScript there is no world, so no door to it: the page is the whole site. */}
         <noscript><style>{"[data-world-door]{display:none}@media (max-width:760px){[data-door-bar]{display:none}#landing{padding-bottom:0}}"}</style></noscript>
       </head>

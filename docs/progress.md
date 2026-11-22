@@ -3,11 +3,11 @@
 Krótka lista do odhaczania. Szczegóły każdego punktu (zakres, kryterium „gotowe”, decyzje) są w `docs/roadmap.md` pod tym samym numerem.
 Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 
-**Faza 1:** 23 / 48 (48%) `██████████░░░░░░░░░░`
+**Faza 1:** 24 / 48 (50%) `██████████░░░░░░░░░░`
 
 | Część | Zrobione |
 |---|---|
-| Baza produktu (B0-B9) | 23 / 37 |
+| Baza produktu (B0-B9) | 24 / 37 |
 | Gotowe dla rekruterów (J1-J5) | 0 / 11 |
 
 ---
@@ -37,13 +37,13 @@ Po odhaczeniu popraw licznik przy kroku i w podsumowaniu.
 - [x] Głowa i oczy za kursorem, bezczynność, telefon (2026-11-22)
 - [x] Bez straty na wydajności i Lighthouse (2026-11-22)
 
-**B4. Ekran wejściowy z drzwiami** 5/6
+**B4. Ekran wejściowy z drzwiami** 6/6
 - [x] Decyzja: ekran z drzwiami jako loaderem (prototyp `?entry=door`) (2026-11-22)
 - [x] Postęp ładowania na drzwiach (2026-11-22)
 - [x] Uchylenie i światło, gdy świat gotowy (2026-11-22)
 - [x] Kartka „CV” z panelem, tabliczka, PL | EN (2026-11-22)
 - [x] Drzwi zamiast platformy z kryształem
-- [ ] Ekran domyślnie na `/` (telefon i brak WebGL: wersja klasyczna, linki omijają, wybór zapamiętany)
+- [x] Ekran domyślnie na `/` (telefon i brak WebGL: wersja klasyczna, linki omijają, wybór zapamiętany) (2026-11-22)
 
 **B5. Przejście i mapa świata** 3/4
 - [x] Kamera w drzwi, światło, świat od najwyższego punktu (2026-11-22)

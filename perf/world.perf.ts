@@ -47,6 +47,9 @@ const MINE = "zone:zone-11";
 const OBJECT = "entity:portfolio-workshop-compound";
 
 /** Records phase changes and long tasks from the very start of the page. */
+/** The production server the perf run starts (playwright.perf.config.ts). */
+const BASE_URL = `http://localhost:${process.env.PERF_PORT ?? "3218"}`;
+
 const INSTRUMENT = () => {
   window.__perf = { phases: [], longTasks: [], frames: [], raf: 0 };
   new PerformanceObserver((list) => {
@@ -106,6 +109,28 @@ const record = (name: string, value: number) => {
   results[name] = Math.round(value * 100) / 100;
 };
 
+/**
+ * The entry through the door: from the click on the door, through the light, down from the sky, to the
+ * world's map at the end. The visitor rests on the door screen first, as they would.
+ */
+async function doorEntry(page: Page) {
+  await page.addInitScript(INSTRUMENT);
+  await page.goto("/");
+  await page.waitForFunction(() => document.documentElement.dataset.world === "ready", null, { timeout: 60_000 });
+  await page.evaluate(() => (window.__worldEngine as unknown as Probe).environment.wind.setStilled(true));
+  await page.waitForTimeout(1500);
+  const programsBefore = await page.evaluate(() => (window.__worldEngine as unknown as Probe).renderer.info.programs.length);
+  await startFrames(page);
+  const clickedAt = await now(page);
+  await page.getByRole("button", { name: "Enter the 3D world" }).click();
+  await page.getByRole("dialog", { name: "Map of the world" }).waitFor({ timeout: 30_000 });
+  await settle(page);
+  const frames = await stopFrames(page);
+  const tasks = await longTasks(page, clickedAt, await now(page));
+  const programsAfter = await page.evaluate(() => (window.__worldEngine as unknown as Probe).renderer.info.programs.length);
+  return { frames: calculateFrameSummary(frames), longTasks: tasks.count, programsCompiled: programsAfter - programsBefore };
+}
+
 /** Opens the landing page, waits for the warm world and enters it. Records load and entry. */
 async function loadAndEnter(page: Page) {
   await page.addInitScript(INSTRUMENT);
@@ -162,10 +187,11 @@ test("the world stays within its performance budgets", async ({ browser }) => {
   })();
   test.skip(/swiftshader|llvmpipe|software|none/i.test(gpu) && process.env.PERF_ALLOW_SOFTWARE !== "1", `No hardware GPU (${gpu}): frame times would be meaningless.`);
 
-  // Load and entry, three times on fresh pages.
+  // Load and entry, three times on fresh pages, as a visitor who chose the classic page (its door in the sidebar).
+  const classic = { cookies: [], origins: [{ origin: BASE_URL, localStorage: [{ name: "entry-choice", value: "classic" }] }] };
   const runs = [];
   for (let run = 0; run < 3; run += 1) {
-    const context = await browser.newContext();
+    const context = await browser.newContext({ storageState: classic });
     const page = await context.newPage();
     runs.push(await loadAndEnter(page));
     if (run < 2) await context.close();
@@ -188,6 +214,19 @@ test("the world stays within its performance budgets", async ({ browser }) => {
   record("entry.framesOver33Ms", median(runs.map((run) => run.entry.above33_3Ms.count)));
   record("entry.longTasks", median(runs.map((run) => run.entryLongTasks)));
   record("entry.programsCompiled", Math.max(...runs.map((run) => run.entryProgramsCompiled)));
+
+  // The entry through the door (B4, B5), the default for a first visit on a wide screen: three times on fresh pages.
+  const doorRuns = [];
+  for (let run = 0; run < 3; run += 1) {
+    const context = await browser.newContext();
+    doorRuns.push(await doorEntry(await context.newPage()));
+    await context.close();
+  }
+  record("doorEntry.maxFrameMs", median(doorRuns.map((run) => run.frames.maxFrameMs)));
+  record("doorEntry.p95FrameMs", median(doorRuns.map((run) => run.frames.p95FrameMs)));
+  record("doorEntry.framesOver33Ms", median(doorRuns.map((run) => run.frames.above33_3Ms.count)));
+  record("doorEntry.longTasks", median(doorRuns.map((run) => run.longTasks)));
+  record("doorEntry.programsCompiled", Math.max(...doorRuns.map((run) => run.programsCompiled)));
 
   // Compare and report.
   const lines: string[] = [];

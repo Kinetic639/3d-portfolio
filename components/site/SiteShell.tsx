@@ -26,7 +26,7 @@ export default function SiteShell({ locale, children }: { locale: Locale; childr
   const { defaultMapId } = readMapIndex();
 
   return (
-    <RootDocument lang={locale}>
+    <RootDocument lang={locale} entryScreen>
       <LocaleProvider locale={locale}>
         {children}
         <WorldLayer defaultMapId={defaultMapId} bakes={listFreshBakes()} serveBakes={SERVE_BAKED_WORLDS} minimaps={readAllMinimaps()} portraitModelUrl={guideModelUrl()} />

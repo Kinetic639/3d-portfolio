@@ -102,7 +102,17 @@ html {
   transition: opacity 0.5s ease, transform 0.9s ease, visibility 0s;
 }
 
-/* The entry screen's door (prototype): the page goes under the full light, before the world's own entry fades it. */
+/* The entry screen with the door (B4): decided in <head> (entry-boot.ts), so the page is never painted before it.
+   The page is hidden (not removed: it is the whole portfolio in HTML) until the screen closes. */
+html[data-entry-screen] #landing {
+  visibility: hidden;
+}
+
+html[data-entry-screen] body {
+  background: #161b25;
+}
+
+/* Through the door: the page goes under the full light, before the world's own entry fades it. */
 html[data-entry="door"] #landing {
   visibility: hidden;
 }

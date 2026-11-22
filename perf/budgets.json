@@ -128,6 +128,26 @@
     "portrait.longTaskMs": {
       "max": 250,
       "why": "Main-thread blocking while the portrait loads (model, shaders). Measured 0-152 ms."
+    },
+    "doorEntry.maxFrameMs": {
+      "max": 34,
+      "why": "At most one dropped frame in the move through the light. Set 2026-11-22 to the ordinary entry's budget, before the door entry was first measured."
+    },
+    "doorEntry.p95FrameMs": {
+      "max": 17.5,
+      "why": "60 fps through the door, the light and the descent. Set 2026-11-22 to the ordinary entry's budget, before the door entry was first measured."
+    },
+    "doorEntry.framesOver33Ms": {
+      "max": 1,
+      "why": "At most one dropped frame. Set 2026-11-22 to the ordinary entry's budget, before the door entry was first measured."
+    },
+    "doorEntry.longTasks": {
+      "max": 0,
+      "why": "Nothing blocks the main thread during the entry. Set 2026-11-22 to the ordinary entry's budget, before the door entry was first measured."
+    },
+    "doorEntry.programsCompiled": {
+      "max": 0,
+      "why": "Everything was compiled during warm-up."
     }
   }
 }

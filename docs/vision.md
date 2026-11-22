@@ -113,7 +113,7 @@ HUD, panele treści, menu, minimapa, przełącznik dnia i nocy, ewentualny dzien
 - **W pełni responsywna, z wysokimi wynikami testów** (Lighthouse: wydajność, dostępność, SEO, dobre praktyki).
 - **Szybki przegląd:** wszystkie sekcje portfolio bez wchodzenia do świata, pobranie CV, kontakt.
 - **Portret:** animowana postać przewodnika (rozdział 5).
-- **Ekran wejściowy (zmienione 2026-11-22, prototyp pod `?entry=door`):** drzwi na środku ekranu jako loader i wejście do świata, tabliczka z imieniem i rolą, kartka „CV” na drzwiach z panelem (o stronie, pobierz CV, wersja klasyczna, kontakt), wybór języka. Wzorzec: portfolio Bruno Simona (świat od razu), ale z siatką bezpieczeństwa dla rekruterów: wersja klasyczna zawsze o jedno kliknięcie, telefon i słabe urządzenia trafiają na nią od razu, treść jest w HTML.
+- **Ekran wejściowy (zmienione 2026-11-22, domyślny na stronie głównej):** drzwi na środku ekranu jako loader i wejście do świata, tabliczka z imieniem i rolą, kartka „CV” na drzwiach z panelem (o stronie, pobierz CV, wersja klasyczna, kontakt), wybór języka. Wzorzec: portfolio Bruno Simona (świat od razu), ale z siatką bezpieczeństwa dla rekruterów: wersja klasyczna zawsze o jedno kliknięcie, telefon i słabe urządzenia trafiają na nią od razu, treść jest w HTML.
 - **Zwykła strona (wersja klasyczna):** strona z portretem, sekcjami i CV, dla tych, którzy nie chcą świata. Portret i małe drzwi mają zarezerwowane miejsce i niczego nie przykrywają.
   - **Komputer:** przypięty sidebar po prawej, duży portret na górze, małe drzwi na dole. Oba zawsze widoczne, także na podstronach.
   - **Telefon:** portret na górze treści (przewija się z nią), drzwi przypięte w dolnym pasku.
