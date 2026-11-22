@@ -120,3 +120,36 @@ Usługa została zamknięta 31 stycznia 2026 po przejęciu przez Netflix ([TechC
 ## 5. Przy okazji
 
 Obecny model testowy `assets/models/soldier` pochodzi z przykładów three.js. Według [zestawienia innej osoby](https://claudeskills.info/skills/PlayableIntelligence/game-creator/game-3d-assets/) jest na licencji MIT, ale źródła tego nie potwierdziłem. Po wyborze postaci w B2 warto go usunąć, żeby nie zostawiać w publicznym repozytorium modelu niepewnego pochodzenia.
+
+## 6. Sprawdzenie pobranych plików (2026-11-22)
+
+Pobrane (wersje Standard, CC0) do `temp/models/quaternius/`, poza repozytorium:
+- Universal Base Characters;
+- Universal Animation Library 1 i 2;
+- Modular Character Outfits - Fantasy.
+
+**Co jest w darmowej wersji:**
+- **Postacie:** tylko proporcje Superhero (mężczyzna i kobieta), ok. 14,3 tys. trójkątów. Proporcji Regular nie ma jako gołego ciała.
+- **Stroje:** Peasant i Ranger dla mężczyzny i kobiety. Strój to całe ubrane ciało w proporcjach Regular, ale **bez głowy**:
+  - Peasant: 12,9 tys. trójkątów;
+  - Ranger: 27 tys., za ciężki.
+- **Fryzury i brwi** przypięte do kości głowy (fryzura 1,3 tys. trójkątów).
+- **Rig:** wspólny dla wszystkiego, 65 kości w układzie Unreal (`root`, `pelvis`, `spine_01-03`, `neck_01`, `Head`, palce). **Kości oczu brak.** Oczy to osobna siatka z własną teksturą 256×256.
+- **Animacje:**
+  - biblioteka 1: 43 klipy, m.in. `Idle_Loop`, `Idle_Talking_Loop`, `Walk_Loop`, `Walk_Formal_Loop`, `Jog_Fwd_Loop`, `Sprint_Loop`, `Interact`, `PickUp_Table`, `Sitting_Enter`, `Sitting_Idle_Loop`, `Sitting_Talking_Loop`, `Sitting_Exit`, `Dance_Loop`;
+  - biblioteka 2: 43 klipy, m.in. `Idle_FoldArms_Loop`, `Yes`, `Idle_No_Loop`, `Idle_Rail_Call`, `Chest_Open`, `Consume`, `Walk_Carry_Loop`;
+  - **machania nie ma w darmowych wersjach.** Na powitanie nadają się `Yes`, `Idle_Rail_Call` albo `Interact`; machanie można dorobić później w Blenderze na tym samym rigu.
+- **Tekstury:** duże, 2048-4096 px PNG (normal, roughness/ORM). `pnpm assets` i tak zmniejsza je do WebP; mapy normal i ORM można pominąć.
+- **Błąd w paczce:** model Superhero odwołuje się do nieistniejących plików `T_Hair_1_Normal_png.png` i `T_Eye_Normal_png.png`. Przy imporcie trzeba to obejść.
+
+**Test złożenia** (zrzuty w `temp/shots/a-*.png`, `b-*.png`):
+- Strój Peasant przebija przez ciało Superhero, bo te proporcje do siebie nie pasują.
+- Działa za to **strój Peasant i sama głowa z modelu Superhero**:
+  - z siatki Superhero zostają tylko trójkąty przypięte do kości `Head` i `neck_01` (2,8 tys.), do tego oczy, fryzura i brwi;
+  - wygląda spójnie, animacje chodu i bezczynności działają, na szyi przy kołnierzu widać tylko drobny szew.
+- **Oczy za kursorem bez kości oczu:** przesunięcie tekstury oczu odwraca wzrok w bok (zrzut `b-composed-eyes-left.png`). Razem z obrotem kości `Head` i `neck_01` wystarczy to na portret.
+- **Szacunek po złożeniu:** ok. 17-18 tys. trójkątów (bez zdublowanych brwi), czyli mieści się w limicie 20 tys. Kilka tekstur 1024 px WebP i ok. 8 wybranych klipów animacji.
+
+**Wniosek:** wariant A się sprawdza jako **Peasant z głową z modelu Superhero**. Do zrobienia w B2, punkt 3:
+- skrypt w `pnpm assets`, który składa to w jeden plik GLB (wycięcie głowy, pominięcie zbędnych map, wybrane klipy);
+- usunięcie testowego żołnierza.
