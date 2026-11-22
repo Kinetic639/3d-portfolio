@@ -20,7 +20,7 @@ import type { WorldConfig } from "@/lib/world/world-config";
  * This module is the runtime side (types, encode, decode) and has no
  * dependencies beyond types, so the visitor bundle does not pull in the baker.
  */
-/** 3: exact ground heights per column (grounds), for creatures standing on slabs, stairs and by curbs. */
+/** 3: exact ground heights (grounds) and where creatures can stand (standable), per column. */
 export const BAKE_FORMAT_VERSION = 3;
 const MAGIC = 0x32574b42; // "BKW2", little-endian
 
@@ -106,6 +106,8 @@ export type BakedHeader = {
   heights: BufferRef;
   /** Int16 per column, in 1/64 of a block: where a creature stands (the exact surface at the column's centre); -32768 where there is none. */
   grounds: BufferRef;
+  /** Uint8 per column: 1 where a creature can stand (docs/navigation.md), 0 elsewhere. */
+  standable: BufferRef;
   /** Uint8 per column: numeric zone id, 0 for none. */
   zones: BufferRef;
   voxelZones: BakedVoxelZone[];

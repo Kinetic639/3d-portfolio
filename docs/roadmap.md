@@ -131,7 +131,11 @@ Zmiana koncepcji (2026-11-22): wejście do świata nie prowadzi już z portretu,
 - [x] Przy dalekich skokach (dalej niż 26 bloków, np. lot do strefy) pojawia się od razu na miejscu i macha. (2026-11-22; animacja pojawienia się, np. błysk, do dopracowania)
 - [ ] Ożywienie: animacje bezczynności, rozglądanie się, reakcje na otwarcie treści (np. gest w stronę obiektu).
   - Zrobione (2026-11-22): powitanie na końcu wejścia (macha do kamery), gest w stronę otwartego obiektu, bezczynność. Zostało: rozglądanie się i drobne animacje, kiedy odwiedzający nic nie robi.
-- [ ] Omijanie przeszkód: wykorzystanie węzłów nawigacji z formatu mapy (edytor już je przewiduje).
+- [ ] Omijanie przeszkód (plan: `docs/navigation.md`, 2026-11-22). Zamiast ręcznych węzłów siatka nawigacji liczona z bloków i obiektów mapy:
+  - siatka: gdzie wolno stać (powierzchnia, prześwit, obiekty blokujące), koszt, przejścia do sąsiadów (stopień do pół bloku); liczona przy wypiekaniu i na żywo, pokazana w edytorze jako nakładka;
+  - droga: A* (8 kierunków, bez ścinania rogów) z wygładzeniem; cel niedostępny: najbliższa dostępna komórka;
+  - aktor idzie po drodze (lista punktów), przewodnik nie wchodzi w drzewa i ściany;
+  - kolizje dla sterowanej postaci (kontroler z kapsułą) dopiero w mini-grach; fizyka (Rapier) tylko, jeśli mini-gra jej wymaga.
 
 ### B7. Świat bazowy **(razem)**
 

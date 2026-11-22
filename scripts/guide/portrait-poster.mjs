@@ -20,7 +20,7 @@ const browser = await chromium.launch({ args: ["--use-angle=d3d11", "--enable-gp
 try {
   // The sidebar's portrait, drawn at twice its CSS size for sharp screens.
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
-  await page.goto(base);
+  await page.goto(`${base}/?entry=classic`);
   await page.waitForFunction(() => (window.__portrait?.sidebar?.stats.loadedAt ?? null) !== null, null, { timeout: 90_000 });
   const dataUrl = await page.evaluate(() => window.__portrait.sidebar.capture());
   const out = path.join(root, "public/portrait/guide.webp");

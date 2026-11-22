@@ -9,7 +9,7 @@ import { createHeightfieldQuery, type WorldQuery } from "./world-query";
  */
 export function createBakedQuery(baked: BakedWorld): WorldQuery {
   const { width, depth } = baked.header.map.dimensions;
-  return createHeightfieldQuery(width, depth, bakedInt8(baked, baked.header.heights).slice(), bakedUint8(baked, baked.header.zones).slice(), bakedInt16(baked, baked.header.grounds).slice());
+  return createHeightfieldQuery(width, depth, bakedInt8(baked, baked.header.heights).slice(), bakedUint8(baked, baked.header.zones).slice(), bakedInt16(baked, baked.header.grounds).slice(), bakedUint8(baked, baked.header.standable).slice());
 }
 
 /** The baked world as terrain, decoded on this thread (the editor's baked view). */

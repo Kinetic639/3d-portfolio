@@ -13,6 +13,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
 const loader = new GLTFLoader();
 const load = (url) => loader.loadAsync(url);
@@ -40,17 +41,16 @@ window.compose = async (recipe) => {
     }
   }
 
-  // Colour only: normal, roughness and occlusion maps are left out (the world draws its own style).
-  root.traverse((object) => {
-    if (!object.isMesh) return;
-    object.frustumCulled = true;
-    for (const material of [object.material].flat()) {
-      for (const key of ["normalMap", "roughnessMap", "metalnessMap", "aoMap", "emissiveMap"]) material[key] = null;
-      material.roughness = 1;
-      material.metalness = 0;
-    }
-    report.meshes.push(`${object.name}:${object.material.name}`);
-  });
+  // One mesh, one skeleton (docs/characters.md): every part shares the rig and its bind pose, so their
+  // geometry merges exactly. Two materials: an atlas of the colour textures, and the eyes (kept apart:
+  // their texture is moved to make them look around). Colour only: normal and roughness maps are left out.
+  const parts = [];
+  root.traverse((object) => { if (object.isSkinnedMesh) parts.push(object); });
+  const merged = mergeIntoOne(parts, outfitMesh.skeleton, recipe.atlas);
+  for (const part of parts) part.parent.remove(part);
+  outfitMesh = merged.mesh;
+  root.add(merged.mesh);
+  report.meshes = merged.report;
 
   // Clips from the animation libraries, renamed to plain roles.
   const clips = [];
@@ -78,6 +78,94 @@ window.compose = async (recipe) => {
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return { report, base64: btoa(binary) };
 };
+
+/**
+ * Merges the skinned parts into one mesh with one skeleton. `atlas` lists the materials whose textures
+ * share one atlas, in its quadrants (left to right, top to bottom); any other material ("MI_Eyes")
+ * stays a material of its own.
+ */
+function mergeIntoOne(parts, skeleton, atlas) {
+  const SIZE = 2048;
+  const CELL = SIZE / 2;
+  const INSET = 4 / SIZE;
+  const canvas = document.createElement("canvas");
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  const context = canvas.getContext("2d");
+  const quadrant = new Map(atlas.map((name, index) => [name, { x: index % 2, y: Math.floor(index / 2) }]));
+  const drawn = new Set();
+  const boneIndex = new Map(skeleton.bones.map((bone, index) => [bone.name, index]));
+  const atlasGeometries = [];
+  const ownGeometries = [];
+  let ownMaterial = null;
+  const report = [];
+
+  for (const part of parts) {
+    const material = part.material;
+    let geometry = compact(part.geometry);
+    for (const name of [...Object.keys(geometry.attributes)]) {
+      if (!["position", "normal", "uv", "skinIndex", "skinWeight"].includes(name)) geometry.deleteAttribute(name);
+    }
+    // The part's joints by name, as indices into the shared skeleton (the same order here, checked anyway).
+    const joints = geometry.attributes.skinIndex;
+    const remapped = new Uint16Array(joints.count * 4);
+    for (let i = 0; i < joints.count; i += 1) {
+      for (let k = 0; k < 4; k += 1) remapped[i * 4 + k] = boneIndex.get(part.skeleton.bones[joints.getComponent(i, k)].name);
+    }
+    geometry.setAttribute("skinIndex", new THREE.BufferAttribute(remapped, 4));
+    const spot = quadrant.get(material.name);
+    if (spot) {
+      if (!drawn.has(material.name)) {
+        drawn.add(material.name);
+        context.drawImage(material.map.image, spot.x * CELL, spot.y * CELL, CELL, CELL);
+      }
+      const uv = geometry.attributes.uv;
+      for (let i = 0; i < uv.count; i += 1) {
+        uv.setXY(i, spot.x * 0.5 + INSET + uv.getX(i) * (0.5 - 2 * INSET), spot.y * 0.5 + INSET + uv.getY(i) * (0.5 - 2 * INSET));
+      }
+      atlasGeometries.push(geometry);
+    } else {
+      ownMaterial = material;
+      ownGeometries.push(geometry);
+    }
+    report.push(`${part.name}:${material.name}:${geometry.index.count / 3}`);
+  }
+
+  const atlasGeometry = mergeGeometries(atlasGeometries);
+  const ownGeometry = mergeGeometries(ownGeometries);
+  const geometry = mergeGeometries([atlasGeometry, ownGeometry], true);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.flipY = false;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  // Double-sided when any part was: the inside of the shirt shows at the collar.
+  const side = parts.some((part) => part.material.side === THREE.DoubleSide) ? THREE.DoubleSide : THREE.FrontSide;
+  const atlasMaterial = new THREE.MeshStandardMaterial({ name: "MI_Guide", map: texture, roughness: 1, metalness: 0, side });
+  for (const key of ["normalMap", "roughnessMap", "metalnessMap", "aoMap", "emissiveMap"]) ownMaterial[key] = null;
+  ownMaterial.roughness = 1;
+  ownMaterial.metalness = 0;
+  const mesh = new THREE.SkinnedMesh(geometry, [atlasMaterial, ownMaterial]);
+  mesh.name = "Guide";
+  mesh.bind(new THREE.Skeleton(skeleton.bones, skeleton.boneInverses), new THREE.Matrix4());
+  report.push(`merged: ${geometry.index.count / 3} triangles, ${geometry.attributes.position.count} vertices, ${geometry.groups.length} materials`);
+  return { mesh, report };
+}
+
+/** The geometry with only the vertices its triangles use (the head cut from a whole body keeps only the head's). */
+function compact(source) {
+  const index = source.index.array;
+  const map = new Map();
+  const order = [];
+  for (const vertex of index) if (!map.has(vertex)) { map.set(vertex, order.length); order.push(vertex); }
+  const geometry = new THREE.BufferGeometry();
+  for (const [name, attribute] of Object.entries(source.attributes)) {
+    const size = attribute.itemSize;
+    const array = new attribute.array.constructor(order.length * size);
+    order.forEach((vertex, i) => { for (let k = 0; k < size; k += 1) array[i * size + k] = attribute.getComponent(vertex, k); });
+    geometry.setAttribute(name, new THREE.BufferAttribute(array, size, attribute.normalized));
+  }
+  geometry.setIndex(Array.from(index, (vertex) => map.get(vertex)));
+  return geometry;
+}
 
 /** Keeps the triangles whose three corners mostly follow the given bones (the head and neck). */
 function keepHead(mesh, headBones) {
