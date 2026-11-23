@@ -161,7 +161,7 @@ export class GuideDriver {
       actor.preview("Call");
       return;
     }
-    actor.followPath(path.map((point) => this.onGround(point)), length > GUIDE.runFrom ? "run" : "walk");
+    actor.followPath(path.map((point) => this.onGround(point)), length > GUIDE.sprintFrom ? "sprint" : length > GUIDE.runFrom ? "run" : "walk");
   }
 
   /**

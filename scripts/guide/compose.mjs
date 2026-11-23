@@ -43,6 +43,7 @@ const recipe = {
         Idle_Loop: "Idle",
         Walk_Loop: "Walk",
         Jog_Fwd_Loop: "Run",
+        Sprint_Loop: "Sprint",
         Idle_Talking_Loop: "Talk",
         Interact: "Interact",
         PickUp_Table: "PickUp",

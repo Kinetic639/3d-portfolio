@@ -27,6 +27,8 @@ export const GUIDE = {
   slack: 3,
   /** Further than this, it runs instead of walking. */
   runFrom: 7,
+  /** Further than this (along its path), it sprints. */
+  sprintFrom: 14,
   /** Further than this (a flight to a zone, a jump across the map), it appears at the spot instead. */
   appearFrom: 26,
   /** How long the camera must be still before the guide sets off (ms): it follows where the visitor stops, not every drag. */

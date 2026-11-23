@@ -249,6 +249,18 @@ export type ModelStyleSettings = {
 export type ModelActorSettings = {
   walkSpeed?: number;
   runSpeed?: number;
+  /** The fastest gait, for long ways (0: none; it runs instead). Needs a "sprint" clip. */
+  sprintSpeed?: number;
+  /** How fast it speeds up and slows down (blocks per second, per second); 0 starts and stops at once. */
+  acceleration?: number;
+  /**
+   * How fast each clip moves it over the ground at its own tempo (measured from the feet:
+   * scripts/clip-speeds.mjs). The clip then plays at "speed / clip speed", so the feet stay
+   * planted at any speed; 0 plays it as it is.
+   */
+  walkClipSpeed?: number;
+  runClipSpeed?: number;
+  sprintClipSpeed?: number;
   flightSpeed?: number;
   /** Height of the flight arc above the higher end. */
   flightHeight?: number;
@@ -1131,7 +1143,7 @@ function validateLook(environment: Record<string, unknown>): string[] {
 }
 
 export const ACTOR_LIMITS: Record<keyof ModelActorSettings, [number, number]> = {
-  walkSpeed: [0, 20], runSpeed: [0, 40], flightSpeed: [0.1, 60], flightHeight: [0, 40], turnSpeed: [0.1, 40], crossfade: [0, 2], groundOffset: [-5, 5], forwardYaw: [-180, 180],
+  walkSpeed: [0, 20], runSpeed: [0, 40], sprintSpeed: [0, 60], acceleration: [0, 100], walkClipSpeed: [0, 40], runClipSpeed: [0, 60], sprintClipSpeed: [0, 80], flightSpeed: [0.1, 60], flightHeight: [0, 40], turnSpeed: [0.1, 40], crossfade: [0, 2], groundOffset: [-5, 5], forwardYaw: [-180, 180],
 };
 
 export function validateActorSettings(path: string, actor: unknown): string[] {

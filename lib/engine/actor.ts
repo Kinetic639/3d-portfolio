@@ -16,13 +16,19 @@ import type { ModelActorSettings } from "@/lib/maps/map-definition";
  * into the model's matrix.
  */
 export type ActorState = "idle" | "walking" | "running" | "taking-off" | "flying" | "landing" | "preview";
-export type ActorMovement = "walk" | "run" | "flight";
+export type ActorMovement = "walk" | "run" | "sprint" | "flight";
+type Gait = "walk" | "run" | "sprint";
 export type ActorConfig = Required<ModelActorSettings>;
 
 /** The lab's crow defaults. Speeds in blocks per second. */
 export const DEFAULT_ACTOR: ActorConfig = {
   walkSpeed: 0.75,
   runSpeed: 1.65,
+  sprintSpeed: 0,
+  acceleration: 0,
+  walkClipSpeed: 0,
+  runClipSpeed: 0,
+  sprintClipSpeed: 0,
   flightSpeed: 2.8,
   flightHeight: 3,
   turnSpeed: 7,
@@ -33,7 +39,7 @@ export const DEFAULT_ACTOR: ActorConfig = {
 
 export const resolveActor = (defaults: ModelActorSettings | undefined, overrides: ModelActorSettings | undefined): ActorConfig => ({ ...DEFAULT_ACTOR, ...defaults, ...overrides });
 
-type Role = "idle" | "walk" | "run" | "takeoff" | "fly";
+type Role = "idle" | "walk" | "run" | "sprint" | "takeoff" | "fly";
 type Resolved = { clip: THREE.AnimationClip; reversed: boolean };
 
 const normalise = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -47,6 +53,11 @@ export function appearSize(progress: number) {
   const eased = 1 - Math.pow(1 - t, 3);
   return 0.001 + 0.999 * eased + Math.sin(Math.PI * t) * (1 - t) * 0.35;
 }
+
+/** The clip's tempo never goes beyond these (a very slow or very fast clip looks wrong whatever the feet do). */
+const TEMPO_LIMITS = [0.5, 1.6] as const;
+/** While braking it never drops below this speed (blocks per second), so it always arrives. */
+const ARRIVING_SPEED = 0.35;
 
 /** How fast a walking creature's height follows the ground, per second: about 0.1 s to settle on a step. */
 const STEP_RATE = 30;
@@ -67,6 +78,7 @@ export function resolveActorClips(clips: readonly THREE.AnimationClip[]) {
     idle: wrap(find("idle")),
     walk: wrap(find("walk")),
     run: wrap(find("run")),
+    sprint: wrap(find("sprint")),
     takeoff: wrap(takeoff),
     fly: wrap(find("fly")),
     landing: landing ? { clip: landing, reversed: false } : takeoff ? { clip: takeoff, reversed: true } : null,
@@ -97,6 +109,9 @@ export class Actor {
   private state: ActorState = "idle";
   /** A heading to turn to in place, while idle (the guide facing the visitor); null when there is none. */
   private facing: number | null = null;
+  /** The gait it was sent with (the fastest it goes), and how fast it goes now. */
+  private gait: Gait = "walk";
+  private speed = 0;
   /** The rest of a path being walked (after the current target). */
   private waypoints: THREE.Vector3[] = [];
   /** A clip to rest in instead of the idle one (arms folded); null for the idle clip. */
@@ -176,7 +191,7 @@ export class Actor {
   }
 
   /** Walks (or runs) through points on the ground, one after another, without stopping between them. */
-  followPath(points: THREE.Vector3[], movement: "walk" | "run") {
+  followPath(points: THREE.Vector3[], movement: Gait) {
     if (points.length === 0) return;
     this.goTo(points[0], movement);
     this.waypoints = points.slice(1).map((point) => point.clone().add(new THREE.Vector3(0, this.config.groundOffset, 0)));
@@ -197,8 +212,10 @@ export class Actor {
       return;
     }
     this.curve = null;
-    this.state = movement === "run" ? "running" : "walking";
-    this.play(movement === "run" ? this.roles.run : this.roles.walk, true);
+    // Already on its way (sent somewhere new): it carries on at the speed it has.
+    if (this.state !== "walking" && this.state !== "running") this.speed = this.config.acceleration > 0 ? 0 : this.topSpeed(movement);
+    this.gait = movement;
+    this.stride();
   }
 
   /** The lab's clip preview: plays any clip where the actor stands. */
@@ -214,6 +231,7 @@ export class Actor {
   }
 
   rest() {
+    this.speed = 0;
     this.target = null;
     this.curve = null;
     this.sequence = null;
@@ -261,12 +279,18 @@ export class Actor {
     this.step.subVectors(target, this.position);
     this.step.y = 0;
     const remaining = this.step.length();
-    const distance = (this.state === "running" ? this.config.runSpeed : this.config.walkSpeed) * delta;
+    this.speed = this.nextSpeed(remaining, delta);
+    this.stride();
+    const distance = this.speed * delta;
     if (remaining <= distance) {
-      // On to the next point of a path, carrying on with the same gait.
+      // On to the next point of a path, carrying on with the same gait and the rest of this frame's step (no pause at corners).
       const next = this.waypoints.shift();
       if (next) {
+        this.position.x = target.x;
+        this.position.z = target.z;
         this.target = next;
+        const rest = (distance - remaining) / Math.max(this.speed, 1e-6);
+        if (rest > 1e-6) this.walk(rest, groundAt);
         return;
       }
       this.position.copy(target);
@@ -280,6 +304,44 @@ export class Actor {
     this.next.y = this.position.y + (ground - this.position.y) * (1 - Math.exp(-STEP_RATE * delta));
     this.position.copy(this.next);
     this.face(this.step, delta);
+  }
+
+  /** The fastest it goes in a gait (a sprint without its clip or speed is a run). */
+  private topSpeed(gait: Gait) {
+    if (gait === "sprint" && this.roles.sprint && this.config.sprintSpeed > 0) return this.config.sprintSpeed;
+    return gait === "walk" ? this.config.walkSpeed : this.config.runSpeed;
+  }
+
+  /** Speeds up towards its gait's speed, and slows down to arrive (as fast as it may stop in the way left). */
+  private nextSpeed(remaining: number, delta: number) {
+    const top = this.topSpeed(this.gait);
+    const acceleration = this.config.acceleration;
+    if (acceleration <= 0) return top;
+    let left = remaining;
+    let from = this.target!;
+    for (const point of this.waypoints) {
+      left += Math.hypot(point.x - from.x, point.z - from.z);
+      from = point;
+    }
+    const braking = Math.max(Math.sqrt(2 * acceleration * left), ARRIVING_SPEED);
+    return Math.min(this.speed + acceleration * delta, top, braking);
+  }
+
+  /** The clip for how fast it goes now (walk, run, sprint, with a margin so it does not flicker between two), at a tempo that keeps the feet planted. */
+  private stride() {
+    const { walkSpeed, runSpeed, sprintSpeed } = this.config;
+    const current = this.currentName;
+    const isRun = current === this.roles.run?.clip.name;
+    const isSprint = current === this.roles.sprint?.clip.name;
+    const toRun = ((walkSpeed + runSpeed) / 2) * (isRun || isSprint ? 0.9 : 1.1);
+    const toSprint = ((runSpeed + sprintSpeed) / 2) * (isSprint ? 0.9 : 1.1);
+    const sprinting = this.gait === "sprint" && this.roles.sprint && sprintSpeed > 0 && this.speed > toSprint;
+    const running = sprinting || (this.gait !== "walk" && this.speed > toRun);
+    const role = sprinting ? this.roles.sprint : running ? this.roles.run : this.roles.walk;
+    this.state = running ? "running" : "walking";
+    this.play(role, true);
+    const clipSpeed = sprinting ? this.config.sprintClipSpeed : running ? this.config.runClipSpeed : this.config.walkClipSpeed;
+    if (clipSpeed > 0 && this.current) this.current.setEffectiveTimeScale(THREE.MathUtils.clamp(this.speed / clipSpeed, TEMPO_LIMITS[0], TEMPO_LIMITS[1]));
   }
 
   private beginFlight() {
