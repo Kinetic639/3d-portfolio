@@ -6,7 +6,7 @@
   "rotationY": 0,
   "collision": "none",
   "animation": "Idle",
-  "animations": ["Idle", "Walk", "Run", "Talk", "Interact", "PickUp", "SitDown", "Sitting", "StandUp", "Yes", "No", "Call", "ArmsFolded"],
+  "animations": ["Idle", "Walk", "Run", "Sprint", "Talk", "Interact", "PickUp", "SitDown", "Sitting", "StandUp", "Yes", "No", "Call", "ArmsFolded"],
   "maxTextureSize": 2048,
   "tags": ["character", "guide", "test", "animated"],
   "style": {
@@ -17,11 +17,16 @@
     "castShadow": false
   },
   "actor": {
-    "walkSpeed": 1.3,
-    "runSpeed": 3,
+    "walkSpeed": 1.15,
+    "runSpeed": 4.8,
+    "sprintSpeed": 7,
+    "acceleration": 9,
     "turnSpeed": 8,
     "crossfade": 0.25,
     "groundOffset": 0.05,
-    "forwardYaw": 0
+    "forwardYaw": 0,
+    "walkClipSpeed": 1.04,
+    "runClipSpeed": 5.95,
+    "sprintClipSpeed": 8.66
   }
 }

@@ -181,3 +181,9 @@ Pobrane (wersje Standard, CC0) do `temp/models/quaternius/`, poza repozytorium:
 | `lookUp`, `lookDown`, `lookLeft`, `lookRight` | opcjonalnie, jeśli oczy nie mają własnych kości |
 
 Nazwy jak w VRM, więc ta sama lista pasuje też do postaci z VRoid Studio. Do tego rig zgodny z obecnym (kości w układzie Unreal, `neck_01`, `Head`), wtedy animacje z biblioteki zadziałają bez zmian.
+
+## 8. Ruch: tempo klipów zgrane z prędkością (2026-11-23)
+
+Klipy chodu i biegu są „w miejscu” (bez root motion), więc ich naturalna prędkość wynika ze stóp: stopa oparta o ziemię przesuwa się pod ciałem dokładnie tak szybko, jak ciało powinno iść do przodu. `node scripts/clip-speeds.mjs <id modelu>` mierzy to i zapisuje w `asset.json` (`walkClipSpeed`, `runClipSpeed`, `sprintClipSpeed`); silnik gra klip w tempie „prędkość / prędkość klipu”, więc stopy się nie ślizgają przy żadnej prędkości. Docelowy model: po złożeniu uruchomić skrypt jeszcze raz.
+
+Guide (Quaternius, wynik pomiaru): chód 1,04, „Jog_Fwd_Loop” 5,95, „Sprint_Loop” 8,66 kratki/s. Wcześniej szedł 1,3 i biegł 3,0, czyli bieg był o połowę wolniejszy od kroku w klipie: wyglądało to jak bieg w miejscu. Teraz: chód 1,15, bieg 4,8, sprint 7 (od 14 kratek drogi), przyspieszenie 9 kratek/s² (rozpęd i hamowanie przed celem), a klipy przechodzą chód → bieg → sprint i z powrotem w miarę prędkości.

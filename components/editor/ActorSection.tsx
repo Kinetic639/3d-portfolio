@@ -30,6 +30,8 @@ export function ActorSection({ name, actor, overridden, clips, onChange, onPrevi
       <summary>Actor · all {name}</summary>
       {slider("walkSpeed", "Walk speed", 0, 6, 0.05)}
       {slider("runSpeed", "Run speed", 0, 12, 0.05)}
+      {slider("sprintSpeed", "Sprint speed", 0, 16, 0.05)}
+      {slider("acceleration", "Acceleration", 0, 30, 0.5)}
       {slider("flightSpeed", "Flight speed", 0.5, 16, 0.1)}
       {slider("flightHeight", "Flight height", 0.2, 16, 0.1)}
       {slider("turnSpeed", "Turn speed", 0.5, 20, 0.1)}

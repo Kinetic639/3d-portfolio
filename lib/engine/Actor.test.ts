@@ -83,4 +83,37 @@ describe("actor", () => {
     actor.setIdle(null);
     expect(actor.status.animation).toBe("ANIM_Crow_IdleLookAround");
   });
+
+  it("speeds up through walk, run and sprint, slows down to arrive, and plays each clip at a tempo that keeps the feet planted", () => {
+    const clips = ["Idle", "Walk", "Run", "Sprint"].map((name) => clip(name));
+    const config = { ...DEFAULT_ACTOR, walkSpeed: 1.15, runSpeed: 4.8, sprintSpeed: 7, acceleration: 9, walkClipSpeed: 1, runClipSpeed: 6, sprintClipSpeed: 8.7, crossfade: 0 };
+    const actor = new Actor(new THREE.Object3D(), clips, config, { position: new THREE.Vector3(0, 2, 0), yaw: 0 });
+    actor.followPath([new THREE.Vector3(0, 2, 15), new THREE.Vector3(0, 2, 30)], "sprint");
+    const seen: string[] = [];
+    let fastest = 0;
+    let previousZ = 0;
+    let lastStep = 0;
+    for (let frame = 0; frame < 600 && actor.busy; frame += 1) {
+      actor.update(1 / 60, flat);
+      const name = actor.status.animation ?? "";
+      if (seen[seen.length - 1] !== name) seen.push(name);
+      const speed = (actor.position.z - previousZ) * 60;
+      previousZ = actor.position.z;
+      if (speed > 0) lastStep = speed;
+      fastest = Math.max(fastest, speed);
+      if (name === "Sprint") expect(speed / 8.7).toBeCloseTo((actor as unknown as { current: THREE.AnimationAction }).current.timeScale, 1);
+    }
+    expect(seen).toEqual(["Walk", "Run", "Sprint", "Run", "Walk", "Idle"]);
+    expect(fastest).toBeCloseTo(7, 1);
+    expect(lastStep).toBeLessThan(1);
+    expect(actor.position.z).toBeCloseTo(30, 3);
+  });
+
+  it("without acceleration or clip speeds it moves as before: at once at its gait's speed, clips at their own tempo", () => {
+    const actor = new Actor(new THREE.Object3D(), CROW_CLIPS, DEFAULT_ACTOR, { position: new THREE.Vector3(0, 2, 0), yaw: 0 });
+    actor.goTo(new THREE.Vector3(10, 2, 0), "run");
+    actor.update(0.1, flat);
+    expect(actor.position.x).toBeCloseTo(DEFAULT_ACTOR.runSpeed * 0.1, 5);
+    expect(actor.status.animation).toBe("ANIM_Crow_Run");
+  });
 });
